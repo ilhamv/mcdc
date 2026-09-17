@@ -58,7 +58,7 @@ void_cell = mcdc.Cell(region=void_channel, fill=m_void)
 
 # Fuel
 fuel_region = +sx3 & -sx4 & +sy3 & -sy4 & +sz1 & -sz2
-fuel_cell = mcdc.Cell(region=fuel_region, fill=m_void)
+fuel_cell = mcdc.Cell(region=fuel_region, fill=m_fuel)
 
 # Detector
 detector_region = +sx3 & -sx4 & +sy5 & -sy6 & +sz3 & -sz4
@@ -93,8 +93,8 @@ simulation.set_sources([source])
 # ======================================================================================
 
 # Tallies
-time_grid = np.linspace(0.0, 400.0, 41)
-time_grid_fine = np.linspace(0.0, 400.0, 401)
+time_grid = np.linspace(0.0, 500.0, 51)
+time_grid_fine = np.linspace(0.0, 500.0, 501)
 mesh = mcdc.MeshUniform(x=(0.0, 1.0, 60), y=(0.0, 1.0, 100))
 
 flux_tally = mcdc.Tally(name="mesh_flux", mesh=mesh, scores=["flux"], time=time_grid)
