@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Added
 
+- Add a fissionable material and an outlet detector to the pulsed Kobayashi example, from [@ilhamv]
 - Add CI check requiring generated Numba support to match the rebuild script, from [@ilhamv]
 - Add piece-wise linear spatial distribution for source definition, from [@ilhamv]
 - Add overriding option N_active, from [@ilhamv]
@@ -15,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Changed
 
+- Organize the Kobayashi examples under `examples/kobayashi-dogleg/` as `steady_state`, `pulsed`, and `pulsed_with_fission`; use the fission variant in the pulsed tutorial and clarify its relation to the original PNE benchmark and the Zenodo transient adaptation, from [@ilhamv]
 - Add standard `performance/` output metrics and replace `--runtime_output` with `--no-tally_output` to omit tally results, from [@ilhamv]
 - Filter out empty numba support accessors from creation, from [@ilhamv]
 - Update GPU transport support for the current MC/DC data model and Harmonize runtime, including GPU-compatible state access, particle-bank operations, array accessors, and torus intersections, from [@braxtoncuneo].

@@ -1,7 +1,7 @@
 import numpy as np
 import mcdc
 
-simulation = mcdc.Simulation("Time-dependent Kobayashi dog-leg benchmark")
+simulation = mcdc.Simulation("Pulsed Kobayashi dog-leg with detector")
 
 # ======================================================================================
 # Set model
@@ -23,7 +23,8 @@ sy1 = mcdc.Surface.PlaneY(y=0.0, boundary_condition="reflective")
 sy2 = mcdc.Surface.PlaneY(y=10.0)
 sy3 = mcdc.Surface.PlaneY(y=50.0)
 sy4 = mcdc.Surface.PlaneY(y=60.0)
-sy5 = mcdc.Surface.PlaneY(y=100.0, boundary_condition="vacuum")
+sy5 = mcdc.Surface.PlaneY(y=90.0)
+sy6 = mcdc.Surface.PlaneY(y=100.0, boundary_condition="vacuum")
 sz1 = mcdc.Surface.PlaneZ(z=0.0, boundary_condition="reflective")
 sz2 = mcdc.Surface.PlaneZ(z=10.0)
 sz3 = mcdc.Surface.PlaneZ(z=30.0)
@@ -32,7 +33,8 @@ sz5 = mcdc.Surface.PlaneZ(z=60.0, boundary_condition="vacuum")
 
 # Set cells
 # Source
-source_cell = mcdc.Cell(region=+sx1 & -sx2 & +sy1 & -sy2 & +sz1 & -sz2, fill=m)
+source_region = +sx1 & -sx2 & +sy1 & -sy2 & +sz1 & -sz2
+source_cell = mcdc.Cell(region=source_region, fill=m)
 # Voids
 channel_1 = +sx1 & -sx2 & +sy2 & -sy3 & +sz1 & -sz2
 channel_2 = +sx1 & -sx3 & +sy3 & -sy4 & +sz1 & -sz2
@@ -40,10 +42,15 @@ channel_3 = +sx3 & -sx4 & +sy3 & -sy4 & +sz1 & -sz3
 channel_4 = +sx3 & -sx4 & +sy3 & -sy5 & +sz3 & -sz4
 void_channel = channel_1 | channel_2 | channel_3 | channel_4
 void_cell = mcdc.Cell(region=void_channel, fill=m_void)
+# Detector: 10 cm cube at the channel outlet, filled with shield material.
+detector_region = +sx3 & -sx4 & +sy5 & -sy6 & +sz3 & -sz4
+detector_cell = mcdc.Cell(region=detector_region, fill=m)
 # Shield
-box = +sx1 & -sx5 & +sy1 & -sy5 & +sz1 & -sz5
-shield_cell = mcdc.Cell(region=box & ~void_channel, fill=m)
-simulation.set_model([source_cell, void_cell, shield_cell])
+box = +sx1 & -sx5 & +sy1 & -sy6 & +sz1 & -sz5
+shield_cell = mcdc.Cell(
+    region=box & ~void_channel & ~source_region & ~detector_region, fill=m
+)
+simulation.set_model([source_cell, void_cell, detector_cell, shield_cell])
 
 # ======================================================================================
 # Set source
@@ -66,10 +73,14 @@ simulation.set_sources([source])
 
 # Tallies
 time_grid = np.linspace(0.0, 200.0, 21)
+time_grid_fine = np.linspace(0.0, 200.0, 201)
 mesh = mcdc.MeshUniform(x=(0.0, 1.0, 60), y=(0.0, 1.0, 100))
-flux_tally = mcdc.Tally(mesh=mesh, scores=["flux"], time=time_grid)
-density_tally = mcdc.Tally(scores=["density"], time=time_grid)
-simulation.set_tallies([flux_tally, density_tally])
+flux_tally = mcdc.Tally(name="mesh_flux", mesh=mesh, scores=["flux"], time=time_grid)
+density_tally = mcdc.Tally(name="density", scores=["density"], time=time_grid)
+detector_tally = mcdc.Tally(
+    name="detector", cell=detector_cell, scores=["capture"], time=time_grid_fine
+)
+simulation.set_tallies([flux_tally, density_tally, detector_tally])
 
 # Settings
 simulation.settings.N_particle = 100
@@ -79,4 +90,5 @@ simulation.settings.N_batch = 2
 simulation.technique.implicit_capture()
 
 # Run
-simulation.run()
+if __name__ == "__main__":
+    simulation.run()

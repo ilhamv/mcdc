@@ -11,7 +11,9 @@ Kobayashi Dog-Leg Transient
 Problem setup
 -------------
 
-This one-group problem adapts the Kobayashi three-dimensional shielding benchmark by pulsing a source into a low-density dog-leg channel.
+This one-group problem follows the `Zenodo time-dependent adaptation <https://doi.org/10.5281/zenodo.15069882>`_ of the original `PNE steady-state shielding benchmark <https://doi.org/10.1016/S0149-1970(01)00007-5>`_ by pulsing a source into a low-density dog-leg channel.
+The PNE paper defines the original shielding problem; the Zenodo record supplies the transient benchmark and archived OpenMC calculations used here.
+Note that this verification case retains the non-fissioning benchmark setup; the :ref:`pulsed tutorial <example_kobayashi_td>` instead demonstrates an extension with a fuel cube and an outlet detector, so the comparison results on this page do not verify those additions.
 The first octant spans 60 by 100 by 60 cm, with reflection on the three symmetry planes and vacuum on the outer boundaries.
 The shield material has capture and scattering cross sections of 0.05 cm\ :sup:`-1`, while both values are :math:`5\times10^{-5}` cm\ :sup:`-1` in the nominal void.
 

@@ -12,8 +12,12 @@ dog-leg vacuum channel embedded in a purely scattering/absorbing shield.
 The problem evaluates the ability of a Monte Carlo code to transport
 neutrons through deep-penetration streaming paths.
 
-It is based on the NEA steady-state fixed-source benchmark problem suite
-by Kobayashi *et al.* [Kobayashi2001]_.
+The original geometry and steady-state fixed-source benchmark are from Kobayashi, Sugimura, and Nagaya's *Progress in Nuclear Energy* paper [Kobayashi2001]_.
+This page uses ``examples/kobayashi-dogleg/steady_state`` and follows the non-fissioning shielding formulation.
+
+The `Zenodo time-dependent adaptation by Variansyah (2025) <https://doi.org/10.5281/zenodo.15069882>`_ introduces a pulsed source and archived transient reference calculations.
+The :ref:`pulsed example <example_kobayashi_td>` builds on that adaptation and demonstrates the ``pulsed_with_fission`` variant, adding a fuel cube and an outlet detector.
+Those additions extend the reference geometry and materials, so the steady-state paper's tabulated solutions do not serve as direct reference results for the modified transient example.
 
 Geometry and Materials
 ======================
@@ -87,7 +91,7 @@ References
    "3D Radiation Transport Benchmark Problems and Results for Simple
    Geometries with Void Region,"
    *Progress in Nuclear Energy*, **39**:2, 119–144 (2001).
-   `[link] <https://www.sciencedirect.com/science/article/abs/pii/S0149197001000075>`__
+   `DOI: 10.1016/S0149-1970(01)00007-5 <https://doi.org/10.1016/S0149-1970(01)00007-5>`_.
 
 Step-by-Step Walkthrough
 ========================
@@ -96,7 +100,7 @@ This section walks through the input file block by block.
 
 **1. Import and Materials (lines 1–13)**
 
-.. literalinclude:: ../../../../examples/kobayashi/input.py
+.. literalinclude:: ../../../../examples/kobayashi-dogleg/steady_state/input.py
    :language: python
    :lines: 1-13
    :linenos:
@@ -108,7 +112,7 @@ Two mono-energetic multigroup materials are created:
 
 **2. Surfaces (lines 15–30)**
 
-.. literalinclude:: ../../../../examples/kobayashi/input.py
+.. literalinclude:: ../../../../examples/kobayashi-dogleg/steady_state/input.py
    :language: python
    :lines: 15-30
    :linenos:
@@ -120,7 +124,7 @@ the quarter-symmetry; vacuum on the outer faces allows leakage.
 
 **3. Cells — CSG Region Definitions (lines 32–44)**
 
-.. literalinclude:: ../../../../examples/kobayashi/input.py
+.. literalinclude:: ../../../../examples/kobayashi-dogleg/steady_state/input.py
    :language: python
    :lines: 32-44
    :linenos:
@@ -136,7 +140,7 @@ Three cells cover the domain:
 
 **4. Source (lines 50–57)**
 
-.. literalinclude:: ../../../../examples/kobayashi/input.py
+.. literalinclude:: ../../../../examples/kobayashi-dogleg/steady_state/input.py
    :language: python
    :lines: 50-57
    :linenos:
@@ -147,7 +151,7 @@ An isotropic, uniformly distributed source fills the
 
 **5. Tallies, Settings, Techniques, and Run (lines 63–74)**
 
-.. literalinclude:: ../../../../examples/kobayashi/input.py
+.. literalinclude:: ../../../../examples/kobayashi-dogleg/steady_state/input.py
    :language: python
    :lines: 63-74
    :linenos:
@@ -167,18 +171,18 @@ An isotropic, uniformly distributed source fills the
 Full Input
 ==========
 
-Click here to view the input file: `examples/kobayashi/input.py <https://github.com/mcdc-project/mcdc/blob/dev/examples/kobayashi/input.py>`_.
+Click here to view the input file: `examples/kobayashi-dogleg/steady_state/input.py <https://github.com/mcdc-project/mcdc/blob/dev/examples/kobayashi-dogleg/steady_state/input.py>`_.
 
 The complete input used for this example is embedded below:
 
-.. literalinclude:: ../../../../examples/kobayashi/input.py
+.. literalinclude:: ../../../../examples/kobayashi-dogleg/steady_state/input.py
   :language: python
   :linenos:
 
 How to Run
 ==========
 
-From inside ``examples/kobayashi`` run::
+From inside ``examples/kobayashi-dogleg/steady_state`` run::
 
   python input.py
 
