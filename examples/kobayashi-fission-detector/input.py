@@ -10,17 +10,13 @@ simulation = mcdc.Simulation("Time-dependent Kobayashi dog-leg with fission")
 # (PNE 2001, https://doi.org/10.1016/S0149-1970(01)00007-5)
 
 # Set materials
-m_shield = mcdc.Material.multigroup(
+m = mcdc.Material.multigroup(
     capture=np.array([0.05]),
     scatter=np.array([[0.05]]),
 )
 m_void = mcdc.Material.multigroup(
     capture=np.array([5e-5]),
     scatter=np.array([[5e-5]]),
-)
-m_detector = mcdc.Material.multigroup(
-    capture=np.array([0.05]),
-    scatter=np.array([[0.05]]),
 )
 m_fuel = mcdc.Material.multigroup(
     scatter=np.array([[0.05]]),
@@ -50,7 +46,7 @@ sz5 = mcdc.Surface.PlaneZ(z=60.0, boundary_condition="vacuum")
 
 ## Source
 source_region = +sx1 & -sx2 & +sy1 & -sy2 & +sz1 & -sz2
-source_cell = mcdc.Cell(region=source_region, fill=m_shield)
+source_cell = mcdc.Cell(region=source_region, fill=m)
 
 ## Void channel
 channel_1 = +sx1 & -sx2 & +sy2 & -sy3 & +sz1 & -sz2
@@ -62,17 +58,17 @@ void_cell = mcdc.Cell(region=void_channel, fill=m_void)
 
 # Fuel
 fuel_region = +sx3 & -sx4 & +sy3 & -sy4 & +sz1 & -sz2
-fuel_cell = mcdc.Cell(region=fuel_region, fill=m_fuel)
+fuel_cell = mcdc.Cell(region=fuel_region, fill=m_void)
 
 # Detector
 detector_region = +sx3 & -sx4 & +sy5 & -sy6 & +sz3 & -sz4
-detector_cell = mcdc.Cell(region=detector_region, fill=m_detector)
+detector_cell = mcdc.Cell(region=detector_region, fill=m)
 
 # Shield
 box = +sx1 & -sx5 & +sy1 & -sy6 & +sz1 & -sz5
 shield_cell = mcdc.Cell(
     region=box & ~void_channel & ~source_region & ~fuel_region & ~detector_region,
-    fill=m_shield,
+    fill=m,
 )
 
 simulation.set_model([source_cell, void_cell, fuel_cell, detector_cell, shield_cell])
@@ -97,18 +93,19 @@ simulation.set_sources([source])
 # ======================================================================================
 
 # Tallies
-time_grid = np.linspace(0.0, 200.0, 21)
+time_grid = np.linspace(0.0, 400.0, 41)
+time_grid_fine = np.linspace(0.0, 400.0, 401)
 mesh = mcdc.MeshUniform(x=(0.0, 1.0, 60), y=(0.0, 1.0, 100))
 
 flux_tally = mcdc.Tally(name="mesh_flux", mesh=mesh, scores=["flux"], time=time_grid)
 density_tally = mcdc.Tally(name="density", scores=["density"], time=time_grid)
 detector_tally = mcdc.Tally(
-    name="detector", cell=detector_cell, scores=["capture"], time=time_grid
+    name="detector", cell=detector_cell, scores=["capture"], time=time_grid_fine
 )
 simulation.set_tallies([flux_tally, density_tally, detector_tally])
 
 # Settings
-simulation.settings.N_particle = 100
+simulation.settings.N_particle = 100000
 simulation.settings.N_batch = 2
 
 # Techniques

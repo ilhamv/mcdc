@@ -21,6 +21,8 @@ with h5py.File(sys.argv[1] if len(sys.argv) > 1 else "output.h5", "r") as f:
     phi_total_sd = f["tallies/density/density/sdev"][:]
     capture = f["tallies/detector/capture/mean"][:]
     capture_sd = f["tallies/detector/capture/sdev"][:]
+    t_detector = f["tallies/detector/grid/time"][:]
+    t_detector_mid = 0.5 * (t_detector[:-1] + t_detector[1:])
 
 # Animate result
 fig, ax = plt.subplots(
@@ -49,21 +51,19 @@ ax[0].set_box_aspect(1)
 (line,) = ax[0].plot([], [], "ok", fillstyle="none")
 
 # Cell tallies are integrated over each time bin; divide by its width for rates.
-capture_rate = capture / np.diff(t)
-capture_rate_sd = capture_sd / np.diff(t)
-(detector_line,) = ax[2].plot(t_mid, capture_rate, label="Detector capture")
+capture_rate = capture / np.diff(t_detector)
+capture_rate_sd = capture_sd / np.diff(t_detector)
+(detector_line,) = ax[2].plot(t_detector_mid, capture_rate)
 ax[2].fill_between(
-    t_mid,
+    t_detector_mid,
     capture_rate - capture_rate_sd,
     capture_rate + capture_rate_sd,
     alpha=0.2,
     color=detector_line.get_color(),
-    label="±1 standard deviation",
 )
 ax[2].set_xlabel("$t$ [s]")
-ax[2].set_ylabel("Reaction rate per source neutron [s$^{-1}$]")
+ax[2].set_ylabel("Detector capture rate [s$^{-1}$]")
 ax[2].set_yscale("log")
-ax[2].legend()
 ax[2].grid()
 ax[2].set_box_aspect(1)
 
