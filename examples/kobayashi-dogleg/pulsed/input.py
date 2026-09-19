@@ -12,6 +12,10 @@ simulation = mcdc.Simulation("Pulsed Kobayashi dog-leg with detector")
 # Set materials
 m = mcdc.Material.multigroup(capture=np.array([0.05]), scatter=np.array([[0.05]]))
 m_void = mcdc.Material.multigroup(capture=np.array([5e-5]), scatter=np.array([[5e-5]]))
+m_detector = mcdc.Material.multigroup(
+    capture=np.array([0.05]),
+    scatter=np.array([[0.05]]),
+)
 
 # Set surfaces
 sx1 = mcdc.Surface.PlaneX(x=0.0, boundary_condition="reflective")
@@ -31,6 +35,8 @@ sz3 = mcdc.Surface.PlaneZ(z=30.0)
 sz4 = mcdc.Surface.PlaneZ(z=40.0)
 sz5 = mcdc.Surface.PlaneZ(z=60.0, boundary_condition="vacuum")
 
+s_detector = mcdc.Surface.CylinderY(center=[35.0, 35.0], radius=4.0)
+
 # Set cells
 # Source
 source_region = +sx1 & -sx2 & +sy1 & -sy2 & +sz1 & -sz2
@@ -39,12 +45,13 @@ source_cell = mcdc.Cell(region=source_region, fill=m)
 channel_1 = +sx1 & -sx2 & +sy2 & -sy3 & +sz1 & -sz2
 channel_2 = +sx1 & -sx3 & +sy3 & -sy4 & +sz1 & -sz2
 channel_3 = +sx3 & -sx4 & +sy3 & -sy4 & +sz1 & -sz3
-channel_4 = +sx3 & -sx4 & +sy3 & -sy5 & +sz3 & -sz4
+channel_4 = +sx3 & -sx4 & +sy3 & -sy6 & +sz3 & -sz4
 void_channel = channel_1 | channel_2 | channel_3 | channel_4
-void_cell = mcdc.Cell(region=void_channel, fill=m_void)
-# Detector: 10 cm cube at the channel outlet, filled with shield material.
-detector_region = +sx3 & -sx4 & +sy5 & -sy6 & +sz3 & -sz4
-detector_cell = mcdc.Cell(region=detector_region, fill=m)
+# Detector: centered cylinder spanning the original outlet interval.
+detector_region = -s_detector & +sy5 & -sy6
+detector_cell = mcdc.Cell(region=detector_region, fill=m_detector)
+# Keep channel material around the cylindrical detector.
+void_cell = mcdc.Cell(region=void_channel & ~detector_region, fill=m_void)
 # Shield
 box = +sx1 & -sx5 & +sy1 & -sy6 & +sz1 & -sz5
 shield_cell = mcdc.Cell(

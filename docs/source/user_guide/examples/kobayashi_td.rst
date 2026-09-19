@@ -13,9 +13,9 @@ Variansyah's Zenodo record [Variansyah2025]_ adapts that problem to a pulsed sou
 The PNE paper is the reference for the original steady-state problem, while the Zenodo adaptation is the reference for the pulsed formulation.
 
 This walkthrough uses ``examples/kobayashi-dogleg/pulsed_with_fission``.
-It extends the pulsed problem with a fuel cube at the second turn, a material detector at the outlet, and tallies through 500 s.
+It extends the pulsed problem with a fuel sphere at the second turn, a material detector at the outlet, and tallies through 500 s.
 These material changes define an example derived from the references; their detector response is not a reference solution published in the original paper or the Zenodo benchmark.
-The sibling ``pulsed`` example includes the outlet detector without the fuel cube and retains a 200 s tally window.
+The sibling ``pulsed`` example includes the outlet detector without the fuel sphere and retains a 200 s tally window.
 For comparisons with the archived non-fissioning transient benchmark, see :ref:`project_vvp_code_to_code_neutron_kobayashi`.
 
 Step-by-Step Walkthrough
@@ -24,8 +24,8 @@ Step-by-Step Walkthrough
 **1. Fuel and Detector**
 
 The domain and outer boundary conditions follow the steady-state dog-leg example.
-A 10 cm fuel cube occupies x=30–40, y=50–60, z=0–10 cm, at the turn from the x-directed channel into the z-directed channel.
-It has scattering and fission cross sections of 0.05 cm\ :sup:`-1` each, zero capture, and a prompt fission multiplicity of 2.5.
+A fuel sphere of diameter 10 cm is centered at (35, 55, 5) cm, inscribed in the original x=30–40, y=50–60, z=0–10 cm cube at the turn from the x-directed channel into the z-directed channel.
+The fuel is purely fissioning, with a fission cross section of 0.1 cm\ :sup:`-1`, zero scattering and capture, and a prompt fission multiplicity of 2.5.
 
 .. literalinclude:: ../../../../examples/kobayashi-dogleg/pulsed_with_fission/input.py
    :language: python
@@ -34,9 +34,21 @@ It has scattering and fission cross sections of 0.05 cm\ :sup:`-1` each, zero ca
    :linenos:
    :lineno-match:
 
-The detector occupies x=30–40, y=90–100, z=30–40 cm at the outlet.
+The detector is a cylinder parallel to the outlet channel along the y axis, centered at x=z=35 cm and spanning y=90–100 cm.
+Its diameter is 8 cm and its length remains 10 cm.
 It uses the shield material, with capture and scattering cross sections of 0.05 cm\ :sup:`-1` each.
-Both cubes replace portions of the low-density channel.
+The fuel sphere and detector cylinder replace portions of the low-density channel.
+The space around the fuel sphere and detector cylinder retains the channel material.
+
+``void_channel`` describes the full channel envelope, including the fuel and detector volumes.
+The actual void cell subtracts ``fuel_region`` and ``detector_region`` from that envelope.
+The shield therefore uses ``box & ~void_channel & ~source_region``; separate fuel and detector exclusions are redundant because both lie inside the channel envelope.
+The source exclusion is required because ``source_cell`` remains a separate cell outside the channel, even though it contains the same material as the shield.
+
+.. literalinclude:: ../../../../examples/kobayashi-dogleg/pulsed_with_fission/input.py
+   :language: python
+   :start-at: shield_cell =
+   :end-at: )
 
 **2. Source with a Time Window**
 

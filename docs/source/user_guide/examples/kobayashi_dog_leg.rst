@@ -16,7 +16,7 @@ The original geometry and steady-state fixed-source benchmark are from Kobayashi
 This page uses ``examples/kobayashi-dogleg/steady_state`` and follows the non-fissioning shielding formulation.
 
 The `Zenodo time-dependent adaptation by Variansyah (2025) <https://doi.org/10.5281/zenodo.15069882>`_ introduces a pulsed source and archived transient reference calculations.
-The :ref:`pulsed example <example_kobayashi_td>` builds on that adaptation and demonstrates the ``pulsed_with_fission`` variant, adding a fuel cube and an outlet detector.
+The :ref:`pulsed example <example_kobayashi_td>` builds on that adaptation and demonstrates the ``pulsed_with_fission`` variant, adding a fuel sphere and an outlet detector.
 Those additions extend the reference geometry and materials, so the steady-state paper's tabulated solutions do not serve as direct reference results for the modified transient example.
 
 Geometry and Materials
