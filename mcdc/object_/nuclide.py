@@ -156,7 +156,6 @@ class Nuclide(MCDCObject):
             self.atomic_weight_ratio = file["atomic_weight_ratio"][()]
             self.fissionable = bool(file["fissionable"][()])
             self.excitation_level = int(file["excitation_level"][()])
-            self.radiation_length = float(file["radiation_length"][()])
         return super()._compile_into_simulation(simulation)
 
     def set_neutron_data(self, simulation):
@@ -322,6 +321,9 @@ class Nuclide(MCDCObject):
         dir_name = os.getenv("MCDC_LIB")
         file_name = f"{nuclide_name}-{temperature}K.h5"
         file = h5py.File(f"{dir_name}/{file_name}", "r")
+
+        # Radiation length
+        self.radiation_length = float(file["radiation_length"][()])
 
         # ==========================================================================
         # Stopping power for protons

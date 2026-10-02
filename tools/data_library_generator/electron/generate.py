@@ -19,10 +19,10 @@ rewrite = args.rewrite
 verbose = args.verbose
 
 # Directories
-output_dir = os.getenv("MCDC_LIB_ELECTRON")
+output_dir = os.getenv("MCDC_LIB")
 ace_file = os.getenv("MCDC_ACELIB_ELECTRON")
 if output_dir is None:
-    print_error("Environment variable $MCDC_LIB_ELECTRON is not set")
+    print_error("Environment variable $MCDC_LIB is not set")
 if ace_file is None:
     print_error("Environment variable $MCDC_ACELIB_ELECTRON is not set")
 # Create output directory if needed

@@ -1,6 +1,8 @@
 # The majority of this script was written by Anthropic's Claude
 
 import argparse
+import io
+from pathlib import Path
 import os
 import sys
 
@@ -8,6 +10,9 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 import ACEtk
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from native_library import has_data, write_contribution
 
 # -- Constants -----------------------------------------------------------------
 
@@ -346,6 +351,8 @@ def write_stopping_power(file, pstar_dir, symbol, verbose=False):
         print(f"  Loading PSTAR from {pstar_path}")
     E_s, S_s = load_pstar_file(pstar_path)
     sp = file.create_group("stopping_power")
+    sp.attrs["source_title"] = "NIST PSTAR"
+    sp.attrs["source_file"] = os.path.basename(pstar_path)
     sp.create_dataset("energy", data=E_s).attrs["unit"] = "MeV"
     sp.create_dataset("total_stopping_power", data=S_s).attrs["unit"] = "MeV cm2/g"
     return True
@@ -656,7 +663,7 @@ def process_ace_file(ace_path, output_dir, pstar_dir=None, verbose=False):
         print(f"  {os.path.basename(ace_path)}  ->  {mcdc_name}")
         print(f"  Z={Z}  A={A}  S={S}  T={T_KELVIN} K")
 
-    file = h5py.File(out_path, "w")
+    file = h5py.File(io.BytesIO(), "w")
 
     # Metadata
     hdr = ace_table.header
@@ -936,6 +943,7 @@ def process_ace_file(ace_path, output_dir, pstar_dir=None, verbose=False):
                     prec.create_group(f"energy_spectrum-{k + 1}"),
                 )
 
+    write_contribution(file, out_path, "proton")
     file.close()
     return mcdc_name
 
@@ -961,7 +969,7 @@ def process_pstar_only_file(symbol, A, awr, output_dir, pstar_dir, verbose=False
         print(f"\n{'='*80}")
         print(f"  (no ACE)  ->  {mcdc_name}  [stopping power only]")
 
-    file = h5py.File(out_path, "w")
+    file = h5py.File(io.BytesIO(), "w")
 
     file.attrs["source_title"] = "PSTAR (NIST) stopping power only — no ACE data"
     file.attrs["source_version"] = "N/A"
@@ -979,13 +987,12 @@ def process_pstar_only_file(symbol, A, awr, output_dir, pstar_dir, verbose=False
     file.create_dataset("fissionable", data=False)
 
     written = write_stopping_power(file, pstar_dir, symbol, verbose=verbose)
-    file.close()
-
     if not written:
-        # No PSTAR data either — remove the empty file and signal failure
-        os.remove(out_path)
+        file.close()
         return None
 
+    write_contribution(file, out_path, "proton")
+    file.close()
     return mcdc_name
 
 
@@ -1000,7 +1007,7 @@ def main():
     rewrite = args.rewrite
     verbose = args.verbose
 
-    output_dir = os.getenv("MCDC_LIB_PROTON")
+    output_dir = os.getenv("MCDC_LIB")
     ace_dir = os.getenv("MCDC_ACELIB_PROTON")
     pstar_dir = os.getenv("MCDC_PSTAR_LIB")
     if ace_dir is None:
@@ -1008,7 +1015,7 @@ def main():
     if pstar_dir is None:
         print_error("Environment variable $MCDC_PSTAR_LIB is not set.")
     if output_dir is None:
-        print_error("Environment variable $MCDC_LIB_PROTON is not set.")
+        print_error("Environment variable $MCDC_LIB is not set.")
 
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nACE directory : {ace_dir}")
@@ -1030,9 +1037,8 @@ def main():
                 Z, A, S, _ = decode_ace_zaid(hdr.zaid)
                 symbol = Z_TO_SYMBOL.get(Z, f"Z{Z}")
                 nuclide_name = f"{symbol}{A}" if S == 0 else f"{symbol}{A}m{S}"
-                if not any(
-                    f.startswith(nuclide_name + "-") for f in os.listdir(output_dir)
-                ):
+                out_path = os.path.join(output_dir, f"{nuclide_name}-{T_KELVIN}K.h5")
+                if not has_data(out_path, "proton_reactions"):
                     target_files.append(fname)
             except Exception:
                 target_files.append(fname)
@@ -1064,14 +1070,15 @@ def main():
 
     # ── Pass 2: PSTAR-only isotopes (e.g. H, He) ─────────────────────────────
     # For each entry in PSTAR_ONLY_ISOTOPES, create a stopping-power-only HDF5
-    # file if one doesn't already exist (or if --rewrite is set).
+    # contribution if stopping power is absent (or if --rewrite is set).
 
     if pstar_dir is not None:
-        existing = set(os.listdir(output_dir))
         for symbol, A, awr in PSTAR_ONLY_ISOTOPES:
             nuclide_name = f"{symbol}{A}"
             mcdc_name = f"{nuclide_name}-{T_KELVIN}K.h5"
-            if not rewrite and mcdc_name in existing:
+            if not rewrite and has_data(
+                os.path.join(output_dir, mcdc_name), "stopping_power"
+            ):
                 continue
             try:
                 out = process_pstar_only_file(

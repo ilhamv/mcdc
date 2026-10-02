@@ -1,4 +1,7 @@
 import argparse
+import io
+import sys
+from pathlib import Path
 import h5py
 import numpy as np
 import os
@@ -7,6 +10,9 @@ import ACEtk
 from tqdm import tqdm
 
 ####
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from native_library import has_data, write_contribution
 
 import util
 from util import print_error, print_note
@@ -37,7 +43,7 @@ if rewrite:
     # Get them all
     target_files = os.listdir(ace_dir)
 else:
-    # Just get the non-existent ones
+    # Add missing neutron contributions, including to existing proton files.
     target_files = []
     for file_name in os.listdir(ace_dir):
         # File header
@@ -47,7 +53,7 @@ else:
         # Decode ACE name to MC/DC name
         mcdc_name, nuclide_name, Z, A, S, T = util.decode_name(header)
 
-        if not os.path.exists(f"{output_dir}/{mcdc_name}"):
+        if not has_data(f"{output_dir}/{mcdc_name}", "neutron_reactions"):
             target_files.append(file_name)
 
 # Loop over all files
@@ -65,15 +71,15 @@ for ace_name in pbar:
     mcdc_name, nuclide_name, Z, A, S, T = util.decode_name(header)
 
     # Rewrite or skip?
-    if not rewrite and os.path.exists(f"{output_dir}/{mcdc_name}"):
+    if not rewrite and has_data(f"{output_dir}/{mcdc_name}", "neutron_reactions"):
         continue
 
-    # Create MC/DC file
+    # Build this contribution separately before merging it into the library.
     if verbose:
         print("\n" + "=" * 80 + "\n")
         print(f"Create {mcdc_name} from {ace_name}\n")
     pbar.set_postfix_str(f"{mcdc_name[:-3]} from {ace_name}")
-    file = h5py.File(f"{output_dir}/{mcdc_name}", "w")
+    file = h5py.File(io.BytesIO(), "w")
 
     # ==================================================================================
     # Basic properties
@@ -441,6 +447,8 @@ for ace_name in pbar:
 
     # Fissionable zone below
     if not fissionable:
+        write_contribution(file, f"{output_dir}/{mcdc_name}", "neutron")
+        file.close()
         continue
 
     # ==================================================================================
@@ -517,6 +525,7 @@ for ace_name in pbar:
     # Finalize
     # ==================================================================================
 
+    write_contribution(file, f"{output_dir}/{mcdc_name}", "neutron")
     file.close()
 
 print("")

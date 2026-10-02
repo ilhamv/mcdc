@@ -12,17 +12,20 @@ per-element HDF5 format for continuous-energy electron transport.
 | Variable               | Description                                        |
 |------------------------|----------------------------------------------------|
 | `MCDC_ACELIB_ELECTRON` | Path to the EPRDATA14 data file.                   |
-| `MCDC_LIB_ELECTRON`    | Path to the output directory for MC/DC HDF5 files. |
+| `MCDC_LIB`    | Path to the output directory for MC/DC HDF5 files. |
 
 ## Usage
 ```bash
 export MCDC_ACELIB_ELECTRON=/path/to/eprdata14/eprdata14/eprdata14
-export MCDC_LIB_ELECTRON=/path/to/mcdc/electron/library
+export MCDC_LIB=/path/to/mcdc/library
 
 python generate.py              # Convert only missing elements
 python generate.py --rewrite    # Regenerate all files
 python generate.py --verbose    # Print detailed per-element info
 ```
+
+Electron output shares `$MCDC_LIB` with neutron and proton data. Elemental files
+(e.g., `Al.h5`) coexist with nuclide-temperature files (e.g., `Al27-293.6K.h5`).
 
 ## What it Does
 For each element (Z=1 to Z=100) in the EPRDATA14 library, the generator:

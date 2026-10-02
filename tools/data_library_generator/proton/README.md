@@ -16,18 +16,47 @@ database to add stopping power data to the HDF5 files.
 | Variable               | Description                                                            |
 |------------------------|------------------------------------------------------------------------|
 | `MCDC_ACELIB_PROTON`   | Path to the directory containing the TENDL2021 ACE files.              |
-| `MCDC_LIB_PROTON`      | Path to the output directory for MC/DC HDF5 files.                     |
+| `MCDC_LIB`      | Path to the output directory for MC/DC HDF5 files.                     |
 | `MCDC_PSTAR_LIB`       | Path to the directory containing the PSTAR stopping power table files. |
 
 ## Usage
 ```bash
 export MCDC_ACELIB_PROTON=/path/to/tendl2021/acefiles
-export MCDC_LIB_PROTON=/path/to/mcdc/proton/library
+export MCDC_LIB=/path/to/mcdc/library
 
-python generate.py              # Convert only missing elements
-python generate.py --rewrite    # Regenerate all files
+python generate.py              # Add missing proton contributions
+python generate.py --rewrite    # Replace proton contributions, preserving other particles
 python generate.py --verbose    # Print detailed per-element info
 ```
+
+## Common Native Library
+
+Both generators target `$MCDC_LIB` and contribute to the same
+`<Nuclide>-<Temperature>K.h5` file. This generator updates `proton_reactions`
+without replacing the other particle's reaction data. An existing file is skipped
+only when it already contains this particle's reaction group. `--rewrite` replaces
+this generator's supplied groups, not the entire file.
+
+Shared nuclide identity must match. Temperature, atomic weight ratio, and radiation
+length (when supplied) must agree within a relative tolerance of `1e-5`; existing
+values are retained. Incompatible contributions fail without modifying the existing
+file. Conversion finishes before the merged file is atomically installed.
+Run writers sequentially when they target the same nuclide file.
+
+ACE provenance is stored under `provenance/proton`. The root `fissionable`
+flag describes neutron-induced fission; proton generation never overwrites neutron
+fissionability. Proton-only files use `False` at the root and retain proton
+fissionability in their provenance record.
+
+Files merge only when nuclide and temperature names match. The proton generator
+currently writes `0.0K` data; it does not copy that data into neutron files at other
+temperatures. Coupled transport needs both contributions in the selected file.
+
+PSTAR-only updates add or replace `stopping_power` while preserving existing
+reaction groups. Missing PSTAR input leaves the existing file unchanged.
+If an ACE conversion has no new stopping-power table, existing stopping power is
+retained. PSTAR provenance is attached to the stopping-power group; standalone
+PSTAR conversions also record `provenance/proton_stopping_power`.
 
 ## What it Does
 For each element (Z=1 to Z=103) in the TENDL2021 ACE file library, the generator:
@@ -43,7 +72,7 @@ For each element (Z=1 to Z=103) in the TENDL2021 ACE file library, the generator
 
 ## Output HDF5 Schema
 ```
-File attrs: source_title, source_version, source_date, source_comments (if present)
+provenance/proton attrs: source_title, source_version, source_date, source_comments (if present)
 
 <Nuclide>-<T>K.h5
 ├── nuclide_name                                (string)

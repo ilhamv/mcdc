@@ -28,10 +28,33 @@ You need a collection of ACE files (e.g., from NJOY or an ENDF/B distribution).
 export MCDC_ACELIB=/path/to/ace/files
 export MCDC_LIB=/path/to/mcdc/library
 
-python generate.py              # Convert only missing nuclides
-python generate.py --rewrite    # Regenerate all files
+python generate.py              # Add missing neutron contributions
+python generate.py --rewrite    # Replace neutron contributions, preserving other particles
 python generate.py --verbose    # Print detailed per-nuclide info
 ```
+
+## Common Native Library
+
+Both generators target `$MCDC_LIB` and contribute to the same
+`<Nuclide>-<Temperature>K.h5` file. This generator updates `neutron_reactions`
+without replacing the other particle's reaction data. An existing file is skipped
+only when it already contains this particle's reaction group. `--rewrite` replaces
+this generator's supplied groups, not the entire file.
+
+Shared nuclide identity must match. Temperature, atomic weight ratio, and radiation
+length (when supplied) must agree within a relative tolerance of `1e-5`; existing
+values are retained. Incompatible contributions fail without modifying the existing
+file. Conversion finishes before the merged file is atomically installed.
+Run writers sequentially when they target the same nuclide file.
+
+ACE provenance is stored under `provenance/neutron`. The root `fissionable`
+flag describes neutron-induced fission; proton generation never overwrites neutron
+fissionability. Proton-only files use `False` at the root and retain proton
+fissionability in their provenance record.
+
+Files merge only when nuclide and temperature names match. The proton generator
+currently writes `0.0K` data; it does not copy that data into neutron files at other
+temperatures. Coupled transport needs both contributions in the selected file.
 
 ## What it Does
 

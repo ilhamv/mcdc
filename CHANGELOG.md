@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Added
 
+- Add native library preparation guidance with source-library links and neutron, electron, and proton generation instructions, from [@ilhamv]
+
 - Add developer documentation on particle transport architecture, covering particle steps, event handling, interaction data, and tally scoring triggers, from [@ilhamv]
 - Add time, polar-cosine, and azimuthal dependence to weight windows; consolidate lower, target, and upper weights into one array and extend flattened-data accessors to eight dimensions, from [@nglaser3]
 - Add a fissionable material and an outlet detector to the pulsed Kobayashi example, from [@ilhamv]
@@ -18,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Changed
 
+- Target a common `MCDC_LIB` from the separate neutron, electron, and proton generators, preserving other particles' data and checking shared nuclide metadata, from [@ilhamv]
 - Rename collision tally/data to interaction tally/data to cover both discrete collisions and condensed interactions; describe tally types by their transport scoring triggers rather than as estimators, from [@ilhamv]
 - Use the full incident-particle state for collision tally filtering, from [@ilhamv]
 - Make lower-energy-first transport rule configurable per particle, from [@ilhamv]
