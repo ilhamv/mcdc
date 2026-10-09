@@ -42,7 +42,10 @@ Angular Distributions
 With a reference ``direction``, scalar ``polar_cosine`` and ``azimuthal``
 values fix the corresponding angle, two values define a uniform interval, and
 an array with shape ``(2, N)`` defines a piecewise-linear probability density.
-The two angular variables are sampled independently.
+The two angular variables are sampled independently. The optional
+``energy_at_polar_cosine`` array assigns one source energy in eV to each point
+of a tabulated polar-cosine grid; MC/DC linearly interpolates energy using the
+sampled polar-cosine interval and fraction.
 
 Energy Distributions
 --------------------
@@ -67,7 +70,8 @@ Use ``discrete_energy`` for a probability mass function over physical emission l
    )
 
 The values in the second row are dimensionless relative probabilities.
-The ``energy`` and ``discrete_energy`` inputs are alternative source-energy specifications and cannot be combined.
+The ``energy``, ``discrete_energy``, and ``energy_at_polar_cosine`` inputs are
+alternative source-energy specifications and cannot be combined.
 
 Time Distributions
 ------------------

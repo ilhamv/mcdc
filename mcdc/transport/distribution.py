@@ -155,6 +155,14 @@ def sample_tabulated(table, rng_state, simulation, data):
     Sample a value from a tabulated distribution.
     """
 
+    value, _ = sample_tabulated_with_interval(table, rng_state, simulation, data)
+    return value
+
+
+@njit
+def sample_tabulated_with_interval(table, rng_state, simulation, data):
+    """Sample a tabulated distribution and return its interpolation interval."""
+
     xi = rng.lcg(rng_state)
 
     pdf_data = simulation["data"][table["pdf_ID"]]
@@ -164,7 +172,7 @@ def sample_tabulated(table, rng_state, simulation, data):
 
     # find_bin returns -1 at the first CDF point; avoid reading before the table.
     if xi <= cdf[0]:
-        return mcdc_get.table_data.x(0, pdf_table, data)
+        return mcdc_get.table_data.x(0, pdf_table, data), 0
     idx = find_bin(xi, cdf)
 
     c0 = mcdc_get.table_data.aux(0, idx, pdf_table, data)
@@ -178,15 +186,8 @@ def sample_tabulated(table, rng_state, simulation, data):
     # Tabulated pdfs are either histogram or linear.
     interpolation = mcdc_get.table_data.interpolations(0, pdf_table, data)
 
-    return invert_tabulated_segment(
-        xi,
-        c0,
-        v0,
-        v1,
-        p0,
-        p1,
-        interpolation,
-    )
+    value = invert_tabulated_segment(xi, c0, v0, v1, p0, p1, interpolation)
+    return value, idx
 
 
 @njit

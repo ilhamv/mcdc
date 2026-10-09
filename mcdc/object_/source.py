@@ -90,6 +90,14 @@ class Source(MCDCObject):
         transport and group-coordinate energies for standard multigroup
         transport. Standard-multigroup coordinates must be integer-valued and
         identify available groups. Cannot be supplied with ``energy``.
+    energy_at_polar_cosine : array_like of float, optional
+        Deterministic source energies in eV at the grid points of a tabulated
+        ``polar_cosine`` distribution. Energy is linearly interpolated using
+        the interval and fraction of the sampled polar cosine. Requires
+        ``direction`` and a ``polar_cosine`` value with shape ``(2, N)``. Its
+        length must equal the polar-cosine grid length. Cannot be supplied with
+        ``energy`` or ``discrete_energy`` and is unavailable in standard
+        multigroup transport.
     time : real or array_like of float, optional
         Emission time in seconds. A real scalar, including a NumPy scalar,
         defines a discrete emission time. An array-like value with shape
@@ -240,9 +248,11 @@ class Source(MCDCObject):
     # Energy
     mono_energetic: bool
     discrete_energy: bool
+    energy_at_polar_cosine_active: bool
     energy: float
     energy_pdf: DistributionTabulated
     energy_pmf: DistributionPMF
+    energy_at_polar_cosine: NDArray[float64]
 
     # Time
     discrete_time: bool
@@ -280,6 +290,7 @@ class Source(MCDCObject):
         #
         energy: float | ArrayLike | int | NoneType = None,
         discrete_energy: ArrayLike | NoneType = None,
+        energy_at_polar_cosine: ArrayLike | NoneType = None,
         #
         time: float | ArrayLike = 0.0,
         #
@@ -338,12 +349,14 @@ class Source(MCDCObject):
         # Energy
         self.mono_energetic = True
         self.discrete_energy = False
+        self.energy_at_polar_cosine_active = False
         self.energy = 1.0e6
         self.energy_pdf = DistributionTabulated(
             np.array([1.0e6 - 1.0, 1.0e6 + 1.0]),
             np.array([1.0, 1.0]),
         )
         self.energy_pmf = DistributionPMF(np.array([1.0e6]), np.array([1.0]))
+        self.energy_at_polar_cosine = np.zeros(0)
 
         # Time
         self.discrete_time = True
@@ -440,8 +453,15 @@ class Source(MCDCObject):
         self.direction /= np.linalg.norm(self.direction)
 
         # Require one unambiguous source-energy representation
-        if discrete_energy is not None and energy is not None:
-            print_error("Cannot specify both energy and discrete_energy.")
+        energy_modes = sum(
+            value is not None
+            for value in (energy, discrete_energy, energy_at_polar_cosine)
+        )
+        if energy_modes > 1:
+            print_error(
+                "Cannot specify more than one of energy, discrete_energy, and "
+                "energy_at_polar_cosine."
+            )
 
         # Discrete energy
         if discrete_energy is not None:
@@ -460,6 +480,39 @@ class Source(MCDCObject):
                 values, pdf = _distribution_pair(energy, "Energy")
                 self.mono_energetic = False
                 self.energy_pdf = DistributionTabulated(values, pdf)
+
+        # Energy determined by the sampled polar cosine
+        if energy_at_polar_cosine is not None:
+            if direction is None:
+                print_error("energy_at_polar_cosine requires direction.")
+            if polar_cosine is None or self.uniform_polar_cosine:
+                print_error(
+                    "energy_at_polar_cosine requires a tabulated polar_cosine PDF."
+                )
+
+            try:
+                correlated_energy = np.asarray(
+                    energy_at_polar_cosine,
+                    dtype=float64,
+                )
+            except (TypeError, ValueError):
+                print_error("energy_at_polar_cosine must be a one-dimensional array.")
+
+            if correlated_energy.ndim != 1:
+                print_error("energy_at_polar_cosine must be a one-dimensional array.")
+            if len(correlated_energy) != len(self.polar_cosine_pdf.pdf.x):
+                print_error(
+                    "energy_at_polar_cosine must have the same length as the "
+                    "polar_cosine grid."
+                )
+            if not np.all(np.isfinite(correlated_energy)):
+                print_error("energy_at_polar_cosine values must be finite.")
+            if np.any(correlated_energy < 0.0):
+                print_error("energy_at_polar_cosine values must be nonnegative.")
+
+            self.mono_energetic = False
+            self.energy_at_polar_cosine_active = True
+            self.energy_at_polar_cosine = correlated_energy
 
         # Time
         if isinstance(time, Real) and not isinstance(time, (bool, np.bool_)):
@@ -510,7 +563,9 @@ class Source(MCDCObject):
             text += f"  - Direction [ux, uy, yz]: {self.direction}\n"
         elif self.white_direction:
             text += f"  - Isotropic halfspace: {self.direction}\n"
-        if self.mono_energetic:
+        if self.energy_at_polar_cosine_active:
+            energy_text = "Function of polar cosine"
+        elif self.mono_energetic:
             energy_text = f"{self.energy} eV"
         elif self.discrete_energy:
             energy_text = "PMF"

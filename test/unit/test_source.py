@@ -329,14 +329,143 @@ def test_discrete_energy_distribution(discrete_energy):
     assert "Energy: PMF" in repr(source)
 
 
-def test_energy_and_discrete_energy_are_mutually_exclusive(capsys):
+@pytest.mark.parametrize(
+    "energy_kwargs",
+    [
+        {
+            "energy": 10_000.0,
+            "discrete_energy": [[9_999.0, 10_001.0], [0.25, 0.75]],
+        },
+        {
+            "energy": 10_000.0,
+            "energy_at_polar_cosine": [9_999.0, 10_001.0],
+        },
+        {
+            "discrete_energy": [[9_999.0, 10_001.0], [0.25, 0.75]],
+            "energy_at_polar_cosine": [9_999.0, 10_001.0],
+        },
+    ],
+)
+def test_energy_representations_are_mutually_exclusive(energy_kwargs, capsys):
     with pytest.raises(SystemExit):
         mcdc.Source(
-            energy=10_000.0,
-            discrete_energy=[[9_999.0, 10_001.0], [0.25, 0.75]],
+            direction=[0.0, 0.0, 1.0],
+            polar_cosine=([0.0, 1.0], [1.0, 1.0]),
+            **energy_kwargs,
         )
 
-    assert "Cannot specify both energy and discrete_energy" in capsys.readouterr().out
+    assert "Cannot specify more than one" in capsys.readouterr().out
+
+
+def test_energy_at_polar_cosine():
+    source = mcdc.Source(
+        direction=[0.0, 0.0, 1.0],
+        polar_cosine=([-1.0, 0.0, 1.0], [0.2, 1.0, 0.4]),
+        energy_at_polar_cosine=[1.0e6, 2.0e6, 4.0e6],
+    )
+
+    assert source.energy_at_polar_cosine_active
+    assert not source.mono_energetic
+    assert not source.discrete_energy
+    np.testing.assert_array_equal(
+        source.energy_at_polar_cosine,
+        [1.0e6, 2.0e6, 4.0e6],
+    )
+    assert "Energy: Function of polar cosine" in repr(source)
+
+
+@pytest.mark.parametrize(
+    "kwargs, expected_message",
+    [
+        (
+            {
+                "polar_cosine": ([0.0, 1.0], [1.0, 1.0]),
+                "energy_at_polar_cosine": [1.0e6, 2.0e6],
+            },
+            "require direction",
+        ),
+        (
+            {
+                "direction": [0.0, 0.0, 1.0],
+                "polar_cosine": [0.0, 1.0],
+                "energy_at_polar_cosine": [1.0e6, 2.0e6],
+            },
+            "requires a tabulated polar_cosine PDF",
+        ),
+        (
+            {
+                "direction": [0.0, 0.0, 1.0],
+                "polar_cosine": ([0.0, 0.5, 1.0], [1.0, 1.0, 1.0]),
+                "energy_at_polar_cosine": [1.0e6, 2.0e6],
+            },
+            "must have the same length",
+        ),
+        (
+            {
+                "direction": [0.0, 0.0, 1.0],
+                "polar_cosine": ([0.0, 1.0], [1.0, 1.0]),
+                "energy_at_polar_cosine": [[1.0e6, 2.0e6]],
+            },
+            "must be a one-dimensional array",
+        ),
+        (
+            {
+                "direction": [0.0, 0.0, 1.0],
+                "polar_cosine": ([0.0, 1.0], [1.0, 1.0]),
+                "energy_at_polar_cosine": [1.0e6, np.nan],
+            },
+            "values must be finite",
+        ),
+        (
+            {
+                "direction": [0.0, 0.0, 1.0],
+                "polar_cosine": ([0.0, 1.0], [1.0, 1.0]),
+                "energy_at_polar_cosine": [1.0e6, -1.0],
+            },
+            "values must be nonnegative",
+        ),
+    ],
+)
+def test_invalid_energy_at_polar_cosine(kwargs, expected_message, capsys):
+    with pytest.raises(SystemExit):
+        mcdc.Source(**kwargs)
+
+    assert expected_message in capsys.readouterr().out
+
+
+def test_transport_source_interpolates_energy_at_polar_cosine(prepare_simulation):
+    cosine_grid = np.array([-1.0, -0.25, 0.5, 1.0])
+    energy_grid = np.array([1.0e6, 2.0e6, 4.0e6, 8.0e6])
+    source = mcdc.Source(
+        position=[0.0, 0.0, 0.0],
+        direction=[0.0, 0.0, 1.0],
+        polar_cosine=(cosine_grid, [0.2, 1.0, 0.4, 0.8]),
+        energy_at_polar_cosine=energy_grid,
+    )
+    simulation_container, data = prepare_simulation(sources=[source])
+    simulation = simulation_container[0]
+
+    assert simulation["sources"][0]["energy_at_polar_cosine_active"]
+    assert simulation["sources"][0]["energy_at_polar_cosine_length"] == len(energy_grid)
+
+    for seed in range(1, 33):
+        particle_container = np.zeros(1, dtype=type_.particle)
+        source_particle(
+            particle_container,
+            np.uint64(seed),
+            simulation,
+            data,
+        )
+        mu, _ = calculate_angles(
+            particle_container,
+            np.array([0.0, 0.0, 1.0]),
+        )
+        expected_energy = np.interp(mu, cosine_grid, energy_grid)
+        np.testing.assert_allclose(
+            particle_container[0]["E"],
+            expected_energy,
+            rtol=1.0e-13,
+        )
 
 
 def test_transport_source_sets_mono_energy(prepare_simulation):
