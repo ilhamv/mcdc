@@ -374,6 +374,30 @@ def test_energy_at_polar_cosine():
     assert "Energy: Function of polar cosine" in repr(source)
 
 
+def test_distributed_energy_at_polar_cosine():
+    conditional_energy = np.array(
+        [
+            [[1.0e6, 2.0e6, 3.0e6], [0.0, 1.0, 0.0]],
+            [[2.0e6, 4.0e6, 6.0e6], [1.0, 2.0, 1.0]],
+            [[5.0e6, 7.0e6, 9.0e6], [0.5, 1.0, 0.5]],
+        ]
+    )
+    source = mcdc.Source(
+        direction=[0.0, 0.0, 1.0],
+        polar_cosine=([-1.0, 0.0, 1.0], [0.2, 1.0, 0.4]),
+        energy_at_polar_cosine=conditional_energy,
+    )
+
+    assert source.energy_at_polar_cosine_active
+    assert source.energy_at_polar_cosine_is_distribution
+    assert not source.mono_energetic
+    assert not source.discrete_energy
+    assert len(source.energy_at_polar_cosine_distribution.tables) == 3
+    for index, table in enumerate(source.energy_at_polar_cosine_distribution.tables):
+        np.testing.assert_array_equal(table.pdf.x, conditional_energy[index, 0])
+    assert "Energy: PDF conditional on polar cosine" in repr(source)
+
+
 @pytest.mark.parametrize(
     "kwargs, expected_message",
     [
@@ -398,7 +422,7 @@ def test_energy_at_polar_cosine():
                 "polar_cosine": ([0.0, 0.5, 1.0], [1.0, 1.0, 1.0]),
                 "energy_at_polar_cosine": [1.0e6, 2.0e6],
             },
-            "must have the same length",
+            "N_mu must equal",
         ),
         (
             {
@@ -406,7 +430,34 @@ def test_energy_at_polar_cosine():
                 "polar_cosine": ([0.0, 1.0], [1.0, 1.0]),
                 "energy_at_polar_cosine": [[1.0e6, 2.0e6]],
             },
-            "must be a one-dimensional array",
+            "must have shape (N_mu,) or (N_mu, 2, N_energy)",
+        ),
+        (
+            {
+                "direction": [0.0, 0.0, 1.0],
+                "polar_cosine": ([0.0, 1.0], [1.0, 1.0]),
+                "energy_at_polar_cosine": np.ones((2, 3)),
+            },
+            "must have shape (N_mu,) or (N_mu, 2, N_energy)",
+        ),
+        (
+            {
+                "direction": [0.0, 0.0, 1.0],
+                "polar_cosine": ([0.0, 1.0], [1.0, 1.0]),
+                "energy_at_polar_cosine": np.ones((2, 2, 1)),
+            },
+            "at least two energy points",
+        ),
+        (
+            {
+                "direction": [0.0, 0.0, 1.0],
+                "polar_cosine": ([0.0, 1.0], [1.0, 1.0]),
+                "energy_at_polar_cosine": [
+                    [[1.0, 2.0], [1.0, 1.0]],
+                    [[3.0, 2.0], [1.0, 1.0]],
+                ],
+            },
+            "energy grid must be strictly increasing",
         ),
         (
             {
@@ -466,6 +517,53 @@ def test_transport_source_interpolates_energy_at_polar_cosine(prepare_simulation
             expected_energy,
             rtol=1.0e-13,
         )
+
+
+def test_transport_source_samples_distributed_energy_at_polar_cosine(
+    prepare_simulation,
+):
+    cosine_grid = np.array([-1.0, 0.0, 1.0])
+    energy_bounds = np.array(
+        [
+            [1.0e6, 2.0e6],
+            [3.0e6, 5.0e6],
+            [7.0e6, 10.0e6],
+        ]
+    )
+    conditional_energy = np.stack(
+        [
+            energy_bounds,
+            np.ones_like(energy_bounds),
+        ],
+        axis=1,
+    )
+    source = mcdc.Source(
+        position=[0.0, 0.0, 0.0],
+        direction=[0.0, 0.0, 1.0],
+        polar_cosine=(cosine_grid, [1.0, 1.0, 1.0]),
+        energy_at_polar_cosine=conditional_energy,
+    )
+    simulation_container, data = prepare_simulation(sources=[source])
+    simulation = simulation_container[0]
+
+    assert simulation["sources"][0]["energy_at_polar_cosine_active"]
+    assert simulation["sources"][0]["energy_at_polar_cosine_is_distribution"]
+
+    for seed in range(1, 65):
+        particle_container = np.zeros(1, dtype=type_.particle)
+        source_particle(
+            particle_container,
+            np.uint64(seed),
+            simulation,
+            data,
+        )
+        mu, _ = calculate_angles(
+            particle_container,
+            np.array([0.0, 0.0, 1.0]),
+        )
+        minimum = np.interp(mu, cosine_grid, energy_bounds[:, 0])
+        maximum = np.interp(mu, cosine_grid, energy_bounds[:, 1])
+        assert minimum <= particle_container[0]["E"] <= maximum
 
 
 def test_transport_source_sets_mono_energy(prepare_simulation):

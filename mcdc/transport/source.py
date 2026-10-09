@@ -7,6 +7,7 @@ import mcdc.mcdc_get as mcdc_get
 import mcdc.transport.rng as rng
 
 from mcdc.transport.distribution import (
+    sample_distribution_with_scale,
     sample_uniform,
     sample_tabulated,
     sample_tabulated_with_interval,
@@ -114,13 +115,24 @@ def source_particle(particle_container, seed, simulation, data):
 
     # Energy
     if source["energy_at_polar_cosine_active"]:
-        E = _interpolate_energy_at_polar_cosine(
-            mu,
-            polar_interval,
-            source,
-            simulation,
-            data,
-        )
+        if source["energy_at_polar_cosine_is_distribution"]:
+            ID = source["energy_at_polar_cosine_distribution_ID"]
+            distribution = simulation["distributions"][ID]
+            E = sample_distribution_with_scale(
+                mu,
+                distribution,
+                particle_container,
+                simulation,
+                data,
+            )
+        else:
+            E = _interpolate_energy_at_polar_cosine(
+                mu,
+                polar_interval,
+                source,
+                simulation,
+                data,
+            )
     elif source["mono_energetic"]:
         E = source["energy"]
     elif source["discrete_energy"]:

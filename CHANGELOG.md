@@ -17,7 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 - Add piece-wise linear spatial distribution for source definition, from [@ilhamv]
 - Add piecewise-linear emission-time distributions to source definitions, from [@ilhamv]
 - Add scalar and piecewise-linear polar-cosine and azimuthal source distributions, from [@ilhamv]
-- Add deterministic source-energy interpolation correlated with a tabulated polar-cosine distribution, from [@ilhamv]
+- Add deterministic and conditionally distributed source energy correlated with a tabulated polar-cosine distribution, reusing scattering-law multi-table sampling, from [@ilhamv]
 - Add overriding option N_active, from [@ilhamv]
 - Add MC/DC-VVP project documentation with verification case narratives, published results, and VVP result-generation and publication steps in the release checklist, from [@ilhamv]
 - Add GPU-compatible functions for 3D cross products and vector normalization, from [@braxtoncuneo]
