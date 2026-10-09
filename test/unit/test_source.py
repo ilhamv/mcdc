@@ -5,7 +5,7 @@ import mcdc
 import mcdc.numba_types as type_
 import mcdc.transport.rng as rng
 from mcdc.transport.source import source_particle
-from mcdc.transport.util import find_bin_with_rules
+from mcdc.transport.util import calculate_angles, find_bin_with_rules
 
 
 @pytest.mark.parametrize("coordinate", ["x", "y", "z"])
@@ -179,8 +179,104 @@ def test_direction_accepts_angular_bounds():
 
     assert not source.isotropic_direction
     assert not source.mono_direction
+    assert source.uniform_polar_cosine
+    assert source.uniform_azimuthal
     np.testing.assert_array_equal(source.polar_cosine, [0.8, 1.0])
     np.testing.assert_array_equal(source.azimuthal, [0.0, np.pi])
+
+
+@pytest.mark.parametrize(
+    "name, value",
+    [
+        ("polar_cosine", 0.5),
+        ("azimuthal", 0.25),
+    ],
+)
+def test_scalar_angular_distribution(name, value):
+    source = mcdc.Source(
+        direction=[0.0, 0.0, 1.0],
+        **{name: value},
+    )
+
+    assert getattr(source, f"uniform_{name}")
+    np.testing.assert_array_equal(getattr(source, name), [value, value])
+
+
+@pytest.mark.parametrize(
+    "name, grid",
+    [
+        ("polar_cosine", [-1.0, 0.0, 1.0]),
+        ("azimuthal", [0.0, np.pi, 2.0 * np.pi]),
+    ],
+)
+def test_piecewise_linear_angular_distribution(name, grid):
+    source = mcdc.Source(
+        direction=[0.0, 0.0, 1.0],
+        **{name: (grid, [0.2, 1.0, 0.4])},
+    )
+
+    assert not getattr(source, f"uniform_{name}")
+    np.testing.assert_array_equal(getattr(source, name), [grid[0], grid[-1]])
+    np.testing.assert_array_equal(getattr(source, f"{name}_pdf").pdf.x, grid)
+
+
+@pytest.mark.parametrize(
+    "polar_cosine",
+    [
+        -1.1,
+        [-1.1, 1.0],
+        ([-1.1, 0.0, 1.0], [0.2, 1.0, 0.4]),
+    ],
+)
+def test_polar_cosine_domain(polar_cosine, capsys):
+    with pytest.raises(SystemExit):
+        mcdc.Source(
+            direction=[0.0, 0.0, 1.0],
+            polar_cosine=polar_cosine,
+        )
+
+    assert "must be within [-1, 1]" in capsys.readouterr().out
+
+
+def test_transport_source_samples_piecewise_linear_angles(prepare_simulation):
+    source = mcdc.Source(
+        position=[0.0, 0.0, 0.0],
+        direction=[0.0, 0.0, 1.0],
+        polar_cosine=([0.5, 1.0], [0.0, 2.0]),
+        azimuthal=([0.0, 0.5 * np.pi], [2.0, 0.0]),
+    )
+    simulation_container, data = prepare_simulation(sources=[source])
+    simulation = simulation_container[0]
+    packed_source = simulation["sources"][0]
+
+    assert not packed_source["uniform_polar_cosine"]
+    assert not packed_source["uniform_azimuthal"]
+    assert packed_source["polar_cosine_pdf_ID"] == source.polar_cosine_pdf.ID
+    assert packed_source["azimuthal_pdf_ID"] == source.azimuthal_pdf.ID
+
+    sampled_mu = []
+    sampled_azimuthal = []
+    for seed in range(1, 17):
+        particle_container = np.zeros(1, dtype=type_.particle)
+        source_particle(
+            particle_container,
+            np.uint64(seed),
+            simulation,
+            data,
+        )
+        mu, azi = calculate_angles(
+            particle_container,
+            np.array([0.0, 0.0, 1.0]),
+        )
+        sampled_mu.append(mu)
+        sampled_azimuthal.append(azi)
+
+    assert np.all(np.asarray(sampled_mu) >= 0.5)
+    assert np.all(np.asarray(sampled_mu) <= 1.0)
+    assert np.all(np.asarray(sampled_azimuthal) >= 0.0)
+    assert np.all(np.asarray(sampled_azimuthal) <= 0.5 * np.pi)
+    assert np.ptp(sampled_mu) > 0.0
+    assert np.ptp(sampled_azimuthal) > 0.0
 
 
 @pytest.mark.parametrize(

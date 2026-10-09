@@ -12,8 +12,8 @@ from mcdc.transport.distribution import (
     sample_pmf,
     sample_white_direction,
     sample_isotropic_direction,
-    sample_direction,
 )
+from mcdc.transport.linalg import direction_from_angles
 from mcdc.transport.util import find_bin_with_rules
 
 
@@ -72,12 +72,35 @@ def source_particle(particle_container, seed, simulation, data):
         uy = source["direction"][1]
         uz = source["direction"][2]
     else:
-        ux, uy, uz = sample_direction(
-            source["polar_cosine"],
-            source["azimuthal"],
-            source["direction"],
-            particle_container,
-        )
+        if source["uniform_polar_cosine"]:
+            mu = sample_uniform(
+                source["polar_cosine"][0],
+                source["polar_cosine"][1],
+                particle_container,
+            )
+        else:
+            mu = _sample_source_tabulated(
+                source["polar_cosine_pdf_ID"],
+                particle_container,
+                simulation,
+                data,
+            )
+
+        if source["uniform_azimuthal"]:
+            azi = sample_uniform(
+                source["azimuthal"][0],
+                source["azimuthal"][1],
+                particle_container,
+            )
+        else:
+            azi = _sample_source_tabulated(
+                source["azimuthal_pdf_ID"],
+                particle_container,
+                simulation,
+                data,
+            )
+
+        ux, uy, uz = direction_from_angles(mu, azi, source["direction"])
 
     # Energy
     if source["mono_energetic"]:
@@ -88,10 +111,9 @@ def source_particle(particle_container, seed, simulation, data):
         pmf = simulation["pmf_distributions"][sub_ID]
         E = sample_pmf(pmf, particle_container, data)
     else:
-        ID = source["energy_pdf_ID"]
-        sub_ID = simulation["distributions"][ID]["sub_ID"]
-        table = simulation["tabulated_distributions"][sub_ID]
-        E = sample_tabulated(table, particle_container, simulation, data)
+        E = _sample_source_tabulated(
+            source["energy_pdf_ID"], particle_container, simulation, data
+        )
 
     # Time
     if source["discrete_time"]:
@@ -101,10 +123,9 @@ def source_particle(particle_container, seed, simulation, data):
             source["time_range"][0], source["time_range"][1], particle_container
         )
     else:
-        ID = source["time_pdf_ID"]
-        sub_ID = simulation["distributions"][ID]["sub_ID"]
-        table = simulation["tabulated_distributions"][sub_ID]
-        t = sample_tabulated(table, particle_container, simulation, data)
+        t = _sample_source_tabulated(
+            source["time_pdf_ID"], particle_container, simulation, data
+        )
 
     # Motion translation
     if source["moving"]:
@@ -153,6 +174,12 @@ def sample_position_axis(uniform, bounds, pdf_ID, rng_state, simulation, data):
     if uniform:
         return sample_uniform(bounds[0], bounds[1], rng_state)
 
+    return _sample_source_tabulated(pdf_ID, rng_state, simulation, data)
+
+
+@njit
+def _sample_source_tabulated(pdf_ID, rng_state, simulation, data):
+    """Sample one of a source's tabulated continuous distributions."""
     sub_ID = simulation["distributions"][pdf_ID]["sub_ID"]
     table = simulation["tabulated_distributions"][sub_ID]
     return sample_tabulated(table, rng_state, simulation, data)

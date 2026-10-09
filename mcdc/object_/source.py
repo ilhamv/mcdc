@@ -61,14 +61,18 @@ class Source(MCDCObject):
     isotropic : bool, optional
         If True, emit particles isotropically. Cannot be supplied with
         ``direction`` or ``white_direction``.
-    polar_cosine : array_like of float, optional
-        Bounds for the sampled polar cosine,
-        ``[mu_min, mu_max]``, measured with respect to ``direction``.
-        Requires ``direction``. Defaults to ``[-1.0, 1.0]``.
-    azimuthal : array_like of float, optional
-        Bounds for the sampled azimuthal angle,
-        ``[azi_min, azi_max]`` in radians, measured about ``direction``.
-        Requires ``direction``. Defaults to ``[0.0, 2π]``.
+    polar_cosine : real or array_like of float, optional
+        Polar cosine measured with respect to ``direction``. A scalar fixes the
+        polar cosine, an array with shape ``(2,)`` samples uniformly over
+        ``[mu_min, mu_max]``, and an array with shape ``(2, N)`` defines a
+        tabulated piecewise-linear probability density. Requires ``direction``.
+        Defaults to uniform sampling over ``[-1.0, 1.0]``.
+    azimuthal : real or array_like of float, optional
+        Azimuthal angle in radians measured about ``direction``. A scalar fixes
+        the angle, an array with shape ``(2,)`` samples uniformly over
+        ``[azi_min, azi_max]``, and an array with shape ``(2, N)`` defines a
+        tabulated piecewise-linear probability density. Requires ``direction``.
+        Defaults to uniform sampling over ``[0.0, 2π]``.
     energy : float, array_like of float, or int, optional
         Source energy in eV. A real scalar, including a NumPy scalar, defines a
         mono-energetic source. An array-like value with shape ``(2, N)`` defines
@@ -226,8 +230,12 @@ class Source(MCDCObject):
     mono_direction: bool
     white_direction: bool
     direction: Annotated[NDArray[float64], (3,)]
+    uniform_polar_cosine: bool
+    uniform_azimuthal: bool
     polar_cosine: Annotated[NDArray[float64], (2,)]
     azimuthal: Annotated[NDArray[float64], (2,)]
+    polar_cosine_pdf: DistributionTabulated
+    azimuthal_pdf: DistributionTabulated
 
     # Energy
     mono_energetic: bool
@@ -267,8 +275,8 @@ class Source(MCDCObject):
         direction: Sequence[float] | NoneType = None,
         white_direction: Sequence[float] | NoneType = None,
         isotropic: bool | NoneType = None,
-        polar_cosine: Sequence[float] | NoneType = None,
-        azimuthal: Sequence[float] | NoneType = None,
+        polar_cosine: float | ArrayLike | NoneType = None,
+        azimuthal: float | ArrayLike | NoneType = None,
         #
         energy: float | ArrayLike | int | NoneType = None,
         discrete_energy: ArrayLike | NoneType = None,
@@ -314,8 +322,18 @@ class Source(MCDCObject):
         self.mono_direction = False
         self.white_direction = False
         self.direction = np.array([0.0, 0.0, 1.0])
+        self.uniform_polar_cosine = True
+        self.uniform_azimuthal = True
         self.polar_cosine = np.array([-1.0, 1.0])
         self.azimuthal = np.array([0.0, 2.0 * PI])
+        self.polar_cosine_pdf = DistributionTabulated(
+            np.array([-1.0, 1.0]),
+            np.array([1.0, 1.0]),
+        )
+        self.azimuthal_pdf = DistributionTabulated(
+            np.array([0.0, 2.0 * PI]),
+            np.array([1.0, 1.0]),
+        )
 
         # Energy
         self.mono_energetic = True
@@ -395,9 +413,23 @@ class Source(MCDCObject):
             if polar_cosine is not None or azimuthal is not None:
                 self.mono_direction = False
                 if polar_cosine is not None:
-                    self.polar_cosine = np.array(polar_cosine)
+                    (
+                        self.uniform_polar_cosine,
+                        self.polar_cosine,
+                        pdf,
+                    ) = _continuous_distribution(polar_cosine, "polar cosine")
+                    if self.polar_cosine[0] < -1.0 or self.polar_cosine[1] > 1.0:
+                        print_error("Source polar cosine must be within [-1, 1].")
+                    if pdf is not None:
+                        self.polar_cosine_pdf = pdf
                 if azimuthal is not None:
-                    self.azimuthal = np.array(azimuthal)
+                    (
+                        self.uniform_azimuthal,
+                        self.azimuthal,
+                        pdf,
+                    ) = _continuous_distribution(azimuthal, "azimuthal angle")
+                    if pdf is not None:
+                        self.azimuthal_pdf = pdf
             else:
                 self.mono_direction = True
         elif white_direction is not None:

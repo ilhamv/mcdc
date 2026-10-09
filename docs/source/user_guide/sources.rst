@@ -36,6 +36,14 @@ MC/DC normalizes the probability density internally.
 Independent distributions may be specified for multiple coordinates to define a separable multidimensional source.
 Use ``position=[x, y, z]`` instead when all three coordinates are fixed.
 
+Angular Distributions
+---------------------
+
+With a reference ``direction``, scalar ``polar_cosine`` and ``azimuthal``
+values fix the corresponding angle, two values define a uniform interval, and
+an array with shape ``(2, N)`` defines a piecewise-linear probability density.
+The two angular variables are sampled independently.
+
 Energy Distributions
 --------------------
 
