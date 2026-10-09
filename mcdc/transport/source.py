@@ -96,10 +96,15 @@ def source_particle(particle_container, seed, simulation, data):
     # Time
     if source["discrete_time"]:
         t = source["time"]
-    else:
+    elif source["uniform_time"]:
         t = sample_uniform(
             source["time_range"][0], source["time_range"][1], particle_container
         )
+    else:
+        ID = source["time_pdf_ID"]
+        sub_ID = simulation["distributions"][ID]["sub_ID"]
+        table = simulation["tabulated_distributions"][sub_ID]
+        t = sample_tabulated(table, particle_container, simulation, data)
 
     # Motion translation
     if source["moving"]:

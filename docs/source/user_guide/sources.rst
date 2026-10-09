@@ -61,6 +61,15 @@ Use ``discrete_energy`` for a probability mass function over physical emission l
 The values in the second row are dimensionless relative probabilities.
 The ``energy`` and ``discrete_energy`` inputs are alternative source-energy specifications and cannot be combined.
 
+Time Distributions
+------------------
+
+A scalar ``time`` fixes the emission time in seconds, two values define a
+uniform interval, and an array with shape ``(2, N)`` defines a piecewise-linear
+probability density. For a tabulated distribution, the first row contains
+strictly increasing times and the second contains nonnegative relative
+densities. MC/DC normalizes the density internally.
+
 .. _user_standard_multigroup_sources:
 
 Standard Neutron Multigroup Sources

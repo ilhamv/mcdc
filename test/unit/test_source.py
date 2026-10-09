@@ -57,7 +57,7 @@ def test_piecewise_linear_spatial_distribution(coordinate):
     [
         ([0.0, 1.0, 2.0], "Source x must be a scalar"),
         ([1.0, 0.0], "Source x bounds must satisfy min <= max"),
-        (np.nan, "Source x coordinate must be finite"),
+        (np.nan, "Source x value must be finite"),
         (([0.0, 0.0], [1.0, 1.0]), "must be strictly increasing"),
         (([0.0, 1.0], [-1.0, 1.0]), "PDF must be nonnegative"),
     ],
@@ -301,7 +301,55 @@ def test_time_interval(time):
     source = mcdc.Source(time=time)
 
     assert not source.discrete_time
+    assert source.uniform_time
     np.testing.assert_array_equal(source.time_range, [1.0, 2.0])
+
+
+@pytest.mark.parametrize(
+    "time",
+    [
+        [[1.0, 2.0, 3.0], [0.2, 1.0, 0.4]],
+        ([1.0, 2.0, 3.0], [0.2, 1.0, 0.4]),
+        np.array([[1.0, 2.0, 3.0], [0.2, 1.0, 0.4]]),
+    ],
+)
+def test_time_distribution(time):
+    source = mcdc.Source(time=time)
+
+    assert not source.discrete_time
+    assert not source.uniform_time
+    np.testing.assert_array_equal(source.time_range, [1.0, 3.0])
+    np.testing.assert_array_equal(source.time_pdf.pdf.x, [1.0, 2.0, 3.0])
+    assert "Time: PDF" in repr(source)
+
+
+def test_transport_source_samples_piecewise_linear_time(prepare_simulation):
+    source = mcdc.Source(
+        position=[0.0, 0.0, 0.0],
+        direction=[0.0, 0.0, 1.0],
+        time=([1.0, 2.0], [0.0, 2.0]),
+    )
+    simulation_container, data = prepare_simulation(sources=[source])
+    simulation = simulation_container[0]
+    packed_source = simulation["sources"][0]
+
+    assert not packed_source["uniform_time"]
+    assert packed_source["time_pdf_ID"] == source.time_pdf.ID
+
+    sampled_time = []
+    for seed in range(1, 17):
+        particle_container = np.zeros(1, dtype=type_.particle)
+        source_particle(
+            particle_container,
+            np.uint64(seed),
+            simulation,
+            data,
+        )
+        sampled_time.append(particle_container[0]["t"])
+
+    assert np.all(np.asarray(sampled_time) >= 1.0)
+    assert np.all(np.asarray(sampled_time) <= 2.0)
+    assert np.ptp(sampled_time) > 0.0
 
 
 @pytest.mark.parametrize(
@@ -312,7 +360,7 @@ def test_time_interval(time):
             {"discrete_energy": [1.0, 2.0, 3.0]},
             "Discrete energy distribution must have shape (2, N)",
         ),
-        ({"time": [1.0, 2.0, 3.0]}, "Source time interval must have shape (2,)"),
+        ({"time": [1.0, 2.0, 3.0]}, "Source time must be a scalar"),
     ],
 )
 def test_invalid_distribution_shape(kwargs, expected_message, capsys):

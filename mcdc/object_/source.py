@@ -89,8 +89,10 @@ class Source(MCDCObject):
     time : real or array_like of float, optional
         Emission time in seconds. A real scalar, including a NumPy scalar,
         defines a discrete emission time. An array-like value with shape
-        ``(2,)`` defines a uniform interval ``[t_min, t_max]``. Defaults to
-        ``0.0``.
+        ``(2,)`` defines a uniform interval ``[t_min, t_max]``. An array-like
+        value with shape ``(2, N)`` defines a tabulated piecewise-linear
+        distribution: the first row contains times and the second row contains
+        their probability density. Defaults to ``0.0``.
     particle_type : {"neutron", "electron", "proton"}, optional
         Type of emitted particle. Defaults to ``"neutron"``.
     probability : float, optional
@@ -236,8 +238,10 @@ class Source(MCDCObject):
 
     # Time
     discrete_time: bool
+    uniform_time: bool
     time: float
     time_range: Annotated[NDArray[float64], (2,)]
+    time_pdf: DistributionTabulated
 
     # Misc.
     particle_type: int
@@ -269,7 +273,7 @@ class Source(MCDCObject):
         energy: float | ArrayLike | int | NoneType = None,
         discrete_energy: ArrayLike | NoneType = None,
         #
-        time: ArrayLike = 0.0,
+        time: float | ArrayLike = 0.0,
         #
         particle_type: str = "neutron",
         #
@@ -325,8 +329,13 @@ class Source(MCDCObject):
 
         # Time
         self.discrete_time = True
+        self.uniform_time = True
         self.time = 0.0
         self.time_range = np.array([0.0, 0.0])
+        self.time_pdf = DistributionTabulated(
+            np.array([0.0, 1.0]),
+            np.array([1.0, 1.0]),
+        )
 
         # Particle type
         self.particle_type = PARTICLE_NEUTRON
@@ -348,15 +357,15 @@ class Source(MCDCObject):
         else:
             self.point_source = False
             if x is not None:
-                self.uniform_x, self.x, pdf = _spatial_distribution(x, "x")
+                self.uniform_x, self.x, pdf = _continuous_distribution(x, "x")
                 if pdf is not None:
                     self.x_pdf = pdf
             if y is not None:
-                self.uniform_y, self.y, pdf = _spatial_distribution(y, "y")
+                self.uniform_y, self.y, pdf = _continuous_distribution(y, "y")
                 if pdf is not None:
                     self.y_pdf = pdf
             if z is not None:
-                self.uniform_z, self.z, pdf = _spatial_distribution(z, "z")
+                self.uniform_z, self.z, pdf = _continuous_distribution(z, "z")
                 if pdf is not None:
                     self.z_pdf = pdf
 
@@ -425,7 +434,11 @@ class Source(MCDCObject):
             self.time = float(time)
         else:
             self.discrete_time = False
-            self.time_range = _time_range(time)
+            self.uniform_time, self.time_range, pdf = _continuous_distribution(
+                time, "time"
+            )
+            if pdf is not None:
+                self.time_pdf = pdf
 
         # Particle type
         if particle_type == "neutron":
@@ -474,8 +487,10 @@ class Source(MCDCObject):
         text += f"  - Energy: {energy_text}\n"
         if self.discrete_time:
             text += f"  - Time: {self.time} s\n"
+        elif self.uniform_time:
+            text += f"  - Time: Uniform {self.time_range} s\n"
         else:
-            text += f"  - Time: {self.time_range} s\n"
+            text += f"  - Time: PDF over {self.time_range} s\n"
 
         return text
 
@@ -559,16 +574,16 @@ def decode_particle_type(type_):
 # ======================================================================================
 
 
-def _spatial_distribution(
+def _continuous_distribution(
     value: float | ArrayLike,
     name: str,
 ) -> tuple[bool, NDArray[float64], DistributionTabulated | None]:
-    """Normalize one independent source-coordinate specification."""
+    """Normalize one scalar, uniform, or tabulated source distribution."""
     if isinstance(value, Real) and not isinstance(value, (bool, np.bool_)):
-        coordinate = float(value)
-        if not np.isfinite(coordinate):
-            print_error(f"Source {name} coordinate must be finite.")
-        return True, np.array([coordinate, coordinate]), None
+        scalar = float(value)
+        if not np.isfinite(scalar):
+            print_error(f"Source {name} value must be finite.")
+        return True, np.array([scalar, scalar]), None
 
     try:
         array = np.asarray(value, dtype=float64)
@@ -586,22 +601,20 @@ def _spatial_distribution(
         return True, array, None
 
     if array.ndim == 2 and array.shape[0] == 2:
-        coordinates, pdf = array
-        if len(coordinates) < 2:
+        grid, pdf = array
+        if len(grid) < 2:
             print_error(
                 f"Source {name} tabulated distribution must contain at least two points."
             )
-        if not np.all(np.isfinite(coordinates)) or not np.all(np.isfinite(pdf)):
-            print_error(f"Source {name} tabulated coordinates and PDF must be finite.")
-        if np.any(coordinates[1:] <= coordinates[:-1]):
-            print_error(
-                f"Source {name} tabulated coordinates must be strictly increasing."
-            )
+        if not np.all(np.isfinite(grid)) or not np.all(np.isfinite(pdf)):
+            print_error(f"Source {name} tabulated values and PDF must be finite.")
+        if np.any(grid[1:] <= grid[:-1]):
+            print_error(f"Source {name} tabulated values must be strictly increasing.")
         if np.any(pdf < 0.0):
             print_error(f"Source {name} tabulated PDF must be nonnegative.")
 
-        distribution = DistributionTabulated(coordinates, pdf)
-        bounds = np.array([coordinates[0], coordinates[-1]])
+        distribution = DistributionTabulated(grid, pdf)
+        bounds = np.array([grid[0], grid[-1]])
         return False, bounds, distribution
 
     print_error(
@@ -636,16 +649,3 @@ def _distribution_pair(
         print_error(f"{name} distribution must have shape (2, N)")
 
     return array[0], array[1]
-
-
-def _time_range(value: ArrayLike) -> NDArray[float64]:
-    """Normalize and validate a source time interval."""
-    try:
-        array = np.asarray(value, dtype=float64)
-    except (TypeError, ValueError):
-        print_error("Source time interval must be an array with shape (2,)")
-
-    if array.shape != (2,):
-        print_error("Source time interval must have shape (2,)")
-
-    return array
