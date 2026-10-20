@@ -2,53 +2,102 @@
 # Conventions and notes: blueprint-conventions.yaml.
 
 file layout:
+  '@format': mcdc-data
+  '@format-version': 0.1.0
+
   temperature: float, K
   kT: float, eV  # Boltzmann constant times temperature; must agree with temperature
-  neutron-reactions/:
-    xs-energy-grid: float [N], eV
 
-    reactions/:
-      elastic/:
-        '@category': elastic-scattering
-        '@ENDF_MT': 2  # Optional source metadata
-        '@GNDS_label': string  # Optional original source label, e.g. n + Fe56; preserve exactly
-        xs: CrossSection
-        reference-frame: LAB or COM
-        Q-value: float, eV
-        angular-cosine-distribution: Distribution, cosine
+  projectiles/:
+    # ====================================================================================
+    # Neutron
+    # ====================================================================================
 
-      radiative-capture/:
-        '@category': capture
-        '@ENDF_MT': 102
-        cross-products/:
-          '{i}': CrossProduct  # Optional additional species          
+    neutron/:
+      xs-energy-grid: float [N], eV
 
-      inelastic-level-1/:
-        '@category': inelastic-scattering
-        '@ENDF_MT': 51
-        multiplicity: integer
-        angular-cosine-distribution: Distribution, cosine  # Omit for a joint energy-angle spectrum
-        spectrum-probability-grid: float [B + 1], eV  # Incident-energy bin edges
-        spectrum-probability: float [B, S]  # Probabilities for S spectra in B bins
-        energy-spectrum-{i}: Distribution, eV  # May jointly sample energy and angle
-        cross-products/:
-          '{i}': CrossProduct  # Optional additional species
+      reactions/:
+        elastic/:
+          # Basic fields
+          '@ENDF_MT': 2  # Optional source metadata
+          '@GNDS_label': string  # Optional original source label, e.g. n + Fe56; preserve exactly
+          '@category': elastic-scattering
+          xs: CrossSection
+          reference-frame: LAB or COM
+          Q-value: float, eV
+          cross-products/: {}
 
-      neutron-emission-2/:
-        '@category': inelastic-scattering
-        '@ENDF_MT': 16
-        multiplicity: 2
+          # Category-specific
+          angular-cosine-distribution: Distribution, cosine
 
-      fission-total/:
-        '@category': fission
-        '@ENDF_MT': 18
-        prompt-angular-cosine-distribution: Distribution, cosine  # Omit for a joint prompt energy-angle distribution
-        prompt-energy-distribution: Distribution, eV
-        prompt-multiplicity: Data, neutrons per fission
-        delayed-multiplicity: Data, neutrons per fission
-        delayed-neutrons/:
-          fractions: float [D]  # Relative delayed-group fractions
-          decay-rates: float [D], 1/s
-          energy-distribution-{i}: Distribution, eV  # One per delayed group
-        cross-products/:
-          '{i}': CrossProduct  # Optional additional species
+
+        radiative-capture/:
+          # Basic fields
+          '@ENDF_MT': 102  # Optional source metadata
+          '@GNDS_label': string  # Optional original source label, preserved exactly
+          '@category': capture
+          xs: CrossSection
+          reference-frame: LAB or COM
+          Q-value: float, eV
+          cross-products/:
+            '{i}': CrossProduct  # Optional additional species
+
+
+        inelastic-level-1/:
+          # Basic fields
+          '@ENDF_MT': 51  # Optional source metadata
+          '@GNDS_label': string  # Optional original source label, preserved exactly
+          '@category': inelastic-scattering
+          xs: CrossSection
+          reference-frame: LAB or COM
+          Q-value: float, eV
+          cross-products/:
+            '{i}': CrossProduct  # Optional additional species
+
+          # Category-specific
+          multiplicity: integer
+          angular-cosine-distribution: Distribution, cosine  # Omit for a joint energy-angle spectrum
+          spectrum-probability-grid: float [B + 1], eV  # Incident-energy bin edges
+          spectrum-probability: float [B, S]  # Probabilities for S spectra in B bins
+          energy-spectrum-{i}: Distribution, eV  # May jointly sample energy and angle
+
+
+        neutron-emission-2/:
+          # Basic fields
+          '@ENDF_MT': 16  # Optional source metadata
+          '@GNDS_label': string  # Optional original source label, preserved exactly
+          '@category': inelastic-scattering
+          xs: CrossSection
+          reference-frame: LAB or COM
+          Q-value: float, eV
+          cross-products/:
+            '{i}': CrossProduct  # Optional additional species
+
+          # Category-specific
+          multiplicity: 2
+          angular-cosine-distribution: Distribution, cosine  # Omit for a joint energy-angle spectrum
+          spectrum-probability-grid: float [B + 1], eV  # Incident-energy bin edges
+          spectrum-probability: float [B, S]  # Probabilities for S spectra in B bins
+          energy-spectrum-{i}: Distribution, eV  # May jointly sample energy and angle
+
+
+        fission-total/:
+          # Basic fields
+          '@ENDF_MT': 18  # Optional source metadata
+          '@GNDS_label': string  # Optional original source label, preserved exactly
+          '@category': fission
+          xs: CrossSection
+          reference-frame: LAB or COM
+          Q-value: float, eV
+          cross-products/:
+            '{i}': CrossProduct  # Optional additional species
+
+          # Category-specific
+          prompt-angular-cosine-distribution: Distribution, cosine  # Omit for a joint prompt energy-angle distribution
+          prompt-energy-distribution: Distribution, eV
+          prompt-multiplicity: Data, neutrons per fission
+          delayed-multiplicity: Data, neutrons per fission
+          delayed-neutrons/:
+            fractions: float [D]  # Relative delayed-group fractions
+            decay-rates: float [D], 1/s
+            energy-distribution-{i}: Distribution, eV  # One per delayed group

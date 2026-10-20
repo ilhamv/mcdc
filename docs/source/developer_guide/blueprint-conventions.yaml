@@ -14,6 +14,15 @@ conventions:
   reusable-types: CrossProduct, CrossSection, Data, Distribution and Interpolation are defined in this file.
   placeholders: Names such as {i} and {j} are placeholders, not literal names or integer fields.
   indices: Indexed entries use zero-based numeric string names
+  projectiles: Projectile groups reside under projectiles/; use neutron/, proton/, electron/, or an ion identifier such as Si32/.
+  targets: The filename identifies the target element or nuclide; the group under projectiles/ identifies the incident projectile.
+  projectile-data: Each projectile group contains its applicable xs-energy-grid, reactions and transport data such as stopping-power.
+  shared-grid: CrossSection references xs-energy-grid in its containing projectile group.
+  format-name: Root attribute @format is mcdc-data in every file type.
+  format-version: Root attribute @format-version is a string in major.minor.patch form; the draft starts at 0.1.0.
+  versioning: Major versions mark breaking changes; minor versions add backward-compatible features; patch versions correct the specification without changing compatibility.
+  compatibility: Check format and format-version before reading data; report unsupported formats or versions explicitly.
+  version-scope: Format version is independent of MC/DC software releases and data-library releases.
 
 # ======================================================================================
 # Transport categories
@@ -27,13 +36,17 @@ transport categories:
   excitation: Electron energy loss to atomic excitation.
   bremsstrahlung: Electron energy loss through photon emission.
   ionization: Electron-impact ionization, including knock-on electron production.
+  coherent-scattering: Coherent photon scattering.
+  incoherent-scattering: Incoherent photon scattering.
+  photoelectric: Photoelectric photon absorption.
+  pair-production: Photon conversion into an electron-positron pair.
 
 # ======================================================================================
 # Cross-species products
 # ======================================================================================
 
 CrossProduct:
-  particle: string  # neutron, photon, electron, proton, etc.
+  particle: string  # neutron, photon, electron, positron, proton, etc.
   yield: Data, particles per reaction  # Average count, nonnegative, may be below or above one
   decay-rate: float, 1/s  # Positive finite rate for exponential delay, positive infinity for prompt
   angle-energy-distribution: Distribution  # Joint outgoing energy and direction sampling
@@ -155,17 +168,10 @@ Interpolation:
 # ======================================================================================
 
 notes:
-  - This is a proposed format; current readers and transport routines do not yet implement it.
-  - Do not add overlapping total and partial reaction cross sections, such as total fission and its chance components.
-  - When inelastic multiplicity equals spectrum count, use one spectrum per secondary; otherwise select spectra using the probability bins.
-  - Cross-product yields describe average counts, not multiplicity fluctuations or correlations between emitted particles.
-  - Missing source products indicate unavailable data, not necessarily zero physical production.
-  - Ionization relaxation yields are either shell-averaged per reaction or conditional per selected shell; never count the same emission at both levels.
-  - Explicit relaxation emissions must reduce local excitation or binding-energy deposition; bremsstrahlung photons must also agree with primary energy loss.
-  - Electron small-angle elastic scattering currently uses an analytic model with a fixed cosine cutoff of 0.999999; its file representation remains undecided.
-  - Preserve the current ionization near-threshold sampling policy; generic incident-table selection is not equivalent.
-  - Correlated distribution interpolation remains unspecified; use histogram table selection for now.
-  - Stopping-power and radiation-length sources may be element- or material-specific; storing them in a nuclide file does not make them isotope-specific.
-  - Product-specific reference frames and explicit isotope identity for emitted nuclei remain to be defined.
-  - Verify the n-body representation and units against the generator before publishing the specification.
-  
+  - File layouts and reusable type definitions are separate; a type reference expands to its selected representation at that field.
+  - Each reaction lists its fields explicitly; cross-products is a basic field and an empty group when no cross-species products are specified.
+  - Repeated entries represent independent records; matching indices across related arrays or groups must refer to the same record.
+  - Atomic-relaxation shell designators link vacancies to transition tables; the block is shared element data, independent of which projectile created the vacancy.
+  - Shell-averaged cross-products, conditional subshell cross-products and relaxation transitions must not duplicate the same emitted contribution.
+  - Momentum-transfer coordinates for form factors and scattering functions must use the same definition as their source tables; units alone do not define that coordinate.
+  - An omitted optional field indicates unspecified data, not an implicit zero value or default representation.
