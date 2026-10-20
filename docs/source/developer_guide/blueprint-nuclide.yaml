@@ -1,0 +1,48 @@
+# Proposed MC/DC HDF5 blueprint: {nuclide}.h5.
+# Conventions and notes: blueprint-conventions.yaml.
+
+file layout:
+  mass-number: integer
+  atomic-weight-ratio: float  # Target mass / neutron mass
+  excitation-level: integer  # Excitation-state index
+  fissionable: boolean
+
+  radiation-length: float, g/cm2
+
+  proton-reactions/:
+    stopping-power: Data, eV cm2/g  # Optional for analog transport, required for condensed-history energy loss
+    xs-energy-grid: float [N], eV
+    reactions/:
+      elastic/:
+        '@category': elastic-scattering
+        '@ENDF_MT': integer  # Optional source metadata
+        '@GNDS_label': string  # Optional original source label, preserved exactly
+        xs: CrossSection
+        reference-frame: LAB or COM
+        Q-value: float, eV
+        angular-cosine-distribution: Distribution, cosine
+
+      inelastic/:
+        '@category': inelastic-scattering
+        '@ENDF_MT': integer  # Optional source metadata
+        '@GNDS_label': string  # Optional original source label, preserved exactly
+        xs: CrossSection
+        reference-frame: LAB or COM
+        Q-value: float, eV
+        multiplicity: integer  # Outgoing protons only
+        angular-cosine-distribution: Distribution, cosine  # Omit for a joint energy-angle spectrum
+        spectrum-probability-grid: float [B + 1], eV
+        spectrum-probability: float [B, S]
+        energy-spectrum-{i}: Distribution, eV
+        cross-products/:
+          '{i}': CrossProduct  # Optional emitted species other than protons
+
+      capture/:
+        '@category': capture
+        '@ENDF_MT': integer  # Optional source metadata
+        '@GNDS_label': string  # Optional original source label, preserved exactly
+        xs: CrossSection
+        reference-frame: LAB or COM
+        Q-value: float, eV
+        cross-products/:
+          '{i}': CrossProduct  # Optional emitted species other than protons

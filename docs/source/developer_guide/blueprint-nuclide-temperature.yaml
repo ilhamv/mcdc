@@ -1,0 +1,54 @@
+# Proposed MC/DC HDF5 blueprint: {nuclide}-{temperature}K.h5.
+# Conventions and notes: blueprint-conventions.yaml.
+
+file layout:
+  temperature: float, K
+  kT: float, eV  # Boltzmann constant times temperature; must agree with temperature
+  neutron-reactions/:
+    xs-energy-grid: float [N], eV
+
+    reactions/:
+      elastic/:
+        '@category': elastic-scattering
+        '@ENDF_MT': 2  # Optional source metadata
+        '@GNDS_label': string  # Optional original source label, e.g. n + Fe56; preserve exactly
+        xs: CrossSection
+        reference-frame: LAB or COM
+        Q-value: float, eV
+        angular-cosine-distribution: Distribution, cosine
+
+      radiative-capture/:
+        '@category': capture
+        '@ENDF_MT': 102
+        cross-products/:
+          '{i}': CrossProduct  # Optional additional species          
+
+      inelastic-level-1/:
+        '@category': inelastic-scattering
+        '@ENDF_MT': 51
+        multiplicity: integer
+        angular-cosine-distribution: Distribution, cosine  # Omit for a joint energy-angle spectrum
+        spectrum-probability-grid: float [B + 1], eV  # Incident-energy bin edges
+        spectrum-probability: float [B, S]  # Probabilities for S spectra in B bins
+        energy-spectrum-{i}: Distribution, eV  # May jointly sample energy and angle
+        cross-products/:
+          '{i}': CrossProduct  # Optional additional species
+
+      neutron-emission-2/:
+        '@category': inelastic-scattering
+        '@ENDF_MT': 16
+        multiplicity: 2
+
+      fission-total/:
+        '@category': fission
+        '@ENDF_MT': 18
+        prompt-angular-cosine-distribution: Distribution, cosine  # Omit for a joint prompt energy-angle distribution
+        prompt-energy-distribution: Distribution, eV
+        prompt-multiplicity: Data, neutrons per fission
+        delayed-multiplicity: Data, neutrons per fission
+        delayed-neutrons/:
+          fractions: float [D]  # Relative delayed-group fractions
+          decay-rates: float [D], 1/s
+          energy-distribution-{i}: Distribution, eV  # One per delayed group
+        cross-products/:
+          '{i}': CrossProduct  # Optional additional species

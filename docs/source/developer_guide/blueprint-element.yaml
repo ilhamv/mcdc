@@ -1,0 +1,48 @@
+# Proposed MC/DC HDF5 blueprint: {element}.h5.
+# Conventions and notes: blueprint-conventions.yaml.
+
+file layout:
+  atomic-number: integer
+
+  electron-reactions/:
+    xs-energy-grid: float [N], eV
+    reactions/:
+      elastic/:
+        '@category': elastic-scattering
+        '@ENDF_MT': integer  # Optional source metadata
+        '@GNDS_label': string  # Optional original source label, preserved exactly
+        xs: CrossSection
+        reference-frame: LAB or COM
+        large-angle/:
+          xs: Data, barn  # Tabulated on its own incident-energy grid
+          angular-cosine-distribution: Distribution, cosine
+
+      excitation/:
+        '@category': excitation
+        xs: CrossSection
+        reference-frame: LAB or COM
+        energy-loss: Data, eV
+        cross-products/:
+          '{i}': CrossProduct  # Optional de-excitation photon production
+
+      bremsstrahlung/:
+        '@category': bremsstrahlung
+        xs: CrossSection
+        reference-frame: LAB or COM
+        energy-loss: Data, eV
+        cross-products/:
+          '{i}': CrossProduct  # Optional photon production when source distributions are available
+
+      ionization/:
+        '@category': ionization
+        xs: CrossSection
+        reference-frame: LAB or COM
+        subshells/:
+          '{subshell}/':
+            binding-energy: float, eV
+            xs: Data, barn  # Tabulated on the subshell's own incident-energy grid
+            secondary-energy-distribution: Distribution, eV
+            cross-products/:
+              '{i}': CrossProduct  # Optional relaxation photons conditional on this subshell
+        cross-products/:
+          '{i}': CrossProduct  # Optional shell-averaged production, instead of subshell entries

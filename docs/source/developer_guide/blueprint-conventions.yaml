@@ -1,0 +1,171 @@
+# Shared documentation for the proposed MC/DC HDF5 blueprints.
+# This file describes the blueprints; it is not an HDF5 file layout.
+
+# ======================================================================================
+# Blueprint conventions
+# ======================================================================================
+
+conventions:
+  groups: Names ending in / are HDF5 groups.
+  attributes: Names beginning with @ describe HDF5 attributes.
+  fields: Values specify type, shape and units; descriptions use inline YAML comments.
+  shapes: Brackets denote array dimensions; other numerical fields are scalar.
+  units: Units describe stored quantities, not required HDF5 unit attributes.
+  reusable-types: CrossProduct, CrossSection, Data, Distribution and Interpolation are defined in this file.
+  placeholders: Names such as {i} and {j} are placeholders, not literal names or integer fields.
+  indices: Indexed entries use zero-based numeric string names
+
+# ======================================================================================
+# Transport categories
+# ======================================================================================
+
+transport categories:
+  elastic-scattering: Elastic scattering, with projectile-specific kinematics.
+  capture: Capture interaction, with secondary production described by cross-products.
+  inelastic-scattering: Non-fission same-species secondary production, with projectile-specific kinematics.
+  fission: Fission interaction, including eigenvalue and fission-tally handling.
+  excitation: Electron energy loss to atomic excitation.
+  bremsstrahlung: Electron energy loss through photon emission.
+  ionization: Electron-impact ionization, including knock-on electron production.
+
+# ======================================================================================
+# Cross-species products
+# ======================================================================================
+
+CrossProduct:
+  particle: string  # neutron, photon, electron, proton, etc.
+  yield: Data, particles per reaction  # Average count, nonnegative, may be below or above one
+  decay-rate: float, 1/s  # Positive finite rate for exponential delay, positive infinity for prompt
+  angle-energy-distribution: Distribution  # Joint outgoing energy and direction sampling
+
+# ======================================================================================
+# Cross sections
+# ======================================================================================
+
+CrossSection:
+  offset: integer  # Zero-based starting index in the shared grid
+  value: float [N - offset], barn
+  interpolation: Interpolation
+
+# ======================================================================================
+# Data
+# ======================================================================================
+
+Data:
+  constant:
+    '@type': constant
+    value: float
+
+  tabulated:
+    '@type': tabulated
+    grid: float [K]
+    value: float [K]
+    interpolation: Interpolation
+
+  polynomial:
+    '@type': polynomial
+    coefficient: float [L]  # Ascending powers of the input
+
+# ======================================================================================
+# Distributions
+# ======================================================================================
+
+Distribution:
+  independent-angle-energy:
+    '@type': independent-angle-energy
+    angular-cosine-distribution: Distribution, cosine
+    energy-distribution: Distribution, eV
+
+  elastic-angle-energy:
+    '@type': elastic-angle-energy
+    angular-cosine-distribution: Distribution, cosine
+
+  mixture:
+    '@type': mixture
+    components/:
+      '{i}/':
+        probability: Data, dimensionless  # Nonnegative, sums to one at each incident energy
+        distribution: Distribution  # All components sample the same physical quantities
+
+  isotropic:
+    '@type': isotropic
+
+  tabulated:
+    '@type': tabulated
+    value: float [K]  # Sample coordinates in the containing field's units
+    pdf: float [K]  # Inverse sample-coordinate units
+    interpolation: Interpolation
+
+  incident-energy-dependent:
+    '@type': incident-energy-dependent
+    energy: float [I], eV
+    interpolation: Interpolation  # Histogram or linear only
+    distributions/:
+      '{i}': Distribution  # One per incident-energy point
+
+  level-scattering:
+    '@type': level-scattering
+    C1: float, eV
+    C2: float, dimensionless
+
+  maxwellian:
+    '@type': maxwellian
+    temperature: Data, eV  # Spectral temperature, not kelvin
+    restriction-energy: float, eV
+
+  evaporation:
+    '@type': evaporation
+    temperature: Data, eV  # Spectral temperature, not kelvin
+    restriction-energy: float, eV
+
+  kalbach-mann:
+    '@type': kalbach-mann
+    energy: float [I], eV
+    tables/:
+      '{i}/':
+        outgoing-energy: Distribution, eV  # Tabulated only
+        precompound-factor: Data, dimensionless  # Input is outgoing energy in eV
+        angular-slope: Data, dimensionless  # Input is outgoing energy in eV
+
+  energy-angle-tabulated:
+    '@type': energy-angle-tabulated
+    energy: float [I], eV
+    tables/:
+      '{i}/':
+        outgoing-energy: Distribution, eV  # Tabulated only
+        cosine-distributions/:
+          '{j}': Distribution, cosine  # Tabulated only; one per outgoing-energy point
+
+  n-body:
+    '@type': n-body
+    value: float [K], eV
+    pdf: float [K], 1/eV
+    interpolation: Interpolation
+
+# ======================================================================================
+# Interpolation
+# ======================================================================================
+
+Interpolation:
+  laws: string [R]  # histogram, linear, semilog-x, semilog-y, or log
+  boundaries: integer [R]  # Zero-based upper point index of each region
+
+# ======================================================================================
+# Notes
+# ======================================================================================
+
+notes:
+  - This is a proposed format; current readers and transport routines do not yet implement it.
+  - Do not add overlapping total and partial reaction cross sections, such as total fission and its chance components.
+  - When inelastic multiplicity equals spectrum count, use one spectrum per secondary; otherwise select spectra using the probability bins.
+  - Cross-product yields describe average counts, not multiplicity fluctuations or correlations between emitted particles.
+  - Missing source products indicate unavailable data, not necessarily zero physical production.
+  - Ionization relaxation yields are either shell-averaged per reaction or conditional per selected shell; never count the same emission at both levels.
+  - Explicit relaxation emissions must reduce local excitation or binding-energy deposition; bremsstrahlung photons must also agree with primary energy loss.
+  - Electron small-angle elastic scattering currently uses an analytic model with a fixed cosine cutoff of 0.999999; its file representation remains undecided.
+  - Preserve the current ionization near-threshold sampling policy; generic incident-table selection is not equivalent.
+  - Correlated distribution interpolation remains unspecified; use histogram table selection for now.
+  - Stopping-power and radiation-length sources may be element- or material-specific; storing them in a nuclide file does not make them isotope-specific.
+  - Product-specific reference frames and explicit isotope identity for emitted nuclei remain to be defined.
+  - Verify the n-body representation and units against the generator before publishing the specification.
+  
