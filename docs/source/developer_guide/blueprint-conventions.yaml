@@ -10,7 +10,7 @@ conventions:
   attributes: Names beginning with @ describe HDF5 attributes.
   fields: Values specify type, shape and units; descriptions use inline YAML comments.
   shapes: Brackets denote array dimensions; other numerical fields are scalar.
-  units: Units describe stored quantities, not required HDF5 unit attributes.
+  units: Physical quantities carry a unit attribute; dimensionless quantities use 1, and polynomial coefficients carry one unit per coefficient.
   reusable-types: CrossProduct, CrossSection, Data, Distribution and Interpolation are defined in this file.
   placeholders: Names such as {i} and {j} are placeholders, not literal names or integer fields.
   indices: Indexed entries use zero-based numeric string names
