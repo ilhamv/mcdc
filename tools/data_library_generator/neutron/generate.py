@@ -1,6 +1,6 @@
 """Coordinate neutron ACE conversion into the MC/DC HDF5 data format.
 
-The command-line interface selects input tables from ``MCDC_ACELIB`` and writes
+The command-line interface selects input tables from ``MCDC_ACE_LIB`` and writes
 prepared data to ``MCDC_LIB``. Each table contributes neutron reactions to a
 nuclide-temperature file and identity/provenance records to the shared element
 and nuclide files.
@@ -160,7 +160,7 @@ def main():
 
     Notes
     -----
-    Options are read from ``sys.argv``. ``MCDC_ACELIB`` identifies the input
+    Options are read from ``sys.argv``. ``MCDC_ACE_LIB`` identifies the input
     directory and ``MCDC_LIB`` the output directory, which is created along
     with any missing parents. ``--ace-files`` selects filenames in the order
     supplied; without it, every regular file in the input directory is
@@ -180,15 +180,15 @@ def main():
         "--verbose", action="store_true", help="Report reaction details"
     )
     parser.add_argument(
-        "--ace-files", nargs="+", help="Select filenames from MCDC_ACELIB"
+        "--ace-files", nargs="+", help="Select filenames from MCDC_ACE_LIB"
     )
     args = parser.parse_args()
 
     # Validate configured directories and create the output location
-    for variable in ("MCDC_ACELIB", "MCDC_LIB"):
+    for variable in ("MCDC_ACE_LIB", "MCDC_LIB"):
         if not os.getenv(variable):
             parser.error(f"Environment variable {variable} is not set")
-    ace_dir = Path(os.environ["MCDC_ACELIB"])
+    ace_dir = Path(os.environ["MCDC_ACE_LIB"])
     output_dir = Path(os.environ["MCDC_LIB"])
     if not ace_dir.is_dir():
         parser.error(f"ACE directory does not exist: {ace_dir}")
