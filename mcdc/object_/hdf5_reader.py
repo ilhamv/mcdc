@@ -7,6 +7,8 @@ conversion at the file boundary. Source-library metadata stays in the files.
 
 import numpy as np
 
+from mcdc.constant import INTERPOLATION_LINEAR, REFERENCE_FRAME_COM, REFERENCE_FRAME_LAB
+
 from mcdc.object_.data import DataPolynomial, DataTable, encode_interpolation
 from mcdc.object_.distribution import (
     DistributionNone,
@@ -64,6 +66,56 @@ def read_interpolation(group):
     return laws, boundaries
 
 
+def numbered_groups(group, prefix=""):
+    """Read contiguous zero-based child indices in numeric order."""
+    names = [name for name in group if name.startswith(prefix)]
+    names.sort(key=lambda name: int(name[len(prefix) :]))
+    if names != [f"{prefix}{i}" for i in range(len(names))]:
+        raise ValueError(
+            f"{group.name}: expected contiguous zero-based {prefix!r} indices"
+        )
+    return [group[name] for name in names]
+
+
+# ======================================================================================
+# Shared-grid cross sections and reaction fields
+# ======================================================================================
+
+
+def read_xs_energy_grid(group):
+    """Read a projectile's eV grid, retaining repeated coordinates at jumps."""
+    grid = np.asarray(group["xs-energy-grid"][()], dtype=np.float64)
+    if (
+        grid.ndim != 1
+        or len(grid) < 2
+        or not np.all(np.isfinite(grid))
+        or np.any(np.diff(grid) < 0)
+        or grid[-1] <= grid[0]
+    ):
+        raise ValueError(
+            f"{group.name}: cross-section energies must be finite and nondecreasing with at least two distinct values"
+        )
+    return grid
+
+
+def read_reaction_properties(group):
+    """Read source MT, cross-section segment, offset, and reference frame.
+
+    Reaction category determines transport dispatch; ENDF-MT is optional source
+    metadata. Cross-product data must not be silently discarded by a reader.
+    """
+    if len(group.get("cross-products", ())):
+        raise ValueError(f"{group.name}: cross-product transport is unsupported")
+    MT = int(group.attrs.get("ENDF-MT", 0))
+    xs = np.asarray(group["xs/value"][()], dtype=np.float64)
+    offset = int(group["xs/offset"][()])
+    frame = text(group["reference-frame"][()])
+    frames = {"LAB": REFERENCE_FRAME_LAB, "COM": REFERENCE_FRAME_COM}
+    if frame not in frames:
+        raise ValueError(f"{group.name}: unknown reference frame {frame!r}")
+    return MT, xs, offset, frames[frame]
+
+
 def set_xs_interpolation(reaction, group):
     """Validate shared-grid cross sections and attach their interpolation metadata.
 
@@ -84,15 +136,17 @@ def set_xs_interpolation(reaction, group):
     return reaction
 
 
-def numbered_groups(group, prefix=""):
-    """Read contiguous zero-based child indices in numeric order."""
-    names = [name for name in group if name.startswith(prefix)]
-    names.sort(key=lambda name: int(name[len(prefix) :]))
-    if names != [f"{prefix}{i}" for i in range(len(names))]:
-        raise ValueError(
-            f"{group.name}: expected contiguous zero-based {prefix!r} indices"
-        )
-    return [group[name] for name in names]
+def xs_is_linear(reaction):
+    """Whether summing grid values before interpolation preserves this reaction.
+
+    A nonzero first value at a positive offset opens abruptly at its threshold.
+    Such a segment must be evaluated separately to avoid interpolating the
+    summed array into the interval below that threshold.
+    """
+    return bool(
+        np.all(reaction.xs_interpolations == INTERPOLATION_LINEAR)
+        and (reaction.xs_offset_ == 0 or reaction.xs[0] == 0.0)
+    )
 
 
 # ======================================================================================
@@ -120,7 +174,7 @@ def read_data(group):
 
 
 def read_distribution(group):
-    """Load a neutron angle, energy, or correlated energy-angle distribution.
+    """Load an angle, energy, or correlated energy-angle distribution.
 
     Nested tables retain their own density interpolation. Incident-energy
     interpolation is carried separately, so angular sampling can interpolate

@@ -220,6 +220,41 @@ def test_split_identity_and_nonlinear_xs(library, prepare_simulation):
     assert simulation["neutron_reactions"][0]["q_value"] == 2.0e6
 
 
+@pytest.mark.parametrize("law", ["linear", "histogram"])
+def test_shared_grid_jumps_and_endpoints(library, prepare_simulation, law):
+    """Neutron tables use the same right-hand jump convention as photon tables."""
+    grid = np.array([1.0, 10.0, 10.0, 100.0, 100.0])
+    values = np.array([1.0, 3.0, 7.0, 11.0, 13.0])
+    with h5py.File(library / "H2-293.6K.h5", "a") as file:
+        neutron = file["projectiles/neutron"]
+        del neutron["xs-energy-grid"]
+        neutron["xs-energy-grid"] = grid
+        basic_reaction(
+            neutron["reactions"],
+            "capture",
+            "capture",
+            values,
+            laws=(law,),
+            boundaries=(4,),
+        )
+    container, data = prepare_library(prepare_simulation)
+    simulation = container[0]
+    nuclide = simulation["nuclides"][0]
+    assert bool(nuclide["neutron_xs_is_linear"]) == (law == "linear")
+    for energy, expected in [
+        (0.1, 1.0),
+        (1.0, 1.0),
+        (np.nextafter(10.0, -np.inf), 3.0 if law == "linear" else 1.0),
+        (10.0, 7.0),
+        (np.nextafter(100.0, -np.inf), 11.0 if law == "linear" else 7.0),
+        (100.0, 13.0),
+        (200.0, 13.0),
+    ]:
+        assert native.total_micro_xs(
+            NEUTRON_REACTION_TOTAL, energy, nuclide, simulation, data
+        ) == pytest.approx(expected)
+
+
 def test_fission_production_is_reaction_local(library, prepare_simulation):
     with h5py.File(library / "H2-293.6K.h5", "a") as file:
         reactions = file["projectiles/neutron/reactions"]

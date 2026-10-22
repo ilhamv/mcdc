@@ -40,10 +40,13 @@ from mcdc.transport.distribution import (
     sample_isotropic_direction,
 )
 from mcdc.transport.physics.util import (
+    evaluate_neutron_xs_energy_grid,
+    evaluate_reaction_xs,
+    interpolate_xs,
     relativistic_energy_from_speed,
     scatter_direction,
 )
-from mcdc.transport.util import find_bin, interpolate, linear_interpolation
+from mcdc.transport.util import find_bin
 
 # ======================================================================================
 # Particle attributes
@@ -103,8 +106,7 @@ def total_micro_xs(reaction_type, E, nuclide, simulation, data):
         return total
     grid = mcdc_get.nuclide.neutron_xs_energy_grid_all(nuclide, data)
     E = min(max(E, grid[0]), grid[-1])
-    idx = min(max(find_bin(E, grid), 0), len(grid) - 2)
-    E0, E1 = grid[idx], grid[idx + 1]
+    idx, E0, E1 = evaluate_neutron_xs_energy_grid(E, nuclide, data)
     if reaction_type == NEUTRON_REACTION_TOTAL:
         xs0 = mcdc_get.nuclide.neutron_total_xs(idx, nuclide, data)
         xs1 = mcdc_get.nuclide.neutron_total_xs(idx + 1, nuclide, data)
@@ -124,33 +126,20 @@ def total_micro_xs(reaction_type, E, nuclide, simulation, data):
         # Should be unreachable
         xs0 = 0.0
         xs1 = 0.0
-    return linear_interpolation(E, E0, E1, xs0, xs1)
+    return interpolate_xs(E, E0, E1, xs0, xs1)
 
 
 @njit
 def reaction_micro_xs(E, reaction, nuclide, data):
     """Evaluate a reaction on the shared grid with its own interpolation regions."""
     grid = mcdc_get.nuclide.neutron_xs_energy_grid_all(nuclide, data)
-    E = max(E, grid[0])
-    offset = reaction["xs_offset_"]
-    if E < grid[offset]:
-        return 0.0
-    values = mcdc_get.neutron_reaction.xs_all(reaction, data)
-    if len(values) == 1 or E >= grid[-1]:
-        return values[-1]
-    idx = min(max(find_bin(E, grid), offset), len(grid) - 2)
-    local = idx - offset
-    laws = mcdc_get.neutron_reaction.xs_interpolations_all(reaction, data)
-    boundaries = mcdc_get.neutron_reaction.xs_interpolation_boundaries_all(
-        reaction, data
-    )
-    law = laws[-1]
-    for i in range(len(boundaries)):
-        if local + 1 < boundaries[i]:
-            law = laws[i]
-            break
-    return interpolate(
-        E, grid[idx], grid[idx + 1], values[local], values[local + 1], law
+    return evaluate_reaction_xs(
+        E,
+        grid,
+        reaction["xs_offset_"],
+        mcdc_get.neutron_reaction.xs_all(reaction, data),
+        mcdc_get.neutron_reaction.xs_interpolations_all(reaction, data),
+        mcdc_get.neutron_reaction.xs_interpolation_boundaries_all(reaction, data),
     )
 
 

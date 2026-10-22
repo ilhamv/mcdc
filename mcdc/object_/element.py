@@ -8,8 +8,12 @@ from numpy.typing import NDArray
 ####
 
 from mcdc.object_.base import MCDCObject
-from mcdc.constant import INTERPOLATION_LINEAR
-from mcdc.object_.hdf5_reader import check_format, text
+from mcdc.object_.hdf5_reader import (
+    check_format,
+    read_xs_energy_grid,
+    text,
+    xs_is_linear,
+)
 from mcdc.object_.electron_reaction import (
     ElectronReactionBremsstrahlung,
     ElectronReactionElasticScattering,
@@ -302,17 +306,17 @@ class Element(MCDCObject):
 
         # The reaction categories
         rx_names = [
-            "coherent_scattering",
-            "incoherent_scattering",
+            "coherent-scattering",
+            "incoherent-scattering",
             "photoelectric",
-            "pair_production",
+            "pair-production",
         ]
 
         # Group reaction names by their declared transport category.
         reaction_names = {name: [] for name in rx_names}
         for name, group in photon["reactions"].items():
             category = text(group.attrs["category"])
-            rx_name = category.replace("-", "_")
+            rx_name = category
             if rx_name not in reaction_names:
                 raise ValueError(
                     f"{group.name}: unknown photon reaction category {category!r}"
@@ -323,20 +327,8 @@ class Element(MCDCObject):
         # Reaction XS
         # ==========================================================================
 
-        self.photon_xs_energy_grid = np.asarray(
-            photon["xs-energy-grid"][()], dtype=float64
-        )
+        self.photon_xs_energy_grid = read_xs_energy_grid(photon)
         grid = self.photon_xs_energy_grid
-        if (
-            grid.ndim != 1
-            or len(grid) < 2
-            or not np.all(np.isfinite(grid))
-            or np.any(np.diff(grid) < 0)
-            or grid[-1] <= grid[0]
-        ):
-            raise ValueError(
-                f"{file.filename}: photon energies must be finite and nondecreasing with at least two distinct values"
-            )
         self.photon_coherent_xs = np.zeros_like(self.photon_xs_energy_grid)
         self.photon_incoherent_xs = np.zeros_like(self.photon_xs_energy_grid)
         self.photon_photoelectric_xs = np.zeros_like(self.photon_xs_energy_grid)
@@ -396,11 +388,7 @@ class Element(MCDCObject):
                 reaction = rx_class.from_h5_group(h5_group)
                 rx_container.append(reaction)
                 self.photon_reactions.append(reaction)
-                self.photon_xs_is_linear &= bool(
-                    np.all(reaction.xs_interpolations == INTERPOLATION_LINEAR)
-                )
-                if reaction.xs_offset_ > 0 and reaction.xs[0] != 0.0:
-                    self.photon_xs_is_linear = False
+                self.photon_xs_is_linear &= xs_is_linear(reaction)
 
         # ==========================================================================
         # Photoelectric element attributes

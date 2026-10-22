@@ -11,13 +11,18 @@ from mcdc.constant import (
     PHOTON_REACTION_INCOHERENT_SCATTERING,
     PHOTON_REACTION_PAIR_PRODUCTION,
     PHOTON_REACTION_PHOTOELECTRIC,
-    REFERENCE_FRAME_COM,
     REFERENCE_FRAME_LAB,
 )
 from mcdc.object_.base import MCDCPolymorphic
 from mcdc.object_.data import DataBase
-from mcdc.object_.hdf5_reader import read_data, set_xs_interpolation, text
+from mcdc.object_.hdf5_reader import (
+    read_data,
+    read_reaction_properties,
+    set_xs_interpolation,
+    text,
+)
 from mcdc.object_.secondary_product import SecondaryProduct
+from mcdc.object_.util import decode_reference_frame
 from mcdc.print_ import print_1d_array
 
 # ======================================================================================
@@ -77,15 +82,6 @@ def decode_type(type_):
         return "Photon photoelectric absorption"
     elif type_ == PHOTON_REACTION_PAIR_PRODUCTION:
         return "Photon pair production"
-
-
-def decode_reference_frame(type_):
-    """Return the display name for a packed reference-frame code."""
-
-    if type_ == REFERENCE_FRAME_LAB:
-        return "Laboratory"
-    elif type_ == REFERENCE_FRAME_COM:
-        return "Center of mass"
 
 
 # ======================================================================================
@@ -253,17 +249,11 @@ class PhotonReactionPairProduction(PhotonReactionBase):
 
 
 def set_basic_properties(h5_group):
-    """Read properties shared by all photon reactions from an HDF5 group."""
-
-    if len(h5_group.get("cross-products", ())):
-        raise ValueError(f"{h5_group.name}: cross-product transport is unsupported")
-    MT = int(h5_group.attrs.get("ENDF-MT", 0))
-    xs = np.asarray(h5_group["xs/value"][()], dtype=float64)
-    xs_offset = int(h5_group["xs/offset"][()])
-    frame = text(h5_group["reference-frame"][()])
-    if frame != "LAB":
+    """Read shared reaction fields and require the photon model's LAB frame."""
+    MT, xs, xs_offset, reference_frame = read_reaction_properties(h5_group)
+    if reference_frame != REFERENCE_FRAME_LAB:
         raise ValueError(f"{h5_group.name}: photon reactions require LAB data")
-    return MT, xs, xs_offset, REFERENCE_FRAME_LAB
+    return MT, xs, xs_offset, reference_frame
 
 
 def ordered_subshells(group):

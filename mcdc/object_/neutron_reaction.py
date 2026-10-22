@@ -17,7 +17,6 @@ from mcdc.constant import (
     NEUTRON_REACTION_FISSION,
     NEUTRON_REACTION_INELASTIC_SCATTERING,
     REFERENCE_FRAME_COM,
-    REFERENCE_FRAME_LAB,
     INTERPOLATION_LINEAR,
 )
 from mcdc.object_.secondary_product import SecondaryProduct
@@ -25,6 +24,7 @@ from mcdc.object_.base import MCDCPolymorphic
 from mcdc.object_.data import DataBase, DataPolynomial
 from mcdc.object_.hdf5_reader import (
     read_data,
+    read_reaction_properties,
     read_distribution,
     set_xs_interpolation,
     numbered_groups,
@@ -33,6 +33,7 @@ from mcdc.object_.hdf5_reader import (
 from mcdc.object_.distribution import (
     DistributionBase,
 )
+from mcdc.object_.util import decode_reference_frame
 from mcdc.print_ import print_1d_array
 
 # ======================================================================================
@@ -81,15 +82,6 @@ class NeutronReactionBase(MCDCPolymorphic):
         text += f"  - Reference frame: {decode_reference_frame(self.reference_frame)}\n"
         text += f"  - Q-value: {self.q_value}\n"
         return text
-
-
-def decode_reference_frame(type_):
-    """Return the display name for a packed reference-frame code."""
-
-    if type_ == REFERENCE_FRAME_LAB:
-        return "Laboratory"
-    elif type_ == REFERENCE_FRAME_COM:
-        return "Center of mass"
 
 
 # ======================================================================================
@@ -380,17 +372,8 @@ class NeutronReactionFission(NeutronReactionBase):
 
 
 def set_basic_properties(h5_group):
-    """Read reaction identity, shared-grid cross sections, frame, and eV Q value."""
-    if len(h5_group.get("cross-products", ())):
-        raise ValueError(f"{h5_group.name}: cross-product transport is unsupported")
-    MT = int(h5_group.attrs.get("ENDF-MT", 0))
-    xs = np.asarray(h5_group["xs/value"][()], dtype=float64)
-    xs_offset = int(h5_group["xs/offset"][()])
-    frame = text(h5_group["reference-frame"][()])
-    frames = {"LAB": REFERENCE_FRAME_LAB, "COM": REFERENCE_FRAME_COM}
-    if frame not in frames:
-        raise ValueError(f"{h5_group.name}: unknown reference frame {frame!r}")
-    return MT, xs, xs_offset, frames[frame], float(h5_group["Q-value"][()])
+    """Read shared reaction fields and the neutron reaction's eV Q value."""
+    return (*read_reaction_properties(h5_group), float(h5_group["Q-value"][()]))
 
 
 def set_angular_distribution(h5_group, simulation):

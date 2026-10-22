@@ -9,6 +9,8 @@ from numpy.typing import NDArray
 
 from mcdc.constant import (
     INF,
+    REFERENCE_FRAME_COM,
+    REFERENCE_FRAME_LAB,
     INTERPOLATION_HISTOGRAM,
     INTERPOLATION_LINEAR,
     INTERPOLATION_SEMILOGX,
@@ -40,6 +42,19 @@ def decode_particle_type(type_, default=None):
         if type_ == code:
             return name.capitalize()
     return default
+
+
+# ======================================================================================
+# Reaction reference frames
+# ======================================================================================
+
+
+def decode_reference_frame(type_):
+    """Return the display name for a packed reaction reference-frame code."""
+    if type_ == REFERENCE_FRAME_LAB:
+        return "Laboratory"
+    if type_ == REFERENCE_FRAME_COM:
+        return "Center of mass"
 
 
 # ======================================================================================

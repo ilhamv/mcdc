@@ -25,9 +25,10 @@ from mcdc.constant import (
 )
 from mcdc.transport.data import evaluate_data, evaluate_data_clamped
 from mcdc.transport.distribution import sample_isotropic_direction
-from mcdc.transport.util import linear_interpolation, interpolate, find_bin_with_rules
 from mcdc.transport.physics.util import (
     evaluate_photon_xs_energy_grid,
+    evaluate_reaction_xs,
+    interpolate_xs,
     scatter_direction,
 )
 
@@ -59,24 +60,6 @@ def particle_speed(particle_container):
 
 
 # ======================================================================================
-# Interpolation
-# ======================================================================================
-
-
-@njit
-def interpolate_xs(E, E0, E1, xs0, xs1):
-    """Interpolate a linear cross-section segment with an upper-side edge value.
-
-    The library repeats each absorption-edge energy so the discontinuity is
-    represented exactly, which leaves a zero-width bin at every edge. The upper
-    value is returned there, which is the value on the high-energy side.
-    """
-    if E1 <= E0:
-        return xs1
-    return linear_interpolation(E, E0, E1, xs0, xs1)
-
-
-# ======================================================================================
 # Material properties
 # ======================================================================================
 
@@ -101,12 +84,6 @@ def macro_xs(reaction_type, particle_container, simulation, data):
 
 @njit
 def total_micro_xs(reaction_type, E, element, simulation, data):
-    idx, E0, E1 = evaluate_photon_xs_energy_grid(E, element, data)
-    return _total_micro_xs(reaction_type, E, idx, E0, E1, element, simulation, data)
-
-
-@njit
-def _total_micro_xs(reaction_type, E, idx, E0, E1, element, simulation, data):
     """Use summed linear tables, or sum individually interpolated reactions."""
     grid = mcdc_get.element.photon_xs_energy_grid_all(element, data)
     E = min(max(E, grid[0]), grid[-1])
@@ -121,6 +98,7 @@ def _total_micro_xs(reaction_type, E, idx, E0, E1, element, simulation, data):
             ):
                 total += reaction_micro_xs(E, reaction, element, data)
         return total
+    idx, E0, E1 = evaluate_photon_xs_energy_grid(E, element, data)
     if reaction_type == PHOTON_REACTION_TOTAL:
         xs0 = mcdc_get.element.photon_total_xs(idx, element, data)
         xs1 = mcdc_get.element.photon_total_xs(idx + 1, element, data)
@@ -151,26 +129,13 @@ def _total_micro_xs(reaction_type, E, idx, E0, E1, element, simulation, data):
 def reaction_micro_xs(E, reaction, element, data):
     """Evaluate one shared-grid segment with right-hand values at absorption edges."""
     grid = mcdc_get.element.photon_xs_energy_grid_all(element, data)
-    E = max(E, grid[0])
-    offset = reaction["xs_offset_"]
-    if E < grid[offset]:
-        return 0.0
-    values = mcdc_get.photon_reaction.xs_all(reaction, data)
-    if len(values) == 1 or E >= grid[-1]:
-        return values[-1]
-    idx = max(find_bin_with_rules(E, grid, 0.0, False), offset)
-    local = idx - offset
-    laws = mcdc_get.photon_reaction.xs_interpolations_all(reaction, data)
-    boundaries = mcdc_get.photon_reaction.xs_interpolation_boundaries_all(
-        reaction, data
-    )
-    law = laws[-1]
-    for i in range(len(boundaries)):
-        if local + 1 < boundaries[i]:
-            law = laws[i]
-            break
-    return interpolate(
-        E, grid[idx], grid[idx + 1], values[local], values[local + 1], law
+    return evaluate_reaction_xs(
+        E,
+        grid,
+        reaction["xs_offset_"],
+        mcdc_get.photon_reaction.xs_all(reaction, data),
+        mcdc_get.photon_reaction.xs_interpolations_all(reaction, data),
+        mcdc_get.photon_reaction.xs_interpolation_boundaries_all(reaction, data),
     )
 
 
@@ -231,18 +196,12 @@ def collision(particle_container, interaction_data_container, program, data):
     xi = rng.lcg(particle_container) * SigmaT
     total = 0.0
     element = simulation["elements"][0]
-    idx = 0
-    E0 = 0.0
-    E1 = 0.0
     for i in range(material["N_element"]):
         element_ID = mcdc_get.material.element_IDs(i, material, data)
         element = simulation["elements"][element_ID]
 
         element_density = mcdc_get.material.element_densities(i, material, data)
-        idx, E0, E1 = evaluate_photon_xs_energy_grid(E, element, data)
-        sigmaT = _total_micro_xs(
-            PHOTON_REACTION_TOTAL, E, idx, E0, E1, element, simulation, data
-        )
+        sigmaT = total_micro_xs(PHOTON_REACTION_TOTAL, E, element, simulation, data)
 
         total += element_density * sigmaT
         if total > xi:
@@ -252,20 +211,18 @@ def collision(particle_container, interaction_data_container, program, data):
     # Sample and perform the reaction
     # ==================================================================================
 
-    sigma_coherent = _total_micro_xs(
-        PHOTON_REACTION_COHERENT_SCATTERING, E, idx, E0, E1, element, simulation, data
+    sigma_coherent = total_micro_xs(
+        PHOTON_REACTION_COHERENT_SCATTERING, E, element, simulation, data
     )
-    sigma_incoherent = _total_micro_xs(
-        PHOTON_REACTION_INCOHERENT_SCATTERING, E, idx, E0, E1, element, simulation, data
+    sigma_incoherent = total_micro_xs(
+        PHOTON_REACTION_INCOHERENT_SCATTERING, E, element, simulation, data
     )
-    sigma_photoelectric = _total_micro_xs(
-        PHOTON_REACTION_PHOTOELECTRIC, E, idx, E0, E1, element, simulation, data
+    sigma_photoelectric = total_micro_xs(
+        PHOTON_REACTION_PHOTOELECTRIC, E, element, simulation, data
     )
     sigma_total = (
         sigma_coherent + sigma_incoherent + sigma_photoelectric
-    ) + _total_micro_xs(
-        PHOTON_REACTION_PAIR_PRODUCTION, E, idx, E0, E1, element, simulation, data
-    )
+    ) + total_micro_xs(PHOTON_REACTION_PAIR_PRODUCTION, E, element, simulation, data)
 
     if sigma_total == 0.0:
         return

@@ -38,6 +38,7 @@ from mcdc.object_.distribution import (
     DistributionTabulatedEnergyAngle,
     DistributionNBody,
 )
+from mcdc.object_.util import decode_reference_frame
 from mcdc.print_ import print_1d_array, print_error
 
 # ======================================================================================
@@ -83,13 +84,6 @@ def decode_type(type_):
         return "Proton inelastic scattering"
     elif type_ == PROTON_REACTION_CAPTURE:
         return "Proton capture"
-
-
-def decode_reference_frame(type_):
-    if type_ == REFERENCE_FRAME_LAB:
-        return "Laboratory"
-    elif type_ == REFERENCE_FRAME_COM:
-        return "Center of mass"
 
 
 # ======================================================================================

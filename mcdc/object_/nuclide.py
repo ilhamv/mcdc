@@ -10,7 +10,12 @@ from numpy.typing import NDArray
 from mcdc.constant import INTERPOLATION_LINEAR
 from mcdc.object_.base import MCDCObject
 from mcdc.object_.data import DataBase, DataNone, DataTable
-from mcdc.object_.hdf5_reader import check_format, text
+from mcdc.object_.hdf5_reader import (
+    check_format,
+    read_xs_energy_grid,
+    text,
+    xs_is_linear,
+)
 from mcdc.object_.element import Element, get_or_create_element
 from mcdc.object_.util import element_symbol_from_nuclide_name
 from mcdc.object_.neutron_reaction import (
@@ -198,15 +203,7 @@ class Nuclide(MCDCObject):
         with h5py.File(path, "r") as file:
             check_format(file)
             neutron = file["projectiles/neutron"]
-            grid = np.asarray(neutron["xs-energy-grid"][()], dtype=float64)
-            if (
-                len(grid) < 2
-                or not np.all(np.isfinite(grid))
-                or np.any(np.diff(grid) <= 0)
-            ):
-                raise ValueError(
-                    f"{path}: neutron cross-section energies must be finite and strictly increasing"
-                )
+            grid = read_xs_energy_grid(neutron)
             self.neutron_xs_energy_grid = grid
             self.neutron_xs_is_linear = True
             self.neutron_reactions = []
@@ -230,11 +227,7 @@ class Nuclide(MCDCObject):
                 ] += reaction.xs
                 getattr(self, f"neutron_{rx_name}_reactions").append(reaction)
                 self.neutron_reactions.append(reaction)
-                self.neutron_xs_is_linear = self.neutron_xs_is_linear and bool(
-                    np.all(reaction.xs_interpolations == INTERPOLATION_LINEAR)
-                )
-                if reaction.xs_offset_ > 0 and reaction.xs[0] != 0.0:
-                    self.neutron_xs_is_linear = False
+                self.neutron_xs_is_linear &= xs_is_linear(reaction)
             self.neutron_total_xs = sum(
                 getattr(self, f"neutron_{name}_xs")
                 for name in ("elastic", "capture", "inelastic", "fission")

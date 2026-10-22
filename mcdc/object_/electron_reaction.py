@@ -23,6 +23,7 @@ from mcdc.object_.distribution import (
     DistributionMultiTable,
     DistributionTabulated,
 )
+from mcdc.object_.util import decode_reference_frame
 from mcdc.print_ import print_1d_array, print_error
 
 # ======================================================================================
@@ -74,15 +75,6 @@ class ElectronReactionBase(MCDCPolymorphic):
         text += f"  - XS {print_1d_array(self.xs)} barn\n"
         text += f"  - Reference frame: {decode_reference_frame(self.reference_frame)}\n"
         return text
-
-
-def decode_reference_frame(type_):
-    """Return the display name for a packed reference-frame code."""
-
-    if type_ == REFERENCE_FRAME_LAB:
-        return "Laboratory"
-    elif type_ == REFERENCE_FRAME_COM:
-        return "Center of mass"
 
 
 # ======================================================================================
