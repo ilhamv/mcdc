@@ -49,14 +49,14 @@ Source identifiers are metadata, not HDF5 group keys.
 For example, neutron MT 102 can be stored as ``radiative-capture`` with ``category = capture``.
 An unavailable source label is omitted.
 
-Nuclear reactions
+Neutron reactions
 -----------------
 
-These categories describe neutron and proton reactions and provide the same-species production structure for ion projectiles.
-Here, multiplicity counts outgoing particles of the incident species.
+These reactions reside in the nuclide-temperature file's ``/projectiles/neutron/reactions`` group.
+Multiplicity counts outgoing neutrons.
 Additional species are described by :ref:`cross-product` records.
 
-.. list-table:: Nuclear transport categories
+.. list-table:: Neutron transport categories
    :header-rows: 1
    :widths: 25 40 35
 
@@ -65,19 +65,21 @@ Additional species are described by :ref:`cross-product` records.
      - Meaning
    * - ``elastic-scattering``
      - ``angular-cosine-distribution``: Distribution
-     - Elastic same-species scattering with two-body kinematics.
+     - Elastic neutron scattering with two-body kinematics.
    * - ``capture``
      - None
-     - No outgoing particle of the incident species; other products may be specified.
+     - No outgoing neutron; other products may be specified.
    * - ``inelastic-scattering``
      - Fields in the inelastic table below
-     - Non-fission same-species secondary production.
+     - Non-fission neutron production.
    * - ``fission``
      - Fields in the fission table below
      - Neutron production separated into prompt and delayed components.
 
 Elastic recoil follows the reaction's two-body kinematics.
-For neutron elastic scattering, ``Q-value`` is zero.
+For elastic scattering, ``Q-value`` is zero.
+
+.. _mcdc-data-neutron-inelastic-fields:
 
 Inelastic scattering
 ^^^^^^^^^^^^^^^^^^^^
@@ -91,7 +93,7 @@ Inelastic scattering
      - Meaning
    * - ``multiplicity``
      - integer
-     - Number of same-species outgoing particles per reaction.
+     - Number of outgoing neutrons per reaction.
    * - ``angular-cosine-distribution``
      - Distribution, conditional
      - Required when the spectra supply energy only; omitted when outgoing angle is supplied jointly with energy.
@@ -153,6 +155,32 @@ The delayed-group distribution specifies energy only; it does not imply an unsta
 Fission production data belongs to the reaction, even if the source shares it among multiple fission channels.
 The optional string attribute ``fission-production-source`` can describe that provenance.
 Total-fission and chance-fission cross sections must not be included together as independently additive channels for the same physical contribution.
+
+Proton reactions
+----------------
+
+These reactions reside in the nuclide file's ``/projectiles/proton/reactions`` group.
+All include the basic fields, with ``cross-products`` available for species other than protons.
+
+.. list-table:: Proton transport categories
+   :header-rows: 1
+   :widths: 25 40 35
+
+   * - Category
+     - Category-specific fields
+     - Meaning
+   * - ``elastic-scattering``
+     - ``angular-cosine-distribution``: Distribution
+     - Elastic proton scattering with two-body kinematics.
+   * - ``capture``
+     - None
+     - No outgoing proton; other products may be specified.
+   * - ``inelastic-scattering``
+     - ``multiplicity``, conditional ``angular-cosine-distribution``, ``spectrum-probability-grid``, ``spectrum-probability``, and ``energy-spectrum-{i}``
+     - Non-fission proton production.
+
+Proton inelastic scattering uses the :ref:`same field layout and spectrum-selection rules as neutron inelastic scattering <mcdc-data-neutron-inelastic-fields>`, with ``multiplicity`` counting outgoing protons.
+Proton stopping power is a projectile-level field described in :doc:`file_layouts`.
 
 Electron reactions
 ------------------
