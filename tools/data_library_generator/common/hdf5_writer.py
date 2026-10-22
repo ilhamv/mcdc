@@ -3,7 +3,7 @@
 Source-format converters supply already interpreted values in the output
 units. This module handles datasets, source-library provenance, interpolation
 metadata, format identification, companion-file merging, and staged publication
-of temperature files. It does not read ACE records or convert physical units.
+of output files. It does not interpret source records or convert physical units.
 
 ``FORMAT`` and ``VERSION`` identify the output specification independently of
 the MC/DC software version and source-library release. Compatibility checks
@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 import os
+import shutil
 import tempfile
 
 import h5py
@@ -306,6 +307,59 @@ def check_format(file):
         raise ValueError(f"{file.filename}: incompatible format or format version")
 
 
+def prepared_file_exists(path, fields, sources):
+    """Check required paths and source provenance without modifying an output.
+
+    Missing files, paths, metadata, or valid UTC conversion times return False.
+    Nonempty expected strings and supplied source temperatures must match.
+    Additional libraries and unrelated projectile data are allowed. An existing
+    file with incompatible format identifiers raises ValueError. This checks
+    reuse readiness, not every reaction's numerical or structural validity.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return False
+    with h5py.File(path, "r") as file:
+        check_format(file)
+        complete = all(field in file for field in fields)
+        for library, source in sources.items():
+            group = file.get(f"source-libraries/{library}")
+            if group is None:
+                complete = False
+                continue
+            for name in (*SOURCE_FIELDS, "conversion-time"):
+                if (
+                    name not in group
+                    or group[name].shape != ()
+                    or h5py.check_string_dtype(group[name].dtype) is None
+                ):
+                    complete = False
+                    continue
+                value = group[name].asstr()[()]
+                if name == "conversion-time":
+                    try:
+                        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                        complete = (
+                            complete
+                            and value.endswith("Z")
+                            and timestamp.tzinfo is not None
+                        )
+                    except ValueError:
+                        complete = False
+                elif source.get(name) and value != source[name]:
+                    complete = False
+            for name, unit in SOURCE_UNITS.items():
+                if name in source:
+                    complete = (
+                        complete
+                        and name in group
+                        and group[name].shape == ()
+                        and np.isclose(group[name][()], source[name])
+                        and group[name].attrs.get("unit") == unit
+                    )
+    return complete
+
+
 def library_exists(directory, filename, nuclide, symbol, sources_by_file):
     """Check whether the three neutron output files can be reused as prepared.
 
@@ -368,53 +422,10 @@ def library_exists(directory, filename, nuclide, symbol, sources_by_file):
     )
     complete = True
     for filename, fields in required:
-        path = Path(directory) / filename
-        if not path.is_file():
-            complete = False
-            continue
-        with h5py.File(path, "r") as file:
-            # Check file identity and required paths before examining provenance
-            check_format(file)
-            complete = complete and all(field in file for field in fields)
-            for library, source in sources_by_file[filename].items():
-                group = file.get(f"source-libraries/{library}")
-                if group is None:
-                    complete = False
-                    continue
-                # Check scalar source metadata and the stored UTC conversion time
-                for name in (*SOURCE_FIELDS, "conversion-time"):
-                    if (
-                        name not in group
-                        or group[name].shape != ()
-                        or h5py.check_string_dtype(group[name].dtype) is None
-                    ):
-                        complete = False
-                        continue
-                    value = group[name].asstr()[()]
-                    if name == "conversion-time":
-                        try:
-                            timestamp = datetime.fromisoformat(
-                                value.replace("Z", "+00:00")
-                            )
-                            complete = (
-                                complete
-                                and value.endswith("Z")
-                                and timestamp.tzinfo is not None
-                            )
-                        except ValueError:
-                            complete = False
-                    elif source.get(name) and value != source[name]:
-                        complete = False
-                # Match supplied source temperatures and their unit attributes
-                for name, unit in SOURCE_UNITS.items():
-                    if name in source:
-                        complete = (
-                            complete
-                            and name in group
-                            and group[name].shape == ()
-                            and np.isclose(group[name][()], source[name])
-                            and group[name].attrs.get("unit") == unit
-                        )
+        reusable = prepared_file_exists(
+            Path(directory) / filename, fields, sources_by_file[filename]
+        )
+        complete = complete and reusable
     return complete
 
 
@@ -477,7 +488,7 @@ def write_companion(path, fields, sources):
 
 
 @contextmanager
-def atomic_file(path, sources):
+def atomic_file(path, sources, *, preserve=False):
     """Stage one HDF5 output and replace its destination on successful exit.
 
     Parameters
@@ -486,6 +497,11 @@ def atomic_file(path, sources):
         Final output path. The parent directory must already exist.
     sources : dict of str to dict
         Source-library records written by ``stamp`` before control is yielded.
+    preserve : bool, optional
+        Copy an existing compatible destination into the staged file before
+        updating it. This retains other projectile groups and source records.
+        The default creates a fresh output, as used for neutron temperature
+        files. A missing destination always starts a new file.
 
     Yields
     ------
@@ -519,8 +535,13 @@ def atomic_file(path, sources):
     ) as temp:
         staged = Path(temp.name)
     try:
-        # Yield a stamped output file for the caller to populate
-        with h5py.File(staged, "w") as file:
+        # Preserve shared-file contents before allowing a projectile update.
+        updating = preserve and path.is_file()
+        if updating:
+            shutil.copyfile(path, staged)
+        with h5py.File(staged, "r+" if updating else "w") as file:
+            if updating:
+                check_format(file)
             stamp(file, sources)
             yield file
         # Publish only after writing and closing the staged file successfully
