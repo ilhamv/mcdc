@@ -79,8 +79,6 @@ Additional species are described by :ref:`cross-product` records.
 Elastic recoil follows the reaction's two-body kinematics.
 For elastic scattering, ``Q-value`` is zero.
 
-.. _mcdc-data-neutron-inelastic-fields:
-
 Inelastic scattering
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -176,11 +174,41 @@ All include the basic fields, with ``cross-products`` available for species othe
      - None
      - No outgoing proton; other products may be specified.
    * - ``inelastic-scattering``
-     - ``multiplicity``, conditional ``angular-cosine-distribution``, ``spectrum-probability-grid``, ``spectrum-probability``, and ``energy-spectrum-{i}``
+     - Fields in the proton inelastic table below
      - Non-fission proton production.
 
-Proton inelastic scattering uses the :ref:`same field layout and spectrum-selection rules as neutron inelastic scattering <mcdc-data-neutron-inelastic-fields>`, with ``multiplicity`` counting outgoing protons.
 Proton stopping power is a projectile-level field described in :doc:`file_layouts`.
+
+Proton inelastic scattering
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table:: Category-specific fields
+   :header-rows: 1
+   :widths: 35 25 40
+
+   * - Field
+     - Type / shape / unit
+     - Meaning
+   * - ``multiplicity``
+     - integer
+     - Number of outgoing protons per reaction.
+   * - ``angular-cosine-distribution``
+     - Distribution, conditional
+     - Required for energy-only spectra; omitted when outgoing angle is supplied jointly with energy.
+   * - ``spectrum-probability-grid``
+     - float [B + 1], eV
+     - Strictly increasing incident-energy bin edges.
+   * - ``spectrum-probability``
+     - float [B, S]
+     - Probability of selecting each of S spectra in each of B bins.
+   * - ``energy-spectrum-{i}``
+     - Distribution
+     - Outgoing proton energy or joint energy-angle distribution for spectrum i.
+
+Multiplicity is positive.
+Spectrum probabilities are constant within each incident-energy bin, nonnegative, and sum to one across each row.
+Spectrum indices run from zero through S - 1 and match the probability matrix's second axis.
+For energy-only spectra, the angular distribution is sampled independently at the incident energy.
 
 Electron reactions
 ------------------
