@@ -12,3 +12,4 @@ The :doc:`format conventions <../../reference/data_format/conventions>` and :doc
    :maxdepth: 1
 
    neutron
+   photon

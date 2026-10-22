@@ -71,6 +71,7 @@ The subshell name is a record identifier; its ``designator`` supplies the shell 
      - Zero for a radiative transition, otherwise the subshell of the second vacancy.
 
 The transition arrays have equal length and matching indices.
+Terminal subshells have length-zero transition arrays.
 Probabilities are nonnegative and sum to one for a nonempty transition table.
 Nonzero shell references must resolve to subshell designators in the same element file.
 Relaxation data is shared by all interactions that create a vacancy.
@@ -155,7 +156,7 @@ The following paths are relative to ``/projectiles/{projectile}`` in the appropr
      - Meaning
    * - ``xs-energy-grid``
      - float [N], eV
-     - Shared, strictly increasing incident-energy grid for reaction cross sections.
+     - Shared, nondecreasing incident-energy grid for reaction cross sections, with at least two distinct energies.
    * - ``reactions/``
      - group
      - Named reactions, each described in :doc:`reactions`.
@@ -166,4 +167,6 @@ The following paths are relative to ``/projectiles/{projectile}`` in the appropr
 ``stopping-power`` is optional for analog proton transport and required when the data supplies condensed-history energy loss.
 Its tabulated grid, when used, is its own grid rather than ``xs-energy-grid``.
 Every reaction ``CrossSection`` references the grid in its containing projectile group.
+Repeated energies store the left and right limits of a discontinuity in that order.
+Interpolation applies between distinct energies, not across the zero-width interval.
 Reaction names identify individual channels, while category attributes identify their transport behavior.

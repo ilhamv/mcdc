@@ -52,7 +52,7 @@ Each representation below lists all of its datasets.
      - The same value for every input.
    * - ``tabulated``
      - ``grid``: float [K]; ``value``: float [K]; ``interpolation``: Interpolation
-     - Values on a strictly increasing input grid with K >= 2.
+     - Values on a nondecreasing input grid with K >= 2 and at least two distinct coordinates.
    * - ``polynomial``
      - ``coefficient``: float [L]
      - Coefficients in ascending powers of the input, with L >= 1.
@@ -70,6 +70,8 @@ For example, a dimensionless multiplicity polynomial of incident energy in eV ha
 Constant and polynomial Data do not have interpolation fields.
 Tabulated Data requires an explicit ``interpolation`` group.
 No generic extrapolation rule is implied outside a tabulated grid's range.
+Repeated coordinates store the left and right limits of a discontinuity in that order.
+Interpolation applies between distinct coordinates, not across the zero-width interval.
 
 Interpolation
 -------------
