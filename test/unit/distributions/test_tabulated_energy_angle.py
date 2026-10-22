@@ -28,17 +28,16 @@ def test_tabulated_energy_angle_sample(mock_rng_sequence, make_distribution_reco
     # The test data again use a constant bin PDF, so the sampled E' is the
     # Eq. (2.65) form rather than the more general Eq. (2.66) expression.
     E_min, E_max = 1.5, 4.5
-    E_hat = 2.0 + (xi2 - 0.0) / 0.2
+    E_hat = 2.0 + (xi2 - 0.0) / 0.25
     # E_min and E_max are the scaled lower and upper bounds from the two incident
     # energy tables, i.e. the Law 4 quantities from Eq. (2.67) through Eq. (2.69).
     expected_E = E_min + (E_hat - 2.0) / (6.0 - 2.0) * (E_max - E_min)
 
     # For the angular table, Law 61 says the linear-interpolation case chooses the
     # tabular angular distribution whose CDF point is closest to the sampled xi_2.
-    # Here xi_2 = 0.1 is tied between the first two CDF points in the selected energy
-    # bin, and the implementation keeps the lower index, so the first cosine table is
-    # used. Sampling that table gives mu = -1 + xi_3 / 0.5.
-    expected_mu = -1.0 + (xi3 - 0.0) / 0.5
+    # Here xi_2 is nearer the lower endpoint of the selected table's first bin.
+    # Its cosine support is [0, 1]; the other incident table uses [-1, 0].
+    expected_mu = xi3
 
     np.testing.assert_allclose(sampled_E, expected_E, rtol=0.0, atol=1e-12)
     np.testing.assert_allclose(sampled_mu, expected_mu, rtol=0.0, atol=1e-12)

@@ -20,8 +20,12 @@ from mcdc.constant import (
     INTERPOLATION_LINEAR,
     PI,
 )
-from mcdc.transport.data import evaluate_data
-from mcdc.transport.util import find_bin
+from mcdc.transport.data import (
+    evaluate_data,
+    evaluate_data_clamped,
+    get_table_interpolation_law,
+)
+from mcdc.transport.util import find_bin, integrate_segment, interpolate
 from mcdc.transport.linalg import make_direction_basis
 
 # ======================================================================================
@@ -103,7 +107,7 @@ def _sample_correlated_distribution(
 
     if distribution_type == DISTRIBUTION_KALBACH_MANN:
         kalbach_mann = simulation["kalbach_mann_distributions"][ID]
-        return sample_kalbach_mann(E, rng_state, kalbach_mann, data)
+        return sample_kalbach_mann(E, rng_state, kalbach_mann, data, simulation)
 
     elif distribution_type == DISTRIBUTION_TABULATED_ENERGY_ANGLE:
         table = simulation["tabulated_energy_angle_distributions"][ID]
@@ -173,7 +177,7 @@ def sample_tabulated_with_interval(table, rng_state, simulation, data):
     # find_bin returns -1 at the first CDF point; avoid reading before the table.
     if xi <= cdf[0]:
         return mcdc_get.table_data.x(0, pdf_table, data), 0
-    idx = find_bin(xi, cdf)
+    idx = min(max(find_bin(xi, cdf), 0), len(cdf) - 2)
 
     c0 = mcdc_get.table_data.aux(0, idx, pdf_table, data)
 
@@ -183,8 +187,7 @@ def sample_tabulated_with_interval(table, rng_state, simulation, data):
     v0 = mcdc_get.table_data.x(idx, pdf_table, data)
     v1 = mcdc_get.table_data.x(idx + 1, pdf_table, data)
 
-    # Tabulated pdfs are either histogram or linear.
-    interpolation = mcdc_get.table_data.interpolations(0, pdf_table, data)
+    interpolation = get_table_interpolation_law(idx, pdf_table, data)
 
     value = invert_tabulated_segment(xi, c0, v0, v1, p0, p1, interpolation)
     return value, idx
@@ -192,7 +195,7 @@ def sample_tabulated_with_interval(table, rng_state, simulation, data):
 
 @njit
 def invert_tabulated_segment(xi, c0, v0, v1, p0, p1, interpolation):
-    """Invert one histogram or linear PDF segment."""
+    """Invert a density segment, using bounded inversion for logarithmic laws."""
 
     s = xi - c0
 
@@ -205,7 +208,7 @@ def invert_tabulated_segment(xi, c0, v0, v1, p0, p1, interpolation):
         dv = v1 - v0
         dp = p1 - p0
 
-        if abs(dp) <= 1.0e-12 * max(abs(p0), abs(p1), 1.0):
+        if abs(dp) <= 1.0e-12 * max(abs(p0), abs(p1)):
             if p0 <= 0.0:
                 return v0
             return v0 + s / p0
@@ -216,11 +219,18 @@ def invert_tabulated_segment(xi, c0, v0, v1, p0, p1, interpolation):
         if disc < 0.0:
             disc = 0.0
 
-        return v0 + (math.sqrt(disc) - p0) / m
+        # Rationalized form avoids cancellation for almost constant densities.
+        return v0 + 2.0 * s / (math.sqrt(disc) + p0)
 
     else:
-        # Distribution tables should only use histogram or linear interpolation.
-        return v0
+        low, high = v0, v1
+        for _ in range(52):
+            middle = 0.5 * (low + high)
+            if integrate_segment(middle, v0, v1, p0, p1, interpolation) < s:
+                low = middle
+            else:
+                high = middle
+        return 0.5 * (low + high)
 
 
 @njit
@@ -276,7 +286,7 @@ def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
         scale = False
 
     # Above grid: use last table without unit-base scaling.
-    elif E > grid[-1]:
+    elif E >= grid[-1]:
         idx = len(grid) - 1
         scale = False
 
@@ -287,6 +297,21 @@ def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
         E0 = grid[idx]
         E1 = grid[idx + 1]
         f = (E - E0) / (E1 - E0)
+
+        boundaries = mcdc_get.multi_table_distribution.interpolation_boundaries_all(
+            multi_table, data
+        )
+        region = len(boundaries) - 1
+        for i in range(len(boundaries)):
+            if idx + 1 < boundaries[i]:
+                region = i
+                break
+        interpolation = mcdc_get.multi_table_distribution.interpolations(
+            region, multi_table, data
+        )
+        if interpolation == INTERPOLATION_HISTOGRAM:
+            f = 0.0
+            scale = False
 
         # Sample which table to choose
         if rng.lcg(rng_state) < f:
@@ -351,8 +376,10 @@ def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
 def sample_maxwellian(E, rng_state, maxwellian, simulation, data):
     # Get nuclear temperature
     table = simulation["data"][maxwellian["nuclear_temperature_ID"]]
-    nuclear_temperature = evaluate_data(E, table, simulation, data)
+    nuclear_temperature = evaluate_data_clamped(E, table, simulation, data)
     restriction_energy = maxwellian["restriction_energy"]
+    if nuclear_temperature <= 0.0 or E <= restriction_energy:
+        return 0.0
 
     # Rejection sampling
     while True:
@@ -381,8 +408,10 @@ def sample_level_scattering(E, level_scattering):
 def sample_evaporation(E, rng_state, evaporation, simulation, data):
     # Get nuclear temperature
     table = simulation["data"][evaporation["nuclear_temperature_ID"]]
-    nuclear_temperature = evaluate_data(E, table, simulation, data)
+    nuclear_temperature = evaluate_data_clamped(E, table, simulation, data)
     restriction_energy = evaporation["restriction_energy"]
+    if nuclear_temperature <= 0.0 or E <= restriction_energy:
+        return 0.0
 
     w = (E - restriction_energy) / nuclear_temperature
     g = 1.0 - math.exp(-w)
@@ -401,228 +430,161 @@ def sample_evaporation(E, rng_state, evaporation, simulation, data):
 
 
 @njit
-def sample_kalbach_mann(E, rng_state, kalbach_mann, data):
-    grid = mcdc_get.kalbach_mann_distribution.energy_all(kalbach_mann, data)
+def correlated_table_indices(E, grid, xi):
+    """Select bracketing incident tables with constant endpoint extrapolation."""
+    if len(grid) == 1 or E <= grid[0]:
+        return 0, 0, 0, 0.0
+    if E >= grid[-1]:
+        last = len(grid) - 1
+        return last, last, last, 0.0
+    low = max(0, find_bin(E, grid))
+    high = low + 1
+    fraction = (E - grid[low]) / (grid[high] - grid[low])
+    selected = high if xi < fraction else low
+    return low, high, selected, fraction
 
-    # Random numbers
-    xi1 = rng.lcg(rng_state)
-    xi2 = rng.lcg(rng_state)
-    xi3 = rng.lcg(rng_state)
-    xi4 = rng.lcg(rng_state)
 
-    # Interpolation factor
-    idx = find_bin(E, grid)
-    E0 = grid[idx]
-    E1 = grid[idx + 1]
-    f = (E - E0) / (E1 - E0)
-
-    # ==================================================================================
-    # Min and max energy values for scaling
-    # ==================================================================================
-
-    # First table
-    start = mcdc_get.kalbach_mann_distribution.offset(idx, kalbach_mann, data)
-    end = mcdc_get.kalbach_mann_distribution.offset(idx + 1, kalbach_mann, data)
-    E0_min = mcdc_get.kalbach_mann_distribution.energy_out(start, kalbach_mann, data)
-    E0_max = mcdc_get.kalbach_mann_distribution.energy_out(end - 1, kalbach_mann, data)
-
-    # Second table
-    start = end
-    if idx + 2 == len(grid):
-        end = kalbach_mann["energy_length"]
-    else:
-        end = mcdc_get.kalbach_mann_distribution.offset(idx + 2, kalbach_mann, data)
-    E1_min = mcdc_get.kalbach_mann_distribution.energy_out(start, kalbach_mann, data)
-    E1_max = mcdc_get.kalbach_mann_distribution.energy_out(end - 1, kalbach_mann, data)
-
-    # The combination of the two tables
-    E_min = E0_min + f * (E1_min - E0_min)
-    E_max = E0_max + f * (E1_max - E0_max)
-
-    # Sample which table to choose
-    if xi1 < f:
-        idx += 1
-
-    # Get the table range
-    start = mcdc_get.kalbach_mann_distribution.offset(idx, kalbach_mann, data)
-    if idx + 1 == len(grid):
-        end = kalbach_mann["energy_length"]
-    else:
-        end = mcdc_get.kalbach_mann_distribution.offset(idx + 1, kalbach_mann, data)
-    size = end - start
-
-    # The CDF
-    cdf = mcdc_get.kalbach_mann_distribution.cdf_chunk(start, size, kalbach_mann, data)
-
-    # Sample bin index
-    idx = find_bin(xi2, cdf)
-    c = cdf[idx]
-
-    # Get the other values
-    idx += start  # Apply the offset as these are not chunk-extracted like the cdf
-    p0 = mcdc_get.kalbach_mann_distribution.pdf(idx, kalbach_mann, data)
-    p1 = mcdc_get.kalbach_mann_distribution.pdf(idx + 1, kalbach_mann, data)
-    E0 = mcdc_get.kalbach_mann_distribution.energy_out(idx, kalbach_mann, data)
-    E1 = mcdc_get.kalbach_mann_distribution.energy_out(idx + 1, kalbach_mann, data)
-
-    # Calculate the outgoing energy (not-scaled)
-    m = (p1 - p0) / (E1 - E0)
-    if m == 0.0:
-        E_hat = E0 + (xi2 - c) / p0
-    else:
-        E_hat = E0 + 1.0 / m * (math.sqrt(p0**2 + 2 * m * (xi2 - c)) - p0)
-
-    # Scale against the bounds
-    E_low = mcdc_get.kalbach_mann_distribution.energy_out(start, kalbach_mann, data)
-    E_high = mcdc_get.kalbach_mann_distribution.energy_out(end - 1, kalbach_mann, data)
-    E_new = E_min + (E_hat - E_low) / (E_high - E_low) * (E_max - E_min)
-
-    # Precompound factor and angular slope
-    R0 = mcdc_get.kalbach_mann_distribution.precompound_factor(idx, kalbach_mann, data)
-    R1 = mcdc_get.kalbach_mann_distribution.precompound_factor(
-        idx + 1, kalbach_mann, data
+@njit
+def sample_flat_density(xi, values, pdf, cdf, laws):
+    """Sample a normalized flattened-table slice, returning the local interval."""
+    idx = min(max(find_bin(xi, cdf), 0), len(values) - 2)
+    law = INTERPOLATION_LINEAR if len(laws) == 0 else laws[idx]
+    value = invert_tabulated_segment(
+        xi, cdf[idx], values[idx], values[idx + 1], pdf[idx], pdf[idx + 1], law
     )
-    A0 = mcdc_get.kalbach_mann_distribution.angular_slope(idx, kalbach_mann, data)
-    A1 = mcdc_get.kalbach_mann_distribution.angular_slope(idx + 1, kalbach_mann, data)
-    #
-    mE = (E_hat - E0) / (E1 - E0)
-    R = R0 + mE * (R1 - R0)
-    A = A0 + mE * (A1 - A0)
+    return value, idx, law
 
-    # Calculate the angular coine
-    T = (2.0 * xi4 - 1.0) * math.sinh(A)
-    if xi3 > R:
-        mu = math.log(T + math.sqrt(T**2 + 1.0)) / A
+
+@njit
+def sample_kalbach_mann(E, rng_state, kalbach_mann, data, simulation=None):
+    """Sample unit-base outgoing energy and its conditional Kalbach-Mann angle."""
+    grid = mcdc_get.kalbach_mann_distribution.energy_all(kalbach_mann, data)
+    offsets = mcdc_get.kalbach_mann_distribution.offset_all(kalbach_mann, data)
+    values = mcdc_get.kalbach_mann_distribution.energy_out_all(kalbach_mann, data)
+    pdf = mcdc_get.kalbach_mann_distribution.pdf_all(kalbach_mann, data)
+    cdf = mcdc_get.kalbach_mann_distribution.cdf_all(kalbach_mann, data)
+    laws = mcdc_get.kalbach_mann_distribution.interpolations_all(kalbach_mann, data)
+    xi1, xi2 = rng.lcg(rng_state), rng.lcg(rng_state)
+    xi3, xi4 = rng.lcg(rng_state), rng.lcg(rng_state)
+    low, high, selected, fraction = correlated_table_indices(E, grid, xi1)
+    low_end = int(offsets[low + 1]) if low + 1 < len(grid) else len(values)
+    high_end = int(offsets[high + 1]) if high + 1 < len(grid) else len(values)
+    start = int(offsets[selected])
+    end = int(offsets[selected + 1]) if selected + 1 < len(grid) else len(values)
+    local_laws = laws[start:end] if len(laws) else laws
+    sampled, interval, law = sample_flat_density(
+        xi2, values[start:end], pdf[start:end], cdf[start:end], local_laws
+    )
+    minimum = values[int(offsets[low])] + fraction * (
+        values[int(offsets[high])] - values[int(offsets[low])]
+    )
+    maximum = values[low_end - 1] + fraction * (
+        values[high_end - 1] - values[low_end - 1]
+    )
+    E_new = minimum + (sampled - values[start]) / (values[end - 1] - values[start]) * (
+        maximum - minimum
+    )
+
+    # Parameter Data can be constant, polynomial, or independently tabulated.
+    if simulation is not None and kalbach_mann["N_precompound_table"] > 0:
+        ID = mcdc_get.kalbach_mann_distribution.precompound_table_IDs(
+            selected, kalbach_mann, data
+        )
+        R = evaluate_data_clamped(sampled, simulation["data"][ID], simulation, data)
+        ID = mcdc_get.kalbach_mann_distribution.angular_slope_table_IDs(
+            selected, kalbach_mann, data
+        )
+        A = evaluate_data_clamped(sampled, simulation["data"][ID], simulation, data)
     else:
-        mu = math.log(xi4 * math.exp(A) + (1.0 - xi4) * math.exp(-A)) / A
-
-    return E_new, mu
+        index = start + interval
+        R = interpolate(
+            sampled,
+            values[index],
+            values[index + 1],
+            mcdc_get.kalbach_mann_distribution.precompound_factor(
+                index, kalbach_mann, data
+            ),
+            mcdc_get.kalbach_mann_distribution.precompound_factor(
+                index + 1, kalbach_mann, data
+            ),
+            law,
+        )
+        A = interpolate(
+            sampled,
+            values[index],
+            values[index + 1],
+            mcdc_get.kalbach_mann_distribution.angular_slope(index, kalbach_mann, data),
+            mcdc_get.kalbach_mann_distribution.angular_slope(
+                index + 1, kalbach_mann, data
+            ),
+            law,
+        )
+    if abs(A) < 1.0e-12:
+        mu = 2.0 * xi4 - 1.0
+    elif xi3 > R:
+        mu = math.asinh((2.0 * xi4 - 1.0) * math.sinh(A)) / A
+    else:
+        mu = 1.0 + math.log(xi4 + (1.0 - xi4) * math.exp(-2.0 * A)) / A
+    return E_new, max(-1.0, min(1.0, mu))
 
 
 @njit
 def sample_tabulated_energy_angle(E, rng_state, table, data):
+    """Sample outgoing energy and the corresponding conditional cosine table."""
     grid = mcdc_get.tabulated_energy_angle_distribution.energy_all(table, data)
-
-    # Random numbers
-    xi1 = rng.lcg(rng_state)
-    xi2 = rng.lcg(rng_state)
-    xi3 = rng.lcg(rng_state)
-
-    # Interpolation factor
-    idx = find_bin(E, grid)
-    E0 = grid[idx]
-    E1 = grid[idx + 1]
-    f = (E - E0) / (E1 - E0)
-
-    # ==================================================================================
-    # Min and max energy values for scaling
-    # ==================================================================================
-
-    # First table
-    start = mcdc_get.tabulated_energy_angle_distribution.offset(idx, table, data)
-    end = mcdc_get.tabulated_energy_angle_distribution.offset(idx + 1, table, data)
-    E0_min = mcdc_get.tabulated_energy_angle_distribution.energy_out(start, table, data)
-    E0_max = mcdc_get.tabulated_energy_angle_distribution.energy_out(
-        end - 1, table, data
+    offsets = mcdc_get.tabulated_energy_angle_distribution.offset_all(table, data)
+    values = mcdc_get.tabulated_energy_angle_distribution.energy_out_all(table, data)
+    pdf = mcdc_get.tabulated_energy_angle_distribution.pdf_all(table, data)
+    cdf = mcdc_get.tabulated_energy_angle_distribution.cdf_all(table, data)
+    laws = mcdc_get.tabulated_energy_angle_distribution.interpolations_all(table, data)
+    xi1, xi2, xi3 = rng.lcg(rng_state), rng.lcg(rng_state), rng.lcg(rng_state)
+    low, high, selected, fraction = correlated_table_indices(E, grid, xi1)
+    low_end = int(offsets[low + 1]) if low + 1 < len(grid) else len(values)
+    high_end = int(offsets[high + 1]) if high + 1 < len(grid) else len(values)
+    start = int(offsets[selected])
+    end = int(offsets[selected + 1]) if selected + 1 < len(grid) else len(values)
+    local_laws = laws[start:end] if len(laws) else laws
+    sampled, interval, law = sample_flat_density(
+        xi2, values[start:end], pdf[start:end], cdf[start:end], local_laws
+    )
+    minimum = values[int(offsets[low])] + fraction * (
+        values[int(offsets[high])] - values[int(offsets[low])]
+    )
+    maximum = values[low_end - 1] + fraction * (
+        values[high_end - 1] - values[low_end - 1]
+    )
+    E_new = minimum + (sampled - values[start]) / (values[end - 1] - values[start]) * (
+        maximum - minimum
     )
 
-    # Second table
-    start = end
-    if idx + 2 == len(grid):
-        end = table["energy_length"]
-    else:
-        end = mcdc_get.tabulated_energy_angle_distribution.offset(idx + 2, table, data)
-    E1_min = mcdc_get.tabulated_energy_angle_distribution.energy_out(start, table, data)
-    E1_max = mcdc_get.tabulated_energy_angle_distribution.energy_out(
-        end - 1, table, data
+    # Histogram laws use the lower angular table. Linear laws use the nearest
+    # cumulative-probability endpoint, measured within the selected incident table.
+    index = start + interval
+    if law != INTERPOLATION_HISTOGRAM and xi2 - cdf[index] > cdf[index + 1] - xi2:
+        index += 1
+    cosine_offsets = mcdc_get.tabulated_energy_angle_distribution.cosine_offset__all(
+        table, data
     )
-
-    # The combination of the two tables
-    E_min = E0_min + f * (E1_min - E0_min)
-    E_max = E0_max + f * (E1_max - E0_max)
-
-    # Sample which table to choose
-    if xi1 < f:
-        idx += 1
-
-    # Get the table range
-    start = mcdc_get.tabulated_energy_angle_distribution.offset(idx, table, data)
-    if idx + 1 == len(grid):
-        end = table["energy_length"]
-    else:
-        end = mcdc_get.tabulated_energy_angle_distribution.offset(idx + 1, table, data)
-    size = end - start
-
-    # The CDF
-    cdf = mcdc_get.tabulated_energy_angle_distribution.cdf_chunk(
-        start, size, table, data
+    cosine = mcdc_get.tabulated_energy_angle_distribution.cosine_all(table, data)
+    cosine_pdf = mcdc_get.tabulated_energy_angle_distribution.cosine_pdf_all(
+        table, data
     )
-
-    # Sample bin index
-    idx = find_bin(xi2, cdf)
-    c = cdf[idx]
-
-    # Get the other values
-    idx_local = (
-        idx + start
-    )  # Apply the offset as these are not chunk-extracted like the cdf
-    p0 = mcdc_get.tabulated_energy_angle_distribution.pdf(idx_local, table, data)
-    p1 = mcdc_get.tabulated_energy_angle_distribution.pdf(idx_local + 1, table, data)
-    E0 = mcdc_get.tabulated_energy_angle_distribution.energy_out(idx_local, table, data)
-    E1 = mcdc_get.tabulated_energy_angle_distribution.energy_out(
-        idx_local + 1, table, data
+    cosine_cdf = mcdc_get.tabulated_energy_angle_distribution.cosine_cdf_all(
+        table, data
     )
-
-    # Calculate the outgoing energy (not-scaled)
-    m = (p1 - p0) / (E1 - E0)
-    if m == 0.0:
-        E_hat = E0 + (xi2 - c) / p0
-    else:
-        E_hat = E0 + 1.0 / m * (math.sqrt(p0**2 + 2 * m * (xi2 - c)) - p0)
-
-    # Scale against the bounds
-    E_low = mcdc_get.tabulated_energy_angle_distribution.energy_out(start, table, data)
-    E_high = mcdc_get.tabulated_energy_angle_distribution.energy_out(
-        end - 1, table, data
-    )
-    E_new = E_min + (E_hat - E_low) / (E_high - E_low) * (E_max - E_min)
-
-    # Determine angular table index
-    if xi2 - cdf[idx] > cdf[idx + 1] - xi2:
-        idx += 1
-
-    # Get the angular table range
-    start = mcdc_get.tabulated_energy_angle_distribution.cosine_offset_(
-        idx, table, data
-    )
-    if idx + 1 == len(grid):
-        end = table["cosine_length"]
-    else:
-        end = mcdc_get.tabulated_energy_angle_distribution.cosine_offset_(
-            idx + 1, table, data
+    cosine_laws = (
+        mcdc_get.tabulated_energy_angle_distribution.cosine_interpolations_all(
+            table, data
         )
-    size = end - start
-
-    # The CDF
-    cdf = mcdc_get.tabulated_energy_angle_distribution.cosine_cdf_chunk(
-        start, size, table, data
     )
-
-    # Sample bin index
-    idx = find_bin(xi3, cdf)
-    c = cdf[idx]
-
-    # Get the other values
-    idx += start  # Apply the offset as these are not chunk-extracted like the cdf
-    p0 = mcdc_get.tabulated_energy_angle_distribution.cosine_pdf(idx, table, data)
-    p1 = mcdc_get.tabulated_energy_angle_distribution.cosine_pdf(idx + 1, table, data)
-    mu0 = mcdc_get.tabulated_energy_angle_distribution.cosine(idx, table, data)
-    mu1 = mcdc_get.tabulated_energy_angle_distribution.cosine(idx + 1, table, data)
-
-    m = (p1 - p0) / (mu1 - mu0)
-    if m == 0.0:
-        mu = mu0 + (xi3 - c) / p0
-    else:
-        mu = mu0 + 1.0 / m * (math.sqrt(p0**2 + 2 * m * (xi3 - c)) - p0)
-
-    return E_new, mu
+    start = int(cosine_offsets[index])
+    end = (
+        int(cosine_offsets[index + 1])
+        if index + 1 < len(cosine_offsets)
+        else len(cosine)
+    )
+    local_laws = cosine_laws[start:end] if len(cosine_laws) else cosine_laws
+    mu, _, _ = sample_flat_density(
+        xi3, cosine[start:end], cosine_pdf[start:end], cosine_cdf[start:end], local_laws
+    )
+    return E_new, max(-1.0, min(1.0, mu))

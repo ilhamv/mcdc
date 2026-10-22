@@ -168,6 +168,12 @@ table_data = into_dtype([
     ('base_ID', int64),
 ])
 
+distribution = into_dtype([
+    ('ID', int64),
+    ('sub_type', int64),
+    ('sub_ID', int64),
+])
+
 evaporation_distribution = into_dtype([
     ('nuclear_temperature_ID', int64),
     ('restriction_energy', float64),
@@ -238,6 +244,17 @@ none_distribution = into_dtype([
     ('base_ID', int64),
 ])
 
+pmf_distribution = into_dtype([
+    ('value_offset', int64),
+    ('value_length', int64),
+    ('pmf_offset', int64),
+    ('pmf_length', int64),
+    ('cmf_offset', int64),
+    ('cmf_length', int64),
+    ('ID', int64),
+    ('base_ID', int64),
+])
+
 tabulated_distribution = into_dtype([
     ('pdf_ID', int64),
     ('ID', int64),
@@ -267,23 +284,6 @@ tabulated_energy_angle_distribution = into_dtype([
     ('interpolations_length', int64),
     ('cosine_interpolations_offset', int64),
     ('cosine_interpolations_length', int64),
-    ('ID', int64),
-    ('base_ID', int64),
-])
-
-distribution = into_dtype([
-    ('ID', int64),
-    ('sub_type', int64),
-    ('sub_ID', int64),
-])
-
-pmf_distribution = into_dtype([
-    ('value_offset', int64),
-    ('value_length', int64),
-    ('pmf_offset', int64),
-    ('pmf_length', int64),
-    ('cmf_offset', int64),
-    ('cmf_length', int64),
     ('ID', int64),
     ('base_ID', int64),
 ])
@@ -488,7 +488,7 @@ nuclide = into_dtype([
     ('fissionable', bool_),
     ('excitation_level', int64),
     ('radiation_length', float64),
-    ('neutron_xs_linear', bool_),
+    ('neutron_xs_is_linear', bool_),
     ('N_neutron_reaction', int64),
     ('neutron_reaction_IDs_offset', int64),
     ('neutron_xs_energy_grid_offset', int64),
@@ -963,6 +963,8 @@ def make_simulation_type(N: dict):
         ('N_polynomial_data', int64),
         ('table_data', table_data, (N['table_data'])),
         ('N_table_data', int64),
+        ('distributions', distribution, (N['distribution'])),
+        ('N_distribution', int64),
         ('evaporation_distributions', evaporation_distribution, (N['evaporation_distribution'])),
         ('N_evaporation_distribution', int64),
         ('kalbach_mann_distributions', kalbach_mann_distribution, (N['kalbach_mann_distribution'])),
@@ -977,14 +979,12 @@ def make_simulation_type(N: dict):
         ('N_nbody_distribution', int64),
         ('none_distributions', none_distribution, (N['none_distribution'])),
         ('N_none_distribution', int64),
+        ('pmf_distributions', pmf_distribution, (N['pmf_distribution'])),
+        ('N_pmf_distribution', int64),
         ('tabulated_distributions', tabulated_distribution, (N['tabulated_distribution'])),
         ('N_tabulated_distribution', int64),
         ('tabulated_energy_angle_distributions', tabulated_energy_angle_distribution, (N['tabulated_energy_angle_distribution'])),
         ('N_tabulated_energy_angle_distribution', int64),
-        ('distributions', distribution, (N['distribution'])),
-        ('N_distribution', int64),
-        ('pmf_distributions', pmf_distribution, (N['pmf_distribution'])),
-        ('N_pmf_distribution', int64),
         ('neutron_reactions', neutron_reaction, (N['neutron_reaction'])),
         ('N_neutron_reaction', int64),
         ('neutron_capture_reactions', neutron_capture_reaction, (N['neutron_capture_reaction'])),

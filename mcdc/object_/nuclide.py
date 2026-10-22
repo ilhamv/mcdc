@@ -64,7 +64,7 @@ class Nuclide(MCDCObject):
     excitation_level: int
     radiation_length: float
     #
-    neutron_xs_linear: bool
+    neutron_xs_is_linear: bool
     neutron_reactions: list[NeutronReactionBase]
     neutron_xs_energy_grid: NDArray[float64]
     neutron_total_xs: NDArray[float64]
@@ -120,7 +120,7 @@ class Nuclide(MCDCObject):
         self.proton_elastic_scattering_reactions = []
         self.proton_inelastic_scattering_reactions = []
         self.proton_capture_reactions = []
-        self.neutron_xs_linear = True
+        self.neutron_xs_is_linear = True
         # Stopping Power
         self.stopping_power = DataNone()
         self.radiation_length = 0.0
@@ -208,7 +208,7 @@ class Nuclide(MCDCObject):
                     f"{path}: neutron cross-section energies must be finite and strictly increasing"
                 )
             self.neutron_xs_energy_grid = grid
-            self.neutron_xs_linear = True
+            self.neutron_xs_is_linear = True
             self.neutron_reactions = []
             for xs_name, rx_name, _ in categories.values():
                 setattr(self, f"neutron_{xs_name}_xs", np.zeros_like(grid))
@@ -230,11 +230,11 @@ class Nuclide(MCDCObject):
                 ] += reaction.xs
                 getattr(self, f"neutron_{rx_name}_reactions").append(reaction)
                 self.neutron_reactions.append(reaction)
-                self.neutron_xs_linear = self.neutron_xs_linear and bool(
+                self.neutron_xs_is_linear = self.neutron_xs_is_linear and bool(
                     np.all(reaction.xs_interpolations == INTERPOLATION_LINEAR)
                 )
                 if reaction.xs_offset_ > 0 and reaction.xs[0] != 0.0:
-                    self.neutron_xs_linear = False
+                    self.neutron_xs_is_linear = False
             self.neutron_total_xs = sum(
                 getattr(self, f"neutron_{name}_xs")
                 for name in ("elastic", "capture", "inelastic", "fission")
