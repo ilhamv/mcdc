@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/2.0.0/),
 
 ### Added
 
+- Add photon transport with coherent and incoherent scattering, photoelectric absorption with atomic relaxation, and pair production, from [@DouglasHouser]
 - Adopt Coveralls for unit test coverage reporting, from [@nglaser3]
 - Add cone surfaces with a half-angle interface in degrees, specialized transport kernels for all cone orientations, and a specialized arbitrary-axis cylinder kernel, from [@ilhamv]
 - Add proton transport with nuclear reactions and secondary-particle production, continuous slowing down, energy-loss straggling, and multiple Coulomb scattering, from [@ethan-lame]
@@ -271,4 +272,5 @@ The pre-refactor implementation remains available in the `cement` branch as a re
 [@steps-re]: https://github.com/steps-re
 [@braxtoncuneo]: https://github.com/braxtoncuneo
 [@ethan-lame]: https://github.com/ethan-lame
+[@DouglasHouser]: https://github.com/DouglasHouser
 [@hansenkyle]: https://github.com/hansenkyle

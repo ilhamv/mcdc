@@ -114,7 +114,7 @@ class Source(MCDCObject):
         value with shape ``(2, N)`` defines a tabulated piecewise-linear
         distribution: the first row contains times and the second row contains
         their probability density. Defaults to ``0.0``.
-    particle_type : {"neutron", "electron", "proton"}, optional
+    particle_type : {"neutron", "electron", "proton", "photon"}, optional
         Type of emitted particle. Defaults to ``"neutron"``.
     probability : float, optional
         Relative source probability weight. Defaults to ``1.0``.

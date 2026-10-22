@@ -77,7 +77,7 @@ class Tally(MCDCPolymorphic):
         Azimuthal-angle bin boundaries in radians.
     polar_reference : sequence of 3 float, optional
         Reference direction for the angular filters.
-    particle_type : {"neutron", "electron", "proton"}, optional
+    particle_type : {"neutron", "electron", "proton", "photon"}, optional
         Particle type selected by the tally. If omitted, the tally accepts any
         transported particle type.
     energy : sequence of float or "all", optional

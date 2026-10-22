@@ -7,6 +7,7 @@ from mcdc.constant import (
     PARTICLE_NEUTRON,
     PARTICLE_ELECTRON,
     PARTICLE_PROTON,
+    PARTICLE_PHOTON,
 )
 from mcdc.object_.util import decode_particle_type, parse_particle_type
 from mcdc.transport.util import particle_name
@@ -18,6 +19,7 @@ from mcdc.transport.util import particle_name
         ("neutron", PARTICLE_NEUTRON),
         ("electron", PARTICLE_ELECTRON),
         ("proton", PARTICLE_PROTON),
+        ("photon", PARTICLE_PHOTON),
     ],
 )
 def test_particle_conversion_across_apis(name, code):
@@ -43,7 +45,7 @@ def test_wildcard_and_unknown_names():
     assert particle_name(-1) == "unknown particle type -1"
 
 
-@pytest.mark.parametrize("name", ["any", "photon", "Neutron", None])
+@pytest.mark.parametrize("name", ["any", "positron", "Neutron", None])
 def test_concrete_species_validation(name):
     with pytest.raises(ValueError):
         parse_particle_type(name)

@@ -9,6 +9,7 @@ from mcdc.object_.transport_model_data import NeutronMultigroupData
 from mcdc.object_.mesh import MeshBase
 from mcdc.object_.neutron_reaction import NeutronReactionBase
 from mcdc.object_.nuclide import Nuclide
+from mcdc.object_.photon_reaction import PhotonReactionBase
 from mcdc.object_.proton_reaction import ProtonReactionBase
 from mcdc.object_.secondary_product import SecondaryProduct
 from mcdc.object_.universe import Universe, Lattice
@@ -103,6 +104,8 @@ def register_object(object_: MCDCObject, simulation: Simulation) -> bool:
         object_list = simulation.neutron_reactions
     elif isinstance(object_, ProtonReactionBase):
         object_list = simulation.proton_reactions
+    elif isinstance(object_, PhotonReactionBase):
+        object_list = simulation.photon_reactions
     elif isinstance(object_, SecondaryProduct):
         object_list = simulation.secondary_products
     elif isinstance(object_, Region):

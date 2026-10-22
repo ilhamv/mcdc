@@ -391,6 +391,7 @@ class Technique(MCDCBase):
     neutron_weight_windows: WeightWindows
     electron_weight_windows: WeightWindows
     proton_weight_windows: WeightWindows
+    photon_weight_windows: WeightWindows
     population_control: PopulationControl
 
     def __init__(self) -> None:
