@@ -4,7 +4,7 @@ import numpy as np
 import mcdc
 import os
 
-os.environ["MCDC_LIB"] = "../mcdc-regression_test_data/neutron_data_check/"
+os.environ["MCDC_LIB"] = "../mcdc-regression_test_data/data_check/"
 
 # ======================================================================================
 # Representative nuclides and temperatures
