@@ -8,6 +8,7 @@ from numpy.typing import NDArray
 ####
 
 from mcdc.object_.base import MCDCObject
+from mcdc.object_.hdf5_reader import check_format
 from mcdc.object_.electron_reaction import (
     ElectronReactionBremsstrahlung,
     ElectronReactionElasticScattering,
@@ -22,6 +23,10 @@ from mcdc.object_.photon_reaction import (
     PhotonReactionPhotoelectric,
 )
 from mcdc.print_ import print_error
+
+# ======================================================================================
+# Element
+# ======================================================================================
 
 
 class Element(MCDCObject):
@@ -39,13 +44,14 @@ class Element(MCDCObject):
     simulation. Electron reaction cross sections and secondary distributions
     are loaded later by :meth:`set_electron_data`, and the photon ones by
     :meth:`set_photon_data`.
+    Isotopes and temperature-specific nuclides share one element object per
+    chemical symbol within a simulation.
     """
 
     # MC/DC framework metadata
     label = "element"
 
     name: str
-    atomic_weight_ratio: float
     atomic_number: int
     #
     electron_xs_energy_grid: NDArray[float64]
@@ -152,8 +158,12 @@ class Element(MCDCObject):
             print_error(f"Element {self.name} is not available in the library")
 
         with h5py.File(file_path, "r") as file:
-            self.atomic_weight_ratio = float(file["atomic_weight_ratio"][()])
-            self.atomic_number = int(file["atomic_number"][()])
+            if "format" in file.attrs:
+                check_format(file)
+                self.atomic_number = int(file["atomic-number"][()])
+            else:
+                # TODO: Remove this fallback once element libraries use mcdc-data.
+                self.atomic_number = int(file["atomic_number"][()])
 
         return super()._compile_into_simulation(simulation)
 
@@ -480,5 +490,22 @@ class Element(MCDCObject):
         text += f"  - ID: {self.ID}\n"
         text += f"  - Name: {self.name}\n"
         text += f"  - Atomic number: {self.atomic_number}\n"
-        text += f"  - Atomic weight ratio: {self.atomic_weight_ratio}\n"
         return text
+
+
+# ======================================================================================
+# Element lookup
+# ======================================================================================
+
+
+def get_or_create_element(element_name, simulation, candidate=None):
+    """Reuse the simulation's element object for a chemical symbol.
+
+    A candidate preserves an existing object's identity when the symbol has
+    not been registered yet. Compilation registers the returned object and
+    loads its basic properties independently of projectile reaction data.
+    """
+    for element in simulation.elements:
+        if element.name == element_name:
+            return element
+    return candidate if candidate is not None else Element(element_name)

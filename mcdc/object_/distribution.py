@@ -1,6 +1,7 @@
 import numpy as np
 
 from collections.abc import Sequence
+from numbers import Integral
 from numpy import float64, int64
 from numpy.typing import ArrayLike, NDArray
 
@@ -19,7 +20,7 @@ from mcdc.constant import (
     INTERPOLATION_LINEAR,
 )
 from mcdc.object_.base import MCDCPolymorphic
-from mcdc.object_.data import DataTable
+from mcdc.object_.data import DataBase, DataTable
 from mcdc.object_.util import (
     cdf_from_pdf,
     pdf_from_cdf,
@@ -115,8 +116,9 @@ class DistributionTabulated(DistributionBase):
     """One-dimensional continuous tabulated distribution.
 
     Exactly one of ``pdf`` or ``cdf`` must be supplied alongside ``value``.
-    PDF input is treated as piecewise linear; CDF input produces a histogram
-    density. The distribution is normalized internally.
+    PDF input uses the supplied interpolation regions, defaulting to linear.
+    CDF input produces a histogram density. The distribution is normalized
+    internally by integrating each segment under its declared law.
     """
 
     # MC/DC framework metadata
@@ -130,6 +132,8 @@ class DistributionTabulated(DistributionBase):
         value: ArrayLike,
         pdf: ArrayLike | None = None,
         cdf: ArrayLike | None = None,
+        interpolations=INTERPOLATION_LINEAR,
+        interpolation_boundaries=None,
     ) -> None:
         super().__init__()
 
@@ -151,11 +155,10 @@ class DistributionTabulated(DistributionBase):
             if len(pdf_array) != len(value_array):
                 print_error("value and pdf must have the same length.")
 
-            interpolation = INTERPOLATION_LINEAR
             pdf_normalized, cdf_normalized = cdf_from_pdf(
-                value_array,
-                pdf_array,
+                value_array, pdf_array, interpolations, interpolation_boundaries
             )
+            interpolation = interpolations
         else:
             cdf_array = np.asarray(cdf, dtype=float64)
 
@@ -174,6 +177,7 @@ class DistributionTabulated(DistributionBase):
             value_array,
             pdf_normalized,
             interpolation,
+            interpolation_boundaries,
             aux=cdf_normalized,
         )
 
@@ -194,8 +198,13 @@ class DistributionTabulated(DistributionBase):
 class DistributionMultiTable(DistributionBase):
     """Family of tabulated distributions indexed by another grid.
 
-    ``offset`` marks the first entry of each table in the flattened ``value``
-    and probability arrays. Exactly one of ``pdf`` or ``cdf`` is required.
+    ``tables`` supplies one DistributionTabulated object per grid point.
+
+    ``interpolations`` and ``interpolation_boundaries`` describe interpolation
+    between neighboring tables on ``grid``. Boundaries are exclusive upper
+    point indices, with the final boundary equal to ``len(grid)``. A scalar
+    law applies to the full grid; supported laws are histogram and linear.
+    Each child table separately owns its PDF interpolation rules.
     """
 
     # MC/DC framework metadata
@@ -203,88 +212,71 @@ class DistributionMultiTable(DistributionBase):
     sub_type = DISTRIBUTION_MULTITABLE
 
     grid: NDArray[float64]
+    interpolations: NDArray[int64]
+    interpolation_boundaries: NDArray[int64]
     tables: list[DistributionTabulated]
 
     def __init__(
         self,
         grid: ArrayLike,
-        offset: ArrayLike,
-        value: ArrayLike,
-        pdf: ArrayLike | None = None,
-        cdf: ArrayLike | None = None,
+        tables: list[DistributionTabulated],
+        *,
+        interpolations: int | Sequence[int] = INTERPOLATION_LINEAR,
+        interpolation_boundaries: Sequence[int] | None = None,
     ) -> None:
         super().__init__()
 
-        if (pdf is None) == (cdf is None):
-            print_error("Exactly one of pdf or cdf must be provided.")
-
         self.grid = np.asarray(grid, dtype=float64)
-        offset_array = np.asarray(offset, dtype=int64)
-        value_array = np.asarray(value, dtype=float64)
+        if self.grid.ndim != 1 or len(self.grid) == 0:
+            raise ValueError(
+                "The multi-table grid must be a nonempty one-dimensional array"
+            )
+        if not np.all(np.isfinite(self.grid)) or np.any(np.diff(self.grid) < 0):
+            raise ValueError("Grid values must be finite and nondecreasing")
 
-        if self.grid.ndim != 1:
-            print_error("grid must be one-dimensional.")
-        if offset_array.ndim != 1:
-            print_error("offset must be one-dimensional.")
-        if value_array.ndim != 1:
-            print_error("value must be one-dimensional.")
-
-        if len(self.grid) == 0:
-            print_error("grid must contain at least one value.")
-        if len(self.grid) != len(offset_array):
-            print_error("grid and offset must have the same length.")
-        if len(value_array) == 0:
-            print_error("value must contain at least one value.")
-        if offset_array[0] != 0:
-            print_error("offset[0] must be zero.")
-        if np.any(offset_array[1:] <= offset_array[:-1]):
-            print_error("offset must be strictly increasing.")
-        if offset_array[-1] >= len(value_array):
-            print_error("Every offset must refer to an element in value.")
-
-        pdf_array = None
-        cdf_array = None
-
-        if pdf is not None:
-            pdf_array = np.asarray(pdf, dtype=float64)
-
-            if pdf_array.ndim != 1:
-                print_error("pdf must be one-dimensional.")
-            if len(pdf_array) != len(value_array):
-                print_error("pdf and value must have the same length.")
-
-        if cdf is not None:
-            cdf_array = np.asarray(cdf, dtype=float64)
-
-            if cdf_array.ndim != 1:
-                print_error("cdf must be one-dimensional.")
-            if len(cdf_array) != len(value_array):
-                print_error("cdf and value must have the same length.")
-
-        stop = np.empty(len(offset_array), dtype=int64)
-        stop[:-1] = offset_array[1:]
-        stop[-1] = len(value_array)
-
-        self.tables = []
-
-        for start_i, stop_i in zip(offset_array, stop):
-            if stop_i <= start_i:
-                print_error("Each table must contain at least one value.")
-
-            if pdf_array is not None:
-                table = DistributionTabulated(
-                    value_array[start_i:stop_i],
-                    pdf=pdf_array[start_i:stop_i],
+        # Interpolation between neighboring grid tables.
+        if isinstance(interpolations, Integral):
+            self.interpolations = np.array([interpolations], dtype=int64)
+            self.interpolation_boundaries = np.array([len(self.grid)], dtype=int64)
+        else:
+            self.interpolations = np.asarray(interpolations, dtype=int64)
+            if interpolation_boundaries is None:
+                raise ValueError(
+                    "Interpolation boundaries are required for a sequence of laws"
                 )
-            elif cdf_array is not None:
-                table = DistributionTabulated(
-                    value_array[start_i:stop_i],
-                    cdf=cdf_array[start_i:stop_i],
-                )
-            else:
-                table = DistributionTabulated([])  # Unachievable
+            self.interpolation_boundaries = np.asarray(
+                interpolation_boundaries, dtype=int64
+            )
+        if (
+            self.interpolations.ndim != 1
+            or self.interpolation_boundaries.ndim != 1
+            or len(self.interpolations) == 0
+            or len(self.interpolations) != len(self.interpolation_boundaries)
+        ):
+            raise ValueError(
+                "Interpolation laws and boundaries must be nonempty vectors of equal length"
+            )
+        if (
+            self.interpolation_boundaries[0] < min(2, len(self.grid))
+            or self.interpolation_boundaries[-1] != len(self.grid)
+            or np.any(np.diff(self.interpolation_boundaries) <= 0)
+        ):
+            raise ValueError("Invalid grid interpolation boundaries")
+        if np.any(
+            ~np.isin(
+                self.interpolations, [INTERPOLATION_HISTOGRAM, INTERPOLATION_LINEAR]
+            )
+        ):
+            raise ValueError(
+                "Multi-table interpolation requires histogram or linear interpolation"
+            )
 
-            self.tables.append(table)
+        # PDF interpolation belongs to the individual child distributions.
+        if len(tables) != len(self.grid):
+            raise ValueError(
+                "Grid points and distribution tables must have equal lengths"
+            )
+        self.tables = tables
 
     def __repr__(self) -> str:
         text = super().__repr__()
@@ -339,45 +331,30 @@ class DistributionLevelScattering(DistributionBase):
 
 
 class DistributionEvaporation(DistributionBase):
-    """Evaporation spectrum with incident-energy-dependent temperature."""
+    """Evaporation spectrum with temperature supplied as an evaluable Data object."""
 
     # MC/DC framework metadata
     label = "evaporation_distribution"
     sub_type = DISTRIBUTION_EVAPORATION
 
-    nuclear_temperature: DataTable
+    nuclear_temperature: DataBase
     restriction_energy: float
 
     def __init__(
         self,
-        nuclear_temperature_energy_grid: NDArray[float64],
-        nuclear_temperature_value: NDArray[float64],
-        restriction_energy: float,
-        temperature_interpolations: int | Sequence[int],
-        interpolation_boundaries: Sequence[int] | None,
+        nuclear_temperature: DataBase,
+        restriction_energy: float = 0.0,
     ) -> None:
         super().__init__()
 
         self.restriction_energy = restriction_energy
-        self.nuclear_temperature = DataTable(
-            nuclear_temperature_energy_grid,
-            nuclear_temperature_value,
-            temperature_interpolations,
-            interpolation_boundaries,
-        )
+        self.nuclear_temperature = nuclear_temperature
 
     def __repr__(self) -> str:
         text = super().__repr__()
 
         text += f"  - Restriction energy: {self.restriction_energy} [eV]\n"
-        text += (
-            "  - Nuclear temperature "
-            f"{print_1d_array(self.nuclear_temperature.y)} [eV]\n"
-        )
-        text += (
-            "  - Nuclear temperature energy grid "
-            f"{print_1d_array(self.nuclear_temperature.x)} [eV]\n"
-        )
+        text += f"  - Nuclear temperature data: {self.nuclear_temperature}\n"
         return text
 
 
@@ -387,45 +364,30 @@ class DistributionEvaporation(DistributionBase):
 
 
 class DistributionMaxwellian(DistributionBase):
-    """Maxwellian spectrum with incident-energy-dependent temperature."""
+    """Maxwellian spectrum with temperature supplied as an evaluable Data object."""
 
     # MC/DC framework metadata
     label = "maxwellian_distribution"
     sub_type = DISTRIBUTION_MAXWELLIAN
 
-    nuclear_temperature: DataTable
+    nuclear_temperature: DataBase
     restriction_energy: float
 
     def __init__(
         self,
-        nuclear_temperature_energy_grid: NDArray[float64],
-        nuclear_temperature_value: NDArray[float64],
-        restriction_energy: float,
-        temperature_interpolations: int | Sequence[int],
-        interpolation_boundaries: Sequence[int] | None,
+        nuclear_temperature: DataBase,
+        restriction_energy: float = 0.0,
     ) -> None:
         super().__init__()
 
         self.restriction_energy = restriction_energy
-        self.nuclear_temperature = DataTable(
-            nuclear_temperature_energy_grid,
-            nuclear_temperature_value,
-            temperature_interpolations,
-            interpolation_boundaries,
-        )
+        self.nuclear_temperature = nuclear_temperature
 
     def __repr__(self) -> str:
         text = super().__repr__()
 
         text += f"  - Restriction energy: {self.restriction_energy} [eV]\n"
-        text += (
-            "  - Nuclear temperature "
-            f"{print_1d_array(self.nuclear_temperature.y)} [eV]\n"
-        )
-        text += (
-            "  - Nuclear temperature energy grid "
-            f"{print_1d_array(self.nuclear_temperature.x)} [eV]\n"
-        )
+        text += f"  - Nuclear temperature data: {self.nuclear_temperature}\n"
         return text
 
 
@@ -452,6 +414,9 @@ class DistributionKalbachMann(DistributionBase):
     cdf: NDArray[float64]
     precompound_factor: NDArray[float64]
     angular_slope: NDArray[float64]
+    interpolations: NDArray[int64]
+    precompound_tables: list[DataBase]
+    angular_slope_tables: list[DataBase]
 
     def __init__(
         self,
@@ -467,12 +432,17 @@ class DistributionKalbachMann(DistributionBase):
         self.energy = np.asarray(energy, dtype=float64)
         self.offset = np.asarray(offset, dtype=int64)
         self.energy_out = np.asarray(energy_out, dtype=float64)
-        pdf_array = np.asarray(pdf, dtype=float64)
+        pdf_array = np.array(pdf, dtype=float64, copy=True)
         self.precompound_factor = np.asarray(
             precompound_factor,
             dtype=float64,
         )
         self.angular_slope = np.asarray(angular_slope, dtype=float64)
+        self.interpolations = np.full(
+            len(self.energy_out), INTERPOLATION_LINEAR, dtype=int64
+        )
+        self.precompound_tables = []
+        self.angular_slope_tables = []
 
         self.pdf, self.cdf = multi_cdf_from_pdf(
             self.offset,
@@ -517,6 +487,8 @@ class DistributionTabulatedEnergyAngle(DistributionBase):
     cosine: NDArray[float64]
     cosine_pdf: NDArray[float64]
     cosine_cdf: NDArray[float64]
+    interpolations: NDArray[int64]
+    cosine_interpolations: NDArray[int64]
 
     def __init__(
         self,
@@ -533,10 +505,16 @@ class DistributionTabulatedEnergyAngle(DistributionBase):
         self.energy = np.asarray(energy, dtype=float64)
         self.offset = np.asarray(offset, dtype=int64)
         self.energy_out = np.asarray(energy_out, dtype=float64)
-        pdf_array = np.asarray(pdf, dtype=float64)
+        pdf_array = np.array(pdf, dtype=float64, copy=True)
         self.cosine_offset_ = np.asarray(cosine_offset, dtype=int64)
         self.cosine = np.asarray(cosine, dtype=float64)
         cosine_pdf_array = np.asarray(cosine_pdf, dtype=float64)
+        self.interpolations = np.full(
+            len(self.energy_out), INTERPOLATION_LINEAR, dtype=int64
+        )
+        self.cosine_interpolations = np.full(
+            len(self.cosine), INTERPOLATION_LINEAR, dtype=int64
+        )
 
         self.pdf, self.cdf = multi_cdf_from_pdf(
             self.offset,

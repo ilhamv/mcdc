@@ -269,3 +269,61 @@ def cosine_cdf_chunk(start, length, tabulated_energy_angle_distribution, data):
     start += tabulated_energy_angle_distribution["cosine_cdf_offset"]
     end = start + length
     return array_result(data[start:end])
+
+
+@njit
+def interpolations(index, tabulated_energy_angle_distribution, data):
+    offset = tabulated_energy_angle_distribution["interpolations_offset"]
+    return int64(data[offset + index])
+
+
+@array_return(nb.types.float64)
+def interpolations_all(tabulated_energy_angle_distribution, data):
+    start = tabulated_energy_angle_distribution["interpolations_offset"]
+    size = tabulated_energy_angle_distribution["interpolations_length"]
+    end = start + size
+    return array_result(data[start:end])
+
+
+@njit
+def interpolations_last(tabulated_energy_angle_distribution, data):
+    start = tabulated_energy_angle_distribution["interpolations_offset"]
+    size = tabulated_energy_angle_distribution["interpolations_length"]
+    end = start + size
+    return int64(data[end - 1])
+
+
+@array_return(nb.types.float64)
+def interpolations_chunk(start, length, tabulated_energy_angle_distribution, data):
+    start += tabulated_energy_angle_distribution["interpolations_offset"]
+    end = start + length
+    return array_result(data[start:end])
+
+
+@njit
+def cosine_interpolations(index, tabulated_energy_angle_distribution, data):
+    offset = tabulated_energy_angle_distribution["cosine_interpolations_offset"]
+    return int64(data[offset + index])
+
+
+@array_return(nb.types.float64)
+def cosine_interpolations_all(tabulated_energy_angle_distribution, data):
+    start = tabulated_energy_angle_distribution["cosine_interpolations_offset"]
+    size = tabulated_energy_angle_distribution["cosine_interpolations_length"]
+    end = start + size
+    return array_result(data[start:end])
+
+
+@njit
+def cosine_interpolations_last(tabulated_energy_angle_distribution, data):
+    start = tabulated_energy_angle_distribution["cosine_interpolations_offset"]
+    size = tabulated_energy_angle_distribution["cosine_interpolations_length"]
+    end = start + size
+    return int64(data[end - 1])
+
+
+@array_return(nb.types.float64)
+def cosine_interpolations_chunk(start, length, tabulated_energy_angle_distribution, data):
+    start += tabulated_energy_angle_distribution["cosine_interpolations_offset"]
+    end = start + length
+    return array_result(data[start:end])

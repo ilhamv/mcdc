@@ -16,9 +16,9 @@ import mcdc.mcdc_get.kalbach_mann_distribution as kalbach_mann_distribution
 
 import mcdc.mcdc_get.multi_table_distribution as multi_table_distribution
 
-import mcdc.mcdc_get.pmf_distribution as pmf_distribution
-
 import mcdc.mcdc_get.tabulated_energy_angle_distribution as tabulated_energy_angle_distribution
+
+import mcdc.mcdc_get.pmf_distribution as pmf_distribution
 
 import mcdc.mcdc_get.electron_reaction as electron_reaction
 
@@ -37,6 +37,8 @@ import mcdc.mcdc_get.nuclide as nuclide
 import mcdc.mcdc_get.structured_mesh as structured_mesh
 
 import mcdc.mcdc_get.neutron_reaction as neutron_reaction
+
+import mcdc.mcdc_get.neutron_fission_reaction as neutron_fission_reaction
 
 import mcdc.mcdc_get.neutron_inelastic_scattering_reaction as neutron_inelastic_scattering_reaction
 

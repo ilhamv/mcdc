@@ -262,3 +262,61 @@ def cosine_cdf_chunk(start, length, tabulated_energy_angle_distribution, data, v
     start += tabulated_energy_angle_distribution["cosine_cdf_offset"]
     end = start + length
     data[start:end] = value
+
+
+@njit
+def interpolations(index, tabulated_energy_angle_distribution, data, value):
+    offset = tabulated_energy_angle_distribution["interpolations_offset"]
+    data[offset + index] = value
+
+
+@njit
+def interpolations_all(tabulated_energy_angle_distribution, data, value):
+    start = tabulated_energy_angle_distribution["interpolations_offset"]
+    size = tabulated_energy_angle_distribution["interpolations_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def interpolations_last(tabulated_energy_angle_distribution, data, value):
+    start = tabulated_energy_angle_distribution["interpolations_offset"]
+    size = tabulated_energy_angle_distribution["interpolations_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def interpolations_chunk(start, length, tabulated_energy_angle_distribution, data, value):
+    start += tabulated_energy_angle_distribution["interpolations_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
+def cosine_interpolations(index, tabulated_energy_angle_distribution, data, value):
+    offset = tabulated_energy_angle_distribution["cosine_interpolations_offset"]
+    data[offset + index] = value
+
+
+@njit
+def cosine_interpolations_all(tabulated_energy_angle_distribution, data, value):
+    start = tabulated_energy_angle_distribution["cosine_interpolations_offset"]
+    size = tabulated_energy_angle_distribution["cosine_interpolations_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def cosine_interpolations_last(tabulated_energy_angle_distribution, data, value):
+    start = tabulated_energy_angle_distribution["cosine_interpolations_offset"]
+    size = tabulated_energy_angle_distribution["cosine_interpolations_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def cosine_interpolations_chunk(start, length, tabulated_energy_angle_distribution, data, value):
+    start += tabulated_energy_angle_distribution["cosine_interpolations_offset"]
+    end = start + length
+    data[start:end] = value

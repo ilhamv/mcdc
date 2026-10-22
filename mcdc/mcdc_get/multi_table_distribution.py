@@ -40,6 +40,64 @@ def grid_chunk(start, length, multi_table_distribution, data):
 
 
 @njit
+def interpolations(index, multi_table_distribution, data):
+    offset = multi_table_distribution["interpolations_offset"]
+    return int64(data[offset + index])
+
+
+@array_return(nb.types.float64)
+def interpolations_all(multi_table_distribution, data):
+    start = multi_table_distribution["interpolations_offset"]
+    size = multi_table_distribution["interpolations_length"]
+    end = start + size
+    return array_result(data[start:end])
+
+
+@njit
+def interpolations_last(multi_table_distribution, data):
+    start = multi_table_distribution["interpolations_offset"]
+    size = multi_table_distribution["interpolations_length"]
+    end = start + size
+    return int64(data[end - 1])
+
+
+@array_return(nb.types.float64)
+def interpolations_chunk(start, length, multi_table_distribution, data):
+    start += multi_table_distribution["interpolations_offset"]
+    end = start + length
+    return array_result(data[start:end])
+
+
+@njit
+def interpolation_boundaries(index, multi_table_distribution, data):
+    offset = multi_table_distribution["interpolation_boundaries_offset"]
+    return int64(data[offset + index])
+
+
+@array_return(nb.types.float64)
+def interpolation_boundaries_all(multi_table_distribution, data):
+    start = multi_table_distribution["interpolation_boundaries_offset"]
+    size = multi_table_distribution["interpolation_boundaries_length"]
+    end = start + size
+    return array_result(data[start:end])
+
+
+@njit
+def interpolation_boundaries_last(multi_table_distribution, data):
+    start = multi_table_distribution["interpolation_boundaries_offset"]
+    size = multi_table_distribution["interpolation_boundaries_length"]
+    end = start + size
+    return int64(data[end - 1])
+
+
+@array_return(nb.types.float64)
+def interpolation_boundaries_chunk(start, length, multi_table_distribution, data):
+    start += multi_table_distribution["interpolation_boundaries_offset"]
+    end = start + length
+    return array_result(data[start:end])
+
+
+@njit
 def table_IDs(index, multi_table_distribution, data):
     offset = multi_table_distribution["table_IDs_offset"]
     return int64(data[offset + index])

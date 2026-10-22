@@ -18,7 +18,11 @@ from mcdc.constant import (
 from mcdc.object_.secondary_product import SecondaryProduct
 from mcdc.object_.base import MCDCPolymorphic
 from mcdc.object_.data import DataBase, DataTable
-from mcdc.object_.distribution import DistributionBase, DistributionMultiTable
+from mcdc.object_.distribution import (
+    DistributionBase,
+    DistributionMultiTable,
+    DistributionTabulated,
+)
 from mcdc.print_ import print_1d_array, print_error
 
 # ======================================================================================
@@ -145,24 +149,24 @@ class ElectronReactionIonization(ElectronReactionBase):
                     f"Ionization subshell {name} has no product spectrum above "
                     "its binding energy."
                 )
-            if "CDF" in product:
-                subshell_product.append(
-                    DistributionMultiTable(
-                        product_grid,
-                        product["energy_offset"][()],
-                        read_energy(product["value"]),
-                        cdf=product["CDF"][()],
+            offset = product["energy_offset"][()]
+            values = read_energy(product["value"])
+            probabilities = (
+                product["CDF"][()] if "CDF" in product else product["PDF"][()]
+            )
+            tables = []
+            for i, start in enumerate(offset):
+                stop = offset[i + 1] if i + 1 < len(offset) else len(values)
+                if "CDF" in product:
+                    table = DistributionTabulated(
+                        values[start:stop], cdf=probabilities[start:stop]
                     )
-                )
-            else:
-                subshell_product.append(
-                    DistributionMultiTable(
-                        product_grid,
-                        product["energy_offset"][()],
-                        read_energy(product["value"]),
-                        product["PDF"][()],
+                else:
+                    table = DistributionTabulated(
+                        values[start:stop], pdf=probabilities[start:stop]
                     )
-                )
+                tables.append(table)
+            subshell_product.append(DistributionMultiTable(product_grid, tables))
 
         return cls(
             MT,
@@ -227,20 +231,24 @@ class ElectronReactionElasticScattering(ElectronReactionBase):
         )
 
         mu_group = large_angle["scattering_cosine"]
-        if "CDF" in mu_group:
-            mu = DistributionMultiTable(
-                read_energy(mu_group["energy_grid"]),
-                mu_group["energy_offset"][()],
-                mu_group["value"][()],
-                cdf=mu_group["CDF"][()],
-            )
-        else:
-            mu = DistributionMultiTable(
-                read_energy(mu_group["energy_grid"]),
-                mu_group["energy_offset"][()],
-                mu_group["value"][()],
-                mu_group["PDF"][()],
-            )
+        offset = mu_group["energy_offset"][()]
+        values = mu_group["value"][()]
+        probabilities = (
+            mu_group["CDF"][()] if "CDF" in mu_group else mu_group["PDF"][()]
+        )
+        tables = []
+        for i, start in enumerate(offset):
+            stop = offset[i + 1] if i + 1 < len(offset) else len(values)
+            if "CDF" in mu_group:
+                table = DistributionTabulated(
+                    values[start:stop], cdf=probabilities[start:stop]
+                )
+            else:
+                table = DistributionTabulated(
+                    values[start:stop], pdf=probabilities[start:stop]
+                )
+            tables.append(table)
+        mu = DistributionMultiTable(read_energy(mu_group["energy_grid"]), tables)
 
         return cls(MT, xs, xs_offset, reference_frame, xs_large, mu)
 

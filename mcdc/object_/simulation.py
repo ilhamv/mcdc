@@ -493,11 +493,7 @@ class Simulation(MCDCBase):
                 and len(material.nuclides) == 0
             ):
                 set_nuclides_from_elements(material, self)
-            if (
-                (settings.electron_transport.active or settings.photon_transport.active)
-                and material.nuclide_composition
-                and len(material.elements) == 0
-            ):
+            if material.nuclide_composition:
                 set_elements_from_nuclides(material, self)
 
         # Load the physics data required by the completed material model

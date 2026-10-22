@@ -33,6 +33,64 @@ def grid_chunk(start, length, multi_table_distribution, data, value):
 
 
 @njit
+def interpolations(index, multi_table_distribution, data, value):
+    offset = multi_table_distribution["interpolations_offset"]
+    data[offset + index] = value
+
+
+@njit
+def interpolations_all(multi_table_distribution, data, value):
+    start = multi_table_distribution["interpolations_offset"]
+    size = multi_table_distribution["interpolations_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def interpolations_last(multi_table_distribution, data, value):
+    start = multi_table_distribution["interpolations_offset"]
+    size = multi_table_distribution["interpolations_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def interpolations_chunk(start, length, multi_table_distribution, data, value):
+    start += multi_table_distribution["interpolations_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
+def interpolation_boundaries(index, multi_table_distribution, data, value):
+    offset = multi_table_distribution["interpolation_boundaries_offset"]
+    data[offset + index] = value
+
+
+@njit
+def interpolation_boundaries_all(multi_table_distribution, data, value):
+    start = multi_table_distribution["interpolation_boundaries_offset"]
+    size = multi_table_distribution["interpolation_boundaries_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def interpolation_boundaries_last(multi_table_distribution, data, value):
+    start = multi_table_distribution["interpolation_boundaries_offset"]
+    size = multi_table_distribution["interpolation_boundaries_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def interpolation_boundaries_chunk(start, length, multi_table_distribution, data, value):
+    start += multi_table_distribution["interpolation_boundaries_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
 def table_IDs(index, multi_table_distribution, data, value):
     offset = multi_table_distribution["table_IDs_offset"]
     data[offset + index] = value

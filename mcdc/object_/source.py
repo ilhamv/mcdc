@@ -566,13 +566,13 @@ class Source(MCDCObject):
                 if np.any(energy_pdf < 0.0):
                     print_error("energy_at_polar_cosine PDFs must be nonnegative.")
 
-                N_energy = correlated_energy.shape[2]
                 self.energy_at_polar_cosine_is_distribution = True
                 self.energy_at_polar_cosine_distribution = DistributionMultiTable(
                     grid=self.polar_cosine_pdf.pdf.x,
-                    offset=np.arange(N_mu) * N_energy,
-                    value=energy_grid.reshape(-1),
-                    pdf=energy_pdf.reshape(-1),
+                    tables=[
+                        DistributionTabulated(values, pdf=density)
+                        for values, density in zip(energy_grid, energy_pdf)
+                    ],
                 )
 
         # Time
