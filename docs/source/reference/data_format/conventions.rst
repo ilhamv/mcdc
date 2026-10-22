@@ -29,7 +29,7 @@ A shared major version alone does not guarantee that a reader supports every rep
 Source libraries
 ----------------
 
-Every file contains a ``/source-libraries`` group with one subgroup per contributing library, such as ``/source-libraries/Lib81``.
+Every file contains a ``/source-libraries`` group with one subgroup per contributing library at ``/source-libraries/{library}``.
 Subgroup names identify distinct library releases using identifiers from the source files or accompanying library metadata.
 Shared files retain the records of their contributing libraries.
 
