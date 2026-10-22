@@ -12,6 +12,7 @@ import mcdc.transport.rng as rng
 import mcdc.transport.util as util
 
 from mcdc.constant import (
+    DATA_TABLE,
     ELECTRON_MASS,
     LIGHT_SPEED,
     PHOTON_CUTOFF_ENERGY,
@@ -22,9 +23,9 @@ from mcdc.constant import (
     PHOTON_REACTION_TOTAL,
     PI,
 )
-from mcdc.transport.data import evaluate_data
+from mcdc.transport.data import evaluate_data, evaluate_data_clamped
 from mcdc.transport.distribution import sample_isotropic_direction
-from mcdc.transport.util import linear_interpolation
+from mcdc.transport.util import linear_interpolation, interpolate, find_bin_with_rules
 from mcdc.transport.physics.util import (
     evaluate_photon_xs_energy_grid,
     scatter_direction,
@@ -64,7 +65,7 @@ def particle_speed(particle_container):
 
 @njit
 def interpolate_xs(E, E0, E1, xs0, xs1):
-    """Linearly interpolate a cross section, as EPDL declares (INT=2).
+    """Interpolate a linear cross-section segment with an upper-side edge value.
 
     The library repeats each absorption-edge energy so the discontinuity is
     represented exactly, which leaves a zero-width bin at every edge. The upper
@@ -92,20 +93,34 @@ def macro_xs(reaction_type, particle_container, simulation, data):
         element = simulation["elements"][element_ID]
 
         element_density = mcdc_get.material.element_densities(i, material, data)
-        xs = total_micro_xs(reaction_type, E, element, data)
+        xs = total_micro_xs(reaction_type, E, element, simulation, data)
         total += element_density * xs
 
     return total
 
 
 @njit
-def total_micro_xs(reaction_type, E, element, data):
+def total_micro_xs(reaction_type, E, element, simulation, data):
     idx, E0, E1 = evaluate_photon_xs_energy_grid(E, element, data)
-    return _total_micro_xs(reaction_type, E, idx, E0, E1, element, data)
+    return _total_micro_xs(reaction_type, E, idx, E0, E1, element, simulation, data)
 
 
 @njit
-def _total_micro_xs(reaction_type, E, idx, E0, E1, element, data):
+def _total_micro_xs(reaction_type, E, idx, E0, E1, element, simulation, data):
+    """Use summed linear tables, or sum individually interpolated reactions."""
+    grid = mcdc_get.element.photon_xs_energy_grid_all(element, data)
+    E = min(max(E, grid[0]), grid[-1])
+    if not element["photon_xs_is_linear"]:
+        total = 0.0
+        for i in range(element["N_photon_reaction"]):
+            ID = mcdc_get.element.photon_reaction_IDs(i, element, data)
+            reaction = simulation["photon_reactions"][ID]
+            if (
+                reaction_type == PHOTON_REACTION_TOTAL
+                or reaction["sub_type"] == reaction_type
+            ):
+                total += reaction_micro_xs(E, reaction, element, data)
+        return total
     if reaction_type == PHOTON_REACTION_TOTAL:
         xs0 = mcdc_get.element.photon_total_xs(idx, element, data)
         xs1 = mcdc_get.element.photon_total_xs(idx + 1, element, data)
@@ -127,7 +142,59 @@ def _total_micro_xs(reaction_type, E, idx, E0, E1, element, data):
         # Should be unreachable
         return 0.0
 
+    if E >= grid[-1]:
+        return xs1
     return interpolate_xs(E, E0, E1, xs0, xs1)
+
+
+@njit
+def reaction_micro_xs(E, reaction, element, data):
+    """Evaluate one shared-grid segment with right-hand values at absorption edges."""
+    grid = mcdc_get.element.photon_xs_energy_grid_all(element, data)
+    E = max(E, grid[0])
+    offset = reaction["xs_offset_"]
+    if E < grid[offset]:
+        return 0.0
+    values = mcdc_get.photon_reaction.xs_all(reaction, data)
+    if len(values) == 1 or E >= grid[-1]:
+        return values[-1]
+    idx = max(find_bin_with_rules(E, grid, 0.0, False), offset)
+    local = idx - offset
+    laws = mcdc_get.photon_reaction.xs_interpolations_all(reaction, data)
+    boundaries = mcdc_get.photon_reaction.xs_interpolation_boundaries_all(
+        reaction, data
+    )
+    law = laws[-1]
+    for i in range(len(boundaries)):
+        if local + 1 < boundaries[i]:
+            law = laws[i]
+            break
+    return interpolate(
+        E, grid[idx], grid[idx + 1], values[local], values[local + 1], law
+    )
+
+
+@njit
+def sample_reaction(reaction_type, particle_container, element, simulation, data):
+    """Select a reaction within a category using its microscopic cross section."""
+    E = particle_container[0]["E"]
+    total = total_micro_xs(reaction_type, E, element, simulation, data)
+    xi = rng.lcg(particle_container) * total
+    cumulative = 0.0
+    selected = -1
+    for i in range(element["N_photon_reaction"]):
+        ID = mcdc_get.element.photon_reaction_IDs(i, element, data)
+        reaction = simulation["photon_reactions"][ID]
+        if reaction["sub_type"] != reaction_type:
+            continue
+        xs = reaction_micro_xs(E, reaction, element, data)
+        if xs <= 0.0:
+            continue
+        selected = ID
+        cumulative += xs
+        if cumulative > xi:
+            return ID
+    return selected
 
 
 # ======================================================================================
@@ -173,7 +240,9 @@ def collision(particle_container, interaction_data_container, program, data):
 
         element_density = mcdc_get.material.element_densities(i, material, data)
         idx, E0, E1 = evaluate_photon_xs_energy_grid(E, element, data)
-        sigmaT = _total_micro_xs(PHOTON_REACTION_TOTAL, E, idx, E0, E1, element, data)
+        sigmaT = _total_micro_xs(
+            PHOTON_REACTION_TOTAL, E, idx, E0, E1, element, simulation, data
+        )
 
         total += element_density * sigmaT
         if total > xi:
@@ -184,17 +253,19 @@ def collision(particle_container, interaction_data_container, program, data):
     # ==================================================================================
 
     sigma_coherent = _total_micro_xs(
-        PHOTON_REACTION_COHERENT_SCATTERING, E, idx, E0, E1, element, data
+        PHOTON_REACTION_COHERENT_SCATTERING, E, idx, E0, E1, element, simulation, data
     )
     sigma_incoherent = _total_micro_xs(
-        PHOTON_REACTION_INCOHERENT_SCATTERING, E, idx, E0, E1, element, data
+        PHOTON_REACTION_INCOHERENT_SCATTERING, E, idx, E0, E1, element, simulation, data
     )
     sigma_photoelectric = _total_micro_xs(
-        PHOTON_REACTION_PHOTOELECTRIC, E, idx, E0, E1, element, data
+        PHOTON_REACTION_PHOTOELECTRIC, E, idx, E0, E1, element, simulation, data
     )
     sigma_total = (
         sigma_coherent + sigma_incoherent + sigma_photoelectric
-    ) + _total_micro_xs(PHOTON_REACTION_PAIR_PRODUCTION, E, idx, E0, E1, element, data)
+    ) + _total_micro_xs(
+        PHOTON_REACTION_PAIR_PRODUCTION, E, idx, E0, E1, element, simulation, data
+    )
 
     if sigma_total == 0.0:
         return
@@ -274,11 +345,19 @@ def sample_coherent_scattering_cosine(particle_container, element, simulation, d
     if N_reaction == 0:
         return 1.0
 
-    # The ID list holds base-array indices; the base record carries sub_ID into
-    # the concrete subtype array.
     reaction_ID = int(
         mcdc_get.element.photon_coherent_scattering_reaction_IDs(0, element, data)
     )
+    if N_reaction > 1:
+        reaction_ID = sample_reaction(
+            PHOTON_REACTION_COHERENT_SCATTERING,
+            particle_container,
+            element,
+            simulation,
+            data,
+        )
+        if reaction_ID < 0:
+            return 1.0
     reaction_base = simulation["photon_reactions"][reaction_ID]
     reaction = simulation["photon_coherent_scattering_reactions"][
         reaction_base["sub_ID"]
@@ -330,6 +409,8 @@ def incoherent_scattering(
     interaction_data = interaction_data_container[0]
 
     E = particle["E"]
+    # TODO: Load and apply the incoherent scattering function to weight
+    # the Klein-Nishina angular distribution for bound atomic electrons.
     eps, mu = sample_klein_nishina(E, particle_container)
 
     # The scattered photon carries away E * eps; the recoil electron's energy
@@ -480,9 +561,8 @@ def photoelectric(
 def find_subshell_by_designator(designator, element, data):
     """Map an EADL subshell designator to this element's subshell index.
 
-    Returns ``-1`` when the element carries no relaxation table for that
-    subshell, which is how outer shells are written: their vacancy relaxes
-    through unmodeled channels and so deposits locally.
+    Returns ``-1`` when no matching relaxation shell is available. Terminal
+    shells have valid indices and zero transition counts.
     """
     N_subshell = int(element["photon_relaxation_subshell_designator_length"])
     for index in range(N_subshell):
@@ -504,8 +584,8 @@ def sample_photoelectric_subshell(particle_container, element, simulation, data)
     Returns
     -------
     int
-        Subshell index, or ``-1`` when no subshell is accessible at this energy
-        or the element carries no shell-resolved data.
+        Atomic-relaxation subshell index, or ``-1`` when no accessible shell
+        has a matching relaxation record.
     """
     particle = particle_container[0]
     E = particle["E"]
@@ -514,11 +594,15 @@ def sample_photoelectric_subshell(particle_container, element, simulation, data)
     if N_reaction == 0:
         return -1
 
-    # The ID list holds base-array indices; the base record carries sub_ID into
-    # the concrete subtype array.
     reaction_ID = int(
         mcdc_get.element.photon_photoelectric_reaction_IDs(0, element, data)
     )
+    if N_reaction > 1:
+        reaction_ID = sample_reaction(
+            PHOTON_REACTION_PHOTOELECTRIC, particle_container, element, simulation, data
+        )
+        if reaction_ID < 0:
+            return -1
     reaction_base = simulation["photon_reactions"][reaction_ID]
     reaction = simulation["photon_photoelectric_reactions"][reaction_base["sub_ID"]]
 
@@ -535,7 +619,7 @@ def sample_photoelectric_subshell(particle_container, element, simulation, data)
             mcdc_get.photon_photoelectric_reaction.subshell_x_IDs(i, reaction, data)
         )
         subshell_xs = simulation["data"][subshell_ID]
-        sigma_total += evaluate_data(E, subshell_xs, simulation, data)
+        sigma_total += subshell_micro_xs(E, subshell_xs, simulation, data)
 
     if sigma_total <= 0.0:
         return -1
@@ -549,14 +633,25 @@ def sample_photoelectric_subshell(particle_container, element, simulation, data)
             mcdc_get.photon_photoelectric_reaction.subshell_x_IDs(i, reaction, data)
         )
         subshell_xs = simulation["data"][subshell_ID]
-        total += evaluate_data(E, subshell_xs, simulation, data)
+        total += subshell_micro_xs(E, subshell_xs, simulation, data)
         if total > xi:
             subshell = i
             break
 
-    if subshell >= element["photon_relaxation_subshell_count_length"]:
-        return -1
-    return subshell
+    designator = mcdc_get.photon_photoelectric_reaction.subshell_designators(
+        subshell, reaction, data
+    )
+    return find_subshell_by_designator(designator, element, data)
+
+
+@njit
+def subshell_micro_xs(E, data_object, simulation, data):
+    """Return zero below a tabulated subshell threshold and clamp above its grid."""
+    if data_object["sub_type"] == DATA_TABLE:
+        table = simulation["table_data"][data_object["sub_ID"]]
+        if E < mcdc_get.table_data.x(0, table, data):
+            return 0.0
+    return evaluate_data_clamped(E, data_object, simulation, data)
 
 
 @njit
@@ -594,8 +689,7 @@ def relax_subshell(particle_container, subshell, E_available, element, data):
         mcdc_get.element.photon_relaxation_subshell_start(subshell, element, data)
     )
 
-    # The probabilities are absolute, so they need not sum to one: whatever is
-    # left over is an unmodeled channel, which deposits locally like Auger does.
+    # Sample the full branching distribution, including radiative and Auger channels.
     xi = rng.lcg(particle_container)
     total = 0.0
     for i in range(N_transition):
@@ -622,7 +716,7 @@ def relax_subshell(particle_container, subshell, E_available, element, data):
             )
             return E_line, origin
 
-    # Beyond the tabulated probability: unmodeled channel, deposit locally.
+    # No transition selected after rounding: deposit locally.
     return 0.0, -1
 
 

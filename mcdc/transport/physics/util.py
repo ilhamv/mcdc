@@ -7,7 +7,7 @@ from numba import njit
 import mcdc.mcdc_get as mcdc_get
 
 from mcdc.constant import LIGHT_SPEED
-from mcdc.transport.util import find_bin
+from mcdc.transport.util import find_bin, find_bin_with_rules
 from mcdc.transport.linalg import make_direction_basis
 
 
@@ -42,7 +42,11 @@ def evaluate_electron_xs_energy_grid(e, element, data):
 @njit
 def evaluate_photon_xs_energy_grid(e, element, data):
     energy_grid = mcdc_get.element.photon_xs_energy_grid_all(element, data)
-    idx = find_bin(e, energy_grid)
+    # Right-hand limits at repeated edge energies; constant endpoint extension.
+    e = min(max(e, energy_grid[0]), energy_grid[-1])
+    idx = find_bin_with_rules(e, energy_grid, 0.0, False)
+    if idx < 0:
+        idx = len(energy_grid) - 2
     e0 = energy_grid[idx]
     e1 = energy_grid[idx + 1]
     return idx, e0, e1

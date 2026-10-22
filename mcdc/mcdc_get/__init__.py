@@ -28,6 +28,8 @@ import mcdc.mcdc_get.secondary_product as secondary_product
 
 import mcdc.mcdc_get.element as element
 
+import mcdc.mcdc_get.photon_reaction as photon_reaction
+
 import mcdc.mcdc_get.photon_photoelectric_reaction as photon_photoelectric_reaction
 
 import mcdc.mcdc_get.neutron_multigroup_data as neutron_multigroup_data
@@ -43,8 +45,6 @@ import mcdc.mcdc_get.neutron_fission_reaction as neutron_fission_reaction
 import mcdc.mcdc_get.neutron_inelastic_scattering_reaction as neutron_inelastic_scattering_reaction
 
 import mcdc.mcdc_get.proton_inelastic_scattering_reaction as proton_inelastic_scattering_reaction
-
-import mcdc.mcdc_get.photon_reaction as photon_reaction
 
 import mcdc.mcdc_get.proton_reaction as proton_reaction
 

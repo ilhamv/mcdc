@@ -64,6 +64,26 @@ def read_interpolation(group):
     return laws, boundaries
 
 
+def set_xs_interpolation(reaction, group):
+    """Validate shared-grid cross sections and attach their interpolation metadata.
+
+    Neutron and photon reactions retain their own interpolation regions while
+    sharing the projectile energy grid. File boundaries are converted to the
+    exclusive point indices used by the transport objects.
+    """
+    laws, boundaries = read_interpolation(group["xs"])
+    if (
+        reaction.xs.ndim != 1
+        or reaction.xs_offset_ < 0
+        or np.any(reaction.xs < 0)
+        or not np.all(np.isfinite(reaction.xs))
+    ):
+        raise ValueError(f"{group.name}: cross sections must be finite and nonnegative")
+    reaction.xs_interpolations = laws
+    reaction.xs_interpolation_boundaries = boundaries
+    return reaction
+
+
 def numbered_groups(group, prefix=""):
     """Read contiguous zero-based child indices in numeric order."""
     names = [name for name in group if name.startswith(prefix)]

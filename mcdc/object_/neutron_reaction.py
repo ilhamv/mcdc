@@ -26,7 +26,7 @@ from mcdc.object_.data import DataBase, DataPolynomial
 from mcdc.object_.hdf5_reader import (
     read_data,
     read_distribution,
-    read_interpolation,
+    set_xs_interpolation,
     numbered_groups,
     text,
 )
@@ -391,20 +391,6 @@ def set_basic_properties(h5_group):
     if frame not in frames:
         raise ValueError(f"{h5_group.name}: unknown reference frame {frame!r}")
     return MT, xs, xs_offset, frames[frame], float(h5_group["Q-value"][()])
-
-
-def set_xs_interpolation(reaction, group):
-    """Attach interpolation metadata without duplicating the shared energy grid."""
-    laws, boundaries = read_interpolation(group["xs"])
-    if (
-        reaction.xs_offset_ < 0
-        or np.any(reaction.xs < 0)
-        or not np.all(np.isfinite(reaction.xs))
-    ):
-        raise ValueError(f"{group.name}: cross sections must be finite and nonnegative")
-    reaction.xs_interpolations = laws
-    reaction.xs_interpolation_boundaries = boundaries
-    return reaction
 
 
 def set_angular_distribution(h5_group, simulation):

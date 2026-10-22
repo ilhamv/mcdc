@@ -378,6 +378,9 @@ element = into_dtype([
     ('electron_bremsstrahlung_reaction_IDs_offset', int64),
     ('electron_ionization_subshell_binding_energy_offset', int64),
     ('electron_ionization_subshell_binding_energy_length', int64),
+    ('photon_xs_is_linear', bool_),
+    ('N_photon_reaction', int64),
+    ('photon_reaction_IDs_offset', int64),
     ('photon_xs_energy_grid_offset', int64),
     ('photon_xs_energy_grid_length', int64),
     ('photon_total_xs_offset', int64),
@@ -417,6 +420,23 @@ element = into_dtype([
     ('ID', int64),
 ])
 
+photon_reaction = into_dtype([
+    ('MT', int64),
+    ('xs_offset', int64),
+    ('xs_length', int64),
+    ('xs_offset_', int64),
+    ('xs_interpolations_offset', int64),
+    ('xs_interpolations_length', int64),
+    ('xs_interpolation_boundaries_offset', int64),
+    ('xs_interpolation_boundaries_length', int64),
+    ('reference_frame', int64),
+    ('N_secondary_product', int64),
+    ('secondary_product_IDs_offset', int64),
+    ('ID', int64),
+    ('sub_type', int64),
+    ('sub_ID', int64),
+])
+
 photon_coherent_scattering_reaction = into_dtype([
     ('form_factor_ID', int64),
     ('ID', int64),
@@ -429,6 +449,7 @@ photon_incoherent_scattering_reaction = into_dtype([
 ])
 
 photon_pair_production_reaction = into_dtype([
+    ('electron_field', bool_),
     ('ID', int64),
     ('base_ID', int64),
 ])
@@ -437,6 +458,8 @@ photon_photoelectric_reaction = into_dtype([
     ('N_subshell', int64),
     ('N_subshell_x', int64),
     ('subshell_x_IDs_offset', int64),
+    ('subshell_designators_offset', int64),
+    ('subshell_designators_length', int64),
     ('ID', int64),
     ('base_ID', int64),
 ])
@@ -665,19 +688,6 @@ interaction_data = into_dtype([
 particle_bank = into_dtype([
     ('size', int64, (1,)),
     ('tag', 'U32'),
-])
-
-photon_reaction = into_dtype([
-    ('MT', int64),
-    ('xs_offset', int64),
-    ('xs_length', int64),
-    ('xs_offset_', int64),
-    ('reference_frame', int64),
-    ('N_secondary_product', int64),
-    ('secondary_product_IDs_offset', int64),
-    ('ID', int64),
-    ('sub_type', int64),
-    ('sub_ID', int64),
 ])
 
 proton_reaction = into_dtype([
@@ -1013,6 +1023,8 @@ def make_simulation_type(N: dict):
         ('N_proton_inelastic_scattering_reaction', int64),
         ('proton_reactions', proton_reaction, (N['proton_reaction'])),
         ('N_proton_reaction', int64),
+        ('photon_reactions', photon_reaction, (N['photon_reaction'])),
+        ('N_photon_reaction', int64),
         ('photon_coherent_scattering_reactions', photon_coherent_scattering_reaction, (N['photon_coherent_scattering_reaction'])),
         ('N_photon_coherent_scattering_reaction', int64),
         ('photon_incoherent_scattering_reactions', photon_incoherent_scattering_reaction, (N['photon_incoherent_scattering_reaction'])),
@@ -1021,8 +1033,6 @@ def make_simulation_type(N: dict):
         ('N_photon_pair_production_reaction', int64),
         ('photon_photoelectric_reactions', photon_photoelectric_reaction, (N['photon_photoelectric_reaction'])),
         ('N_photon_photoelectric_reaction', int64),
-        ('photon_reactions', photon_reaction, (N['photon_reaction'])),
-        ('N_photon_reaction', int64),
         ('nuclides', nuclide, (N['nuclide'])),
         ('N_nuclide', int64),
         ('elements', element, (N['element'])),
