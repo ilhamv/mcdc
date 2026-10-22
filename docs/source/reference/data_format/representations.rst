@@ -145,7 +145,7 @@ Tabulated density
      - Meaning
    * - ``value``
      - float [K]
-     - Strictly increasing sampled coordinates, K >= 2.
+     - Nondecreasing sampled coordinates with positive support width, K >= 2.
    * - ``pdf``
      - float [K]
      - Nonnegative probability density at those coordinates.
@@ -158,6 +158,7 @@ Both omit ``unit`` for a dimensionless cosine distribution.
 Cosines lie between -1 and 1.
 The density integrates to one over its tabulated support, within the precision of the source data and the specified interpolation law.
 The terminal density of a histogram does not define a further interval.
+Repeated coordinates describe a jump in density; their zero-width interval carries no probability mass.
 The CDF is obtained by integrating the PDF using those laws.
 
 Isotropic and composed distributions
@@ -199,7 +200,7 @@ Incident-energy dependence
      - Meaning
    * - ``energy``
      - float [I], eV
-     - Strictly increasing incident energies, I >= 2.
+     - Nondecreasing incident energies, I >= 2.
    * - ``interpolation``
      - Interpolation
      - Incident-energy dependence; histogram or linear only.
@@ -208,6 +209,7 @@ Incident-energy dependence
      - One distribution for each incident-energy point.
 
 All child distributions describe the same sampled quantity.
+Repeated incident energies describe the distributions on either side of a discontinuity.
 Histogram interpolation uses the lower incident-energy distribution within an interval.
 Linear interpolation uses the neighboring distributions with weights 1 - t and t.
 For outgoing-energy tables with different supports, use unit-base interpolation: linearly interpolate the lower and upper support limits, and map the sampled energy from the selected table's support into that interpolated support.
