@@ -11,7 +11,7 @@ distribution/:
   pdf: float [K], 1/eV
   interpolation/:
     laws: string [R]
-    boundaries: integer [R]  # Inclusive upper-point indices
+    boundaries: integer [R]  # Exclusive upper-point indices
 
 # ======================================================================================
 # Distributions indexed by another grid

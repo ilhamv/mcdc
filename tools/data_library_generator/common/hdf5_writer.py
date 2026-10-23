@@ -186,21 +186,21 @@ def interpolation(group, count, laws=None, boundaries=None):
         One name from ``INTERPOLATION_LAWS`` per region. The default is one
         ``linear`` region.
     boundaries : array_like of int, optional
-        Zero-based upper-point index of each region. The default is a single
-        endpoint, ``count - 1``. The first region starts at point zero;
-        subsequent regions start at the previous region's upper point.
+        Exclusive upper-point index of each region. The default is a single
+        endpoint, ``count``. The first region starts at point zero;
+        subsequent regions start at the preceding boundary minus one.
 
     Raises
     ------
     ValueError
         There are fewer than two points; boundaries are empty, noninteger,
-        or not a one-dimensional strictly increasing sequence beginning
-        above zero and ending at ``count - 1``; counts of laws and boundaries
+        or not a one-dimensional strictly increasing sequence starting at
+        two or greater and ending at ``count``; counts of laws and boundaries
         differ; or a law name is unsupported.
 
     Notes
     -----
-    For six points, boundaries ``[2, 5]`` describe intervals 0--1 and 1--2
+    For six points, boundaries ``[3, 6]`` describe intervals 0--1 and 1--2
     in the first region, followed by 2--3, 3--4, and 4--5 in the second.
     Indices are local to the described table, including a cross-section
     tail stored with a nonzero shared-grid offset.
@@ -219,21 +219,22 @@ def interpolation(group, count, laws=None, boundaries=None):
 def _interpolation_arrays(count, laws=None, boundaries=None):
     """Validate local interpolation regions and return their storage arrays.
 
-    Boundaries are inclusive, zero-based upper-point indices within one
-    table. This validation is shared by standalone and packed tables so
-    packing does not change the interpretation of interpolation regions.
+    Boundaries are exclusive upper-point indices within one table, ending
+    at the table's point count. This validation is shared by standalone and
+    packed tables so packing does not change interpolation-region semantics.
     """
     if count < 2:
         raise ValueError("Tabulated data requires at least two points")
     laws = np.asarray(["linear"] if laws is None else laws, dtype="S16")
-    boundaries = np.asarray([count - 1] if boundaries is None else boundaries)
+    boundaries = np.asarray([count] if boundaries is None else boundaries)
     if (
         laws.ndim != 1
         or boundaries.ndim != 1
         or len(boundaries) == 0
         or not np.issubdtype(boundaries.dtype, np.integer)
         or len(laws) != len(boundaries)
-        or boundaries[-1] != count - 1
+        or boundaries[0] < 2
+        or boundaries[-1] != count
         or np.any(np.diff(np.r_[0, boundaries]) <= 0)
         or not set(laws.astype(str)) <= INTERPOLATION_LAWS
     ):
@@ -301,7 +302,7 @@ def pdf_tables(group, tables, unit="eV"):
         Each item is ``(value, pdf, laws, boundaries)`` for one table. Values
         and densities are one-dimensional arrays of equal length. Laws and
         boundaries follow :func:`interpolation`, including its defaults and
-        inclusive, table-local boundary convention. All tables describe the
+        exclusive, table-local boundary convention. All tables describe the
         same physical coordinate and have at least two points.
     unit : str, optional
         Coordinate unit, with the inverse attached to ``pdf``. ``None`` omits

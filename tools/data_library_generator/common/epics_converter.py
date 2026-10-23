@@ -328,7 +328,7 @@ def write_tabulated(group, table, grid_unit=None, value_unit=None):
     """Write an ENDF TAB1 table as Data without resampling its own grid.
 
     Coordinates and values already use the requested output units. ENDF NBT
-    counts become zero-based upper-point indices in the stored interpolation.
+    point counts are retained as exclusive interpolation boundaries.
     Repeated coordinates are retained, including photoelectric opening edges.
     """
     grid, values, boundaries, laws = table
@@ -336,7 +336,7 @@ def write_tabulated(group, table, grid_unit=None, value_unit=None):
     quantity(group, "grid", grid, grid_unit)
     quantity(group, "value", values, value_unit)
     interpolation(
-        group, len(grid), [ENDF_INTERPOLATION[law] for law in laws], boundaries - 1
+        group, len(grid), [ENDF_INTERPOLATION[law] for law in laws], boundaries
     )
 
 
@@ -407,7 +407,7 @@ def write_cross_section(group, grid, table):
     quantity(group, "value", values, "barn")
     ends = np.r_[np.flatnonzero(laws[1:] != laws[:-1]) + 1, len(laws)]
     interpolation(
-        group, len(grid), [ENDF_INTERPOLATION[law] for law in laws[ends - 1]], ends
+        group, len(grid), [ENDF_INTERPOLATION[law] for law in laws[ends - 1]], ends + 1
     )
 
 

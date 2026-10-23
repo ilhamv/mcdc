@@ -4,6 +4,7 @@ Reusable Representations
 
 ``CrossSection``, ``Data``, ``Distribution``, and ``Interpolation`` describe reusable group layouts.
 These type names identify the layouts expanded at individual fields.
+The reusable representations are designed to be as consistent as possible with their counterparts in MC/DC's ``mcdc.object_`` and ``mcdc.transport`` modules.
 ``Data`` and ``Distribution`` select a representation through a required scalar string attribute ``type`` on the containing group.
 
 CrossSection
@@ -88,13 +89,13 @@ Let K be that representation's number of tabulated points and R its number of in
      - One interpolation law per region.
    * - ``boundaries``
      - integer [R]
-     - Zero-based upper point index of each region.
+     - Exclusive upper-point index of each region.
 
 The arrays have equal nonzero length.
-Boundaries strictly increase, the first boundary is at least one, and the last equals K - 1.
-The first region begins at point zero; subsequent regions begin at the preceding region's upper point.
+Boundaries strictly increase, the first boundary is at least two, and the last equals K.
+The first region begins at point zero; subsequent regions begin at the preceding boundary minus one.
 Thus every interval belongs to exactly one region.
-For example, boundaries ``[2, 5]`` apply the first law to intervals 0–1 and 1–2, then the second law to intervals 2–3, 3–4, and 4–5.
+For example, boundaries ``[3, 6]`` apply the first law to intervals 0–1 and 1–2, then the second law to intervals 2–3, 3–4, and 4–5.
 
 For neighboring points :math:`(x_0,y_0)` and :math:`(x_1,y_1)`, define :math:`t=(x-x_0)/(x_1-x_0)` and :math:`s=\ln(x/x_0)/\ln(x_1/x_0)`.
 
@@ -248,7 +249,7 @@ For T tables, P total points, and R total interpolation regions, the collection 
      - Concatenated interpolation laws for the individual tables.
    * - ``interpolation/boundaries``
      - integer [R]
-     - Inclusive upper-point indices relative to the start of each individual table.
+     - Exclusive upper-point indices relative to the start of each individual table.
 
 Both offset arrays start at zero and are strictly increasing.
 Table i occupies the half-open slice ``offsets[i]:offsets[i + 1]``; its interpolation regions use the corresponding slice of ``interpolation/offsets``.
@@ -258,7 +259,7 @@ No ``type`` attribute is attached to the collection itself.
 CDFs are derived from the stored densities and interpolation rules.
 
 For example, tables with 3, 2, and 4 points have ``offsets = [0, 3, 5, 9]``.
-The last table occupies points 5 through 8, and its final interpolation boundary is 3, regardless of its position in the packed array.
+The last table occupies points 5 through 8, and its final interpolation boundary is 4, regardless of its position in the packed array.
 
 Analytic energy spectra
 ^^^^^^^^^^^^^^^^^^^^^^^

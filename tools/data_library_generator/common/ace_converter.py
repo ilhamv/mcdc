@@ -290,16 +290,17 @@ def write_interpolation(group, source, count):
 
     Notes
     -----
-    Boundaries are reduced by one, so the last output boundary is
-    ``count - 1``. An empty source law list means a single linear region.
+    The source's one-based upper-point indices already equal the exclusive
+    point boundaries used by MC/DC, so the final boundary remains ``count``.
+    An empty source law list means a single linear region.
     The child group contains ``laws`` and ``boundaries`` datasets; existing
     interpolation groups are not replaced. No tabulated values are modified.
     """
-    # Translate source laws and convert upper-point indices to zero-based indices
+    # Translate law names and retain point counts as exclusive region boundaries.
     laws = [interpolation_law(code) for code in source.interpolants]
-    boundaries = np.asarray(source.boundaries, dtype=int) - 1
+    boundaries = np.asarray(source.boundaries, dtype=np.int64)
     if not laws:
-        laws, boundaries = ["linear"], [count - 1]
+        laws, boundaries = ["linear"], [count]
     interpolation(group, count, laws, boundaries)
 
 
