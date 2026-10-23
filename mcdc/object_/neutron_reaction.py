@@ -389,7 +389,7 @@ def validate_angle_energy(angle_type, spectra, path):
     """Require either a separate angle law or a joint law for every spectrum."""
     joint = (
         distribution.DistributionKalbachMann,
-        distribution.DistributionTabulatedEnergyAngle,
+        distribution.DistributionTableEnergyAngle,
         distribution.DistributionNBody,
     )
     for spectrum in spectra:

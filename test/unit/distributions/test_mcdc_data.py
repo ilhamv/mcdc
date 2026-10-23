@@ -9,16 +9,16 @@ from scipy.integrate import quad
 from scipy.optimize import brentq
 
 from mcdc.object_.hdf5_reader import read_distribution
-from mcdc.object_.distribution import DistributionTabulated, DistributionMultiTable
+from mcdc.object_.distribution import DistributionTable, DistributionMultiTable
 from mcdc.transport import distribution as sampling
 
 
 @pytest.mark.parametrize("law", [1, 2, 3, 4, 5])
 def test_density_interpolation_quantiles(law, mock_rng_sequence, prepare_simulation):
-    distribution = DistributionTabulated([1.0, 4.0], pdf=[0.2, 1.1], interpolations=law)
+    distribution = DistributionTable([1.0, 4.0], pdf=[0.2, 1.1], interpolations=law)
     container, data = prepare_simulation(objects=[distribution])
     simulation = container[0]
-    table = simulation["tabulated_distributions"][distribution.sub_ID]
+    table = simulation["table_distributions"][distribution.sub_ID]
 
     def density(x):
         fraction = math.log(x) / math.log(4.0) if law in (3, 5) else (x - 1.0) / 3.0
@@ -33,7 +33,7 @@ def test_density_interpolation_quantiles(law, mock_rng_sequence, prepare_simulat
         expected = brentq(
             lambda x: quad(density, 1.0, x)[0] / integral - probability, 1.0, 4.0
         )
-        sampled = sampling.sample_tabulated(
+        sampled = sampling.sample_table(
             table, mock_rng_sequence(probability), simulation, data
         )
         assert sampled == pytest.approx(expected, abs=1.0e-10)
@@ -42,7 +42,7 @@ def test_density_interpolation_quantiles(law, mock_rng_sequence, prepare_simulat
 def test_density_regions_and_repeated_coordinates(
     mock_rng_sequence, prepare_simulation
 ):
-    distribution = DistributionTabulated(
+    distribution = DistributionTable(
         [1.0, 2.0, 2.0, 4.0],
         pdf=[1.0, 1.0, 2.0, 4.0],
         interpolations=[1, 5],
@@ -54,9 +54,9 @@ def test_density_regions_and_repeated_coordinates(
     )
     container, data = prepare_simulation(objects=[distribution])
     simulation = container[0]
-    table = simulation["tabulated_distributions"][distribution.sub_ID]
+    table = simulation["table_distributions"][distribution.sub_ID]
     # Integral from 2 to x is (x**2 - 4)/2; total density integral is 7.
-    sampled = sampling.sample_tabulated(table, mock_rng_sequence(0.5), simulation, data)
+    sampled = sampling.sample_table(table, mock_rng_sequence(0.5), simulation, data)
     assert sampled == pytest.approx(3.0)
 
 
@@ -64,8 +64,8 @@ def test_histogram_incident_energy_and_endpoints(mock_rng_sequence, prepare_simu
     distribution = DistributionMultiTable(
         [1.0, 3.0],
         tables=[
-            DistributionTabulated([10.0, 20.0], pdf=[1.0, 1.0]),
-            DistributionTabulated([100.0, 200.0], pdf=[1.0, 1.0]),
+            DistributionTable([10.0, 20.0], pdf=[1.0, 1.0]),
+            DistributionTable([100.0, 200.0], pdf=[1.0, 1.0]),
         ],
         interpolations=1,
     )

@@ -12,13 +12,13 @@ from mcdc.constant import INTERPOLATION_LINEAR, REFERENCE_FRAME_COM, REFERENCE_F
 from mcdc.object_.data import DataPolynomial, DataTable, encode_interpolation
 from mcdc.object_.distribution import (
     DistributionNone,
-    DistributionTabulated,
+    DistributionTable,
     DistributionMultiTable,
     DistributionLevelScattering,
     DistributionEvaporation,
     DistributionMaxwellian,
     DistributionKalbachMann,
-    DistributionTabulatedEnergyAngle,
+    DistributionTableEnergyAngle,
     DistributionNBody,
 )
 
@@ -185,7 +185,7 @@ def read_distribution(group):
         return DistributionNone()
     if kind == "tabulated":
         laws, boundaries = read_interpolation(group)
-        return DistributionTabulated(
+        return DistributionTable(
             group["value"][()],
             pdf=group["pdf"][()],
             interpolations=laws,
@@ -227,7 +227,7 @@ def read_distribution(group):
 def read_distribution_density(group):
     """Return a normalized density table including its cumulative probabilities."""
     laws, boundaries = read_interpolation(group)
-    return DistributionTabulated(
+    return DistributionTable(
         group["value"][()],
         pdf=group["pdf"][()],
         interpolations=laws,
@@ -283,7 +283,7 @@ def read_correlated_distribution(group, kind):
         cosine_offset = np.cumsum(
             [0] + [table.N for table in angles[:-1]], dtype=np.int64
         )
-        result = DistributionTabulatedEnergyAngle(
+        result = DistributionTableEnergyAngle(
             group["energy"][()],
             offset,
             values,

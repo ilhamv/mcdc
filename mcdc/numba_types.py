@@ -255,13 +255,13 @@ pmf_distribution = into_dtype([
     ('base_ID', int64),
 ])
 
-tabulated_distribution = into_dtype([
+table_distribution = into_dtype([
     ('pdf_ID', int64),
     ('ID', int64),
     ('base_ID', int64),
 ])
 
-tabulated_energy_angle_distribution = into_dtype([
+table_energy_angle_distribution = into_dtype([
     ('energy_offset', int64),
     ('energy_length', int64),
     ('offset_offset', int64),
@@ -991,10 +991,10 @@ def make_simulation_type(N: dict):
         ('N_none_distribution', int64),
         ('pmf_distributions', pmf_distribution, (N['pmf_distribution'])),
         ('N_pmf_distribution', int64),
-        ('tabulated_distributions', tabulated_distribution, (N['tabulated_distribution'])),
-        ('N_tabulated_distribution', int64),
-        ('tabulated_energy_angle_distributions', tabulated_energy_angle_distribution, (N['tabulated_energy_angle_distribution'])),
-        ('N_tabulated_energy_angle_distribution', int64),
+        ('table_distributions', table_distribution, (N['table_distribution'])),
+        ('N_table_distribution', int64),
+        ('table_energy_angle_distributions', table_energy_angle_distribution, (N['table_energy_angle_distribution'])),
+        ('N_table_energy_angle_distribution', int64),
         ('neutron_reactions', neutron_reaction, (N['neutron_reaction'])),
         ('N_neutron_reaction', int64),
         ('neutron_capture_reactions', neutron_capture_reaction, (N['neutron_capture_reaction'])),

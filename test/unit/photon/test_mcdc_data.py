@@ -101,7 +101,7 @@ def test_absorption_edge_uses_distinct_left_and_right_limits(
         ) == pytest.approx(expected)
 
 
-def test_tabulated_subshell_edge_and_threshold(photon_model):
+def test_table_subshell_edge_and_threshold(photon_model):
     """A repeated first energy must give zero below and the upper value at the edge."""
 
     def edit(file):

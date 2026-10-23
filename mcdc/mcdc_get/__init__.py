@@ -18,7 +18,7 @@ import mcdc.mcdc_get.multi_table_distribution as multi_table_distribution
 
 import mcdc.mcdc_get.pmf_distribution as pmf_distribution
 
-import mcdc.mcdc_get.tabulated_energy_angle_distribution as tabulated_energy_angle_distribution
+import mcdc.mcdc_get.table_energy_angle_distribution as table_energy_angle_distribution
 
 import mcdc.mcdc_get.electron_reaction as electron_reaction
 

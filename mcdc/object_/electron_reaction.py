@@ -21,7 +21,7 @@ from mcdc.object_.data import DataBase, DataTable
 from mcdc.object_.distribution import (
     DistributionBase,
     DistributionMultiTable,
-    DistributionTabulated,
+    DistributionTable,
 )
 from mcdc.object_.util import decode_reference_frame
 from mcdc.print_ import print_1d_array, print_error
@@ -150,11 +150,11 @@ class ElectronReactionIonization(ElectronReactionBase):
             for i, start in enumerate(offset):
                 stop = offset[i + 1] if i + 1 < len(offset) else len(values)
                 if "CDF" in product:
-                    table = DistributionTabulated(
+                    table = DistributionTable(
                         values[start:stop], cdf=probabilities[start:stop]
                     )
                 else:
-                    table = DistributionTabulated(
+                    table = DistributionTable(
                         values[start:stop], pdf=probabilities[start:stop]
                     )
                 tables.append(table)
@@ -232,11 +232,11 @@ class ElectronReactionElasticScattering(ElectronReactionBase):
         for i, start in enumerate(offset):
             stop = offset[i + 1] if i + 1 < len(offset) else len(values)
             if "CDF" in mu_group:
-                table = DistributionTabulated(
+                table = DistributionTable(
                     values[start:stop], cdf=probabilities[start:stop]
                 )
             else:
-                table = DistributionTabulated(
+                table = DistributionTable(
                     values[start:stop], pdf=probabilities[start:stop]
                 )
             tables.append(table)

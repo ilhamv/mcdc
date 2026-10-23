@@ -30,12 +30,12 @@ from mcdc.object_.base import MCDCPolymorphic
 from mcdc.object_.distribution import (
     DistributionBase,
     DistributionMultiTable,
-    DistributionTabulated,
+    DistributionTable,
     DistributionLevelScattering,
     DistributionEvaporation,
     DistributionMaxwellian,
     DistributionKalbachMann,
-    DistributionTabulatedEnergyAngle,
+    DistributionTableEnergyAngle,
     DistributionNBody,
 )
 from mcdc.object_.util import decode_reference_frame
@@ -349,9 +349,7 @@ def set_angular_distribution(h5_group, simulation):
             pdf = h5_group[f"pdf"][()]
             for i, start in enumerate(offset):
                 stop = offset[i + 1] if i + 1 < len(offset) else len(value)
-                tables.append(
-                    DistributionTabulated(value[start:stop], pdf=pdf[start:stop])
-                )
+                tables.append(DistributionTable(value[start:stop], pdf=pdf[start:stop]))
         else:
             grid = h5_group["incident_energies"][()] * 1e6  # MeV to eV
             for i in range(len(grid)):
@@ -360,12 +358,12 @@ def set_angular_distribution(h5_group, simulation):
                     subgroup is not None
                     and subgroup.attrs.get("type", "tabulated") == "tabulated"
                 ):
-                    table = DistributionTabulated(
+                    table = DistributionTable(
                         subgroup["cosines"][()], pdf=subgroup["pdf"][()]
                     )
                 else:
                     # Isotropic or absent child tables use a uniform cosine density.
-                    table = DistributionTabulated([-1.0, 1.0], pdf=[0.5, 0.5])
+                    table = DistributionTable([-1.0, 1.0], pdf=[0.5, 0.5])
                 tables.append(table)
 
         mu = DistributionMultiTable(grid, tables)
@@ -387,7 +385,7 @@ def set_angular_distribution_from_kalbach_mann(spectrum_group, simulation):
     tables = []
     for i, start in enumerate(offset):
         stop = offset[i + 1] if i + 1 < len(offset) else len(a)
-        tables.append(DistributionTabulated(a[start:stop], pdf=pdf[start:stop]))
+        tables.append(DistributionTable(a[start:stop], pdf=pdf[start:stop]))
     mu = DistributionMultiTable(grid, tables)
     return ANGLE_ENERGY_CORRELATED, mu
 
@@ -403,7 +401,7 @@ def set_energy_distribution(h5_group):
         tables = []
         for i, start in enumerate(offset):
             stop = offset[i + 1] if i + 1 < len(offset) else len(value)
-            tables.append(DistributionTabulated(value[start:stop], pdf=pdf[start:stop]))
+            tables.append(DistributionTable(value[start:stop], pdf=pdf[start:stop]))
         energy_spectrum = DistributionMultiTable(grid, tables)
 
     elif spectrum_type == "level-scattering":
@@ -462,7 +460,7 @@ def set_energy_distribution(h5_group):
         cosine = h5_group[f"cosine"][()]
         cosine_pdf = h5_group[f"cosine_pdf"][()]
 
-        energy_spectrum = DistributionTabulatedEnergyAngle(
+        energy_spectrum = DistributionTableEnergyAngle(
             energy, offset, energy_out, pdf, cosine_offset, cosine, cosine_pdf
         )
 

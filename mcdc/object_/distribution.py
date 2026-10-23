@@ -8,13 +8,13 @@ from numpy.typing import ArrayLike, NDArray
 from mcdc.constant import (
     DISTRIBUTION_NONE,
     DISTRIBUTION_PMF,
-    DISTRIBUTION_TABULATED,
+    DISTRIBUTION_TABLE,
     DISTRIBUTION_MULTITABLE,
     DISTRIBUTION_LEVEL_SCATTERING,
     DISTRIBUTION_EVAPORATION,
     DISTRIBUTION_MAXWELLIAN,
     DISTRIBUTION_KALBACH_MANN,
-    DISTRIBUTION_TABULATED_ENERGY_ANGLE,
+    DISTRIBUTION_TABLE_ENERGY_ANGLE,
     DISTRIBUTION_N_BODY,
     INTERPOLATION_HISTOGRAM,
     INTERPOLATION_LINEAR,
@@ -108,11 +108,11 @@ class DistributionPMF(DistributionBase):
 
 
 # ======================================================================================
-# Tabulated
+# Table
 # ======================================================================================
 
 
-class DistributionTabulated(DistributionBase):
+class DistributionTable(DistributionBase):
     """One-dimensional continuous tabulated distribution.
 
     Exactly one of ``pdf`` or ``cdf`` must be supplied alongside ``value``.
@@ -122,8 +122,8 @@ class DistributionTabulated(DistributionBase):
     """
 
     # MC/DC framework metadata
-    label = "tabulated_distribution"
-    sub_type = DISTRIBUTION_TABULATED
+    label = "table_distribution"
+    sub_type = DISTRIBUTION_TABLE
 
     pdf: DataTable
 
@@ -198,7 +198,7 @@ class DistributionTabulated(DistributionBase):
 class DistributionMultiTable(DistributionBase):
     """Family of tabulated distributions indexed by another grid.
 
-    ``tables`` supplies one DistributionTabulated object per grid point.
+    ``tables`` supplies one DistributionTable object per grid point.
 
     ``interpolations`` and ``interpolation_boundaries`` describe interpolation
     between neighboring tables on ``grid``. Boundaries are exclusive upper
@@ -214,12 +214,12 @@ class DistributionMultiTable(DistributionBase):
     grid: NDArray[float64]
     interpolations: NDArray[int64]
     interpolation_boundaries: NDArray[int64]
-    tables: list[DistributionTabulated]
+    tables: list[DistributionTable]
 
     def __init__(
         self,
         grid: ArrayLike,
-        tables: list[DistributionTabulated],
+        tables: list[DistributionTable],
         *,
         interpolations: int | Sequence[int] = INTERPOLATION_LINEAR,
         interpolation_boundaries: Sequence[int] | None = None,
@@ -463,11 +463,11 @@ class DistributionKalbachMann(DistributionBase):
 
 
 # ======================================================================================
-# Tabulated energy-angle
+# Table energy-angle
 # ======================================================================================
 
 
-class DistributionTabulatedEnergyAngle(DistributionBase):
+class DistributionTableEnergyAngle(DistributionBase):
     """Correlated tabulated outgoing energy and scattering-angle distribution.
 
     ``offset`` delimits outgoing-energy tables and ``cosine_offset`` delimits
@@ -475,8 +475,8 @@ class DistributionTabulatedEnergyAngle(DistributionBase):
     """
 
     # MC/DC framework metadata
-    label = "tabulated_energy_angle_distribution"
-    sub_type = DISTRIBUTION_TABULATED_ENERGY_ANGLE
+    label = "table_energy_angle_distribution"
+    sub_type = DISTRIBUTION_TABLE_ENERGY_ANGLE
 
     energy: NDArray[float64]
     offset: NDArray[int64]

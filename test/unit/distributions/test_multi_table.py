@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import mcdc.transport.distribution as dist
-from mcdc.object_.distribution import DistributionMultiTable, DistributionTabulated
+from mcdc.object_.distribution import DistributionMultiTable, DistributionTable
 
 
 @pytest.mark.parametrize("scale", [False, True])
@@ -14,8 +14,8 @@ def test_multi_table_distribution_first_grid_point(
     distribution = DistributionMultiTable(
         grid=grid,
         tables=[
-            DistributionTabulated([10.0, 20.0], cdf=[0.0, 1.0]),
-            DistributionTabulated([100.0, 200.0], cdf=[0.0, 1.0]),
+            DistributionTable([10.0, 20.0], cdf=[0.0, 1.0]),
+            DistributionTable([100.0, 200.0], cdf=[0.0, 1.0]),
         ][: len(grid)],
     )
     simulation_container, data = prepare_simulation(objects=[distribution])
@@ -35,8 +35,8 @@ def test_multi_table_distribution_sample(mock_rng_sequence, prepare_simulation):
     distribution = DistributionMultiTable(
         grid=[1.0, 3.0],
         tables=[
-            DistributionTabulated([10.0, 20.0, 30.0], cdf=[0.0, 0.5, 1.0]),
-            DistributionTabulated([100.0, 200.0, 300.0], cdf=[0.0, 0.6, 1.0]),
+            DistributionTable([10.0, 20.0, 30.0], cdf=[0.0, 0.5, 1.0]),
+            DistributionTable([100.0, 200.0, 300.0], cdf=[0.0, 0.6, 1.0]),
         ],
     )
     simulation_container, data = prepare_simulation(objects=[distribution])
@@ -79,9 +79,9 @@ def test_incident_regions_preserve_child_pdf_interpolation(
     distribution = DistributionMultiTable(
         grid=[1.0, 3.0, 5.0],
         tables=[
-            DistributionTabulated([10.0, 20.0], pdf=[0.0, 1.0]),
-            DistributionTabulated([100.0, 200.0], pdf=[0.0, 1.0]),
-            DistributionTabulated([1000.0, 2000.0], pdf=[0.0, 1.0]),
+            DistributionTable([10.0, 20.0], pdf=[0.0, 1.0]),
+            DistributionTable([100.0, 200.0], pdf=[0.0, 1.0]),
+            DistributionTable([1000.0, 2000.0], pdf=[0.0, 1.0]),
         ],
         interpolations=[1, 2],
         interpolation_boundaries=[2, 3],

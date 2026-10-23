@@ -25,7 +25,7 @@ from mcdc.constant import (
     PI,
 )
 from mcdc.transport.data import evaluate_data
-from mcdc.transport.distribution import invert_tabulated_segment, sample_distribution
+from mcdc.transport.distribution import invert_table_segment, sample_distribution
 from mcdc.transport.physics.util import (
     evaluate_electron_xs_energy_grid,
     scatter_direction,
@@ -623,7 +623,7 @@ def _invert_delta_table(idx, xi, multi_table, simulation, data):
 
     ID = mcdc_get.multi_table_distribution.table_IDs(idx, multi_table, data)
     sub_ID = simulation["distributions"][ID]["sub_ID"]
-    table = simulation["tabulated_distributions"][sub_ID]
+    table = simulation["table_distributions"][sub_ID]
 
     pdf_data = simulation["data"][table["pdf_ID"]]
     pdf_table = simulation["table_data"][pdf_data["sub_ID"]]
@@ -649,7 +649,7 @@ def _invert_delta_table(idx, xi, multi_table, simulation, data):
     if interpolation == INTERPOLATION_LINEAR:
         p0 = mcdc_get.table_data.y(idx, pdf_table, data)
         p1 = mcdc_get.table_data.y(idx + 1, pdf_table, data)
-        return invert_tabulated_segment(xi, c0, v0, v1, p0, p1, interpolation)
+        return invert_table_segment(xi, c0, v0, v1, p0, p1, interpolation)
 
     # CDF input is stored as a histogram PDF (a piecewise-linear CDF), but the
     # EPRDATA14 CDF is log-log in (CDF, energy); the segment starting at

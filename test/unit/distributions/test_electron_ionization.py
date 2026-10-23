@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from mcdc.object_.distribution import DistributionMultiTable, DistributionTabulated
+from mcdc.object_.distribution import DistributionMultiTable, DistributionTable
 from mcdc.transport.physics.electron.native import sample_delta_energy
 
 
@@ -21,8 +21,8 @@ def knock_on_distribution(prepare_simulation):
         prepare_simulation,
         grid=[100.0, 10_000.0],
         tables=[
-            DistributionTabulated([1.0, 4.0, 16.0], cdf=[0.0, 0.25, 1.0]),
-            DistributionTabulated([9.0, 36.0, 576.0], cdf=[0.0, 0.25, 1.0]),
+            DistributionTable([1.0, 4.0, 16.0], cdf=[0.0, 0.25, 1.0]),
+            DistributionTable([9.0, 36.0, 576.0], cdf=[0.0, 0.25, 1.0]),
         ],
     )
 
@@ -78,9 +78,9 @@ def test_delta_energy_interior_grid_point(prepare_simulation, mock_rng_sequence)
         prepare_simulation,
         grid=[100.0, 1000.0, 10_000.0],
         tables=[
-            DistributionTabulated([1.0, 4.0, 16.0], cdf=[0.0, 0.25, 1.0]),
-            DistributionTabulated([9.0, 36.0, 576.0], cdf=[0.0, 0.25, 1.0]),
-            DistributionTabulated([1.0, 2.0, 4.0], cdf=[0.0, 0.25, 1.0]),
+            DistributionTable([1.0, 4.0, 16.0], cdf=[0.0, 0.25, 1.0]),
+            DistributionTable([9.0, 36.0, 576.0], cdf=[0.0, 0.25, 1.0]),
+            DistributionTable([1.0, 2.0, 4.0], cdf=[0.0, 0.25, 1.0]),
         ],
     )
     mock_rng = mock_rng_sequence(0.5)
@@ -100,9 +100,9 @@ def test_delta_energy_skips_tables_at_binding_energy(
         prepare_simulation,
         grid=[1.0, 10.0, 100.0],
         tables=[
-            DistributionTabulated([0.01, 0.1], cdf=[0.0, 1.0]),
-            DistributionTabulated([0.01, 0.1], cdf=[0.0, 1.0]),
-            DistributionTabulated([1.0, 4.0, 16.0], cdf=[0.0, 0.25, 1.0]),
+            DistributionTable([0.01, 0.1], cdf=[0.0, 1.0]),
+            DistributionTable([0.01, 0.1], cdf=[0.0, 1.0]),
+            DistributionTable([1.0, 4.0, 16.0], cdf=[0.0, 0.25, 1.0]),
         ],
     )
     mock_rng = mock_rng_sequence(0.5)
@@ -135,7 +135,7 @@ def test_delta_energy_cdf_plateaus_and_endpoints(
         prepare_simulation,
         grid=[1000.0],
         tables=[
-            DistributionTabulated(
+            DistributionTable(
                 [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0],
                 cdf=[0.0, 0.0, 0.25, 0.5, 0.5, 1.0, 1.0],
             )
@@ -153,7 +153,7 @@ def test_delta_energy_caps_at_knock_on_limit(prepare_simulation, mock_rng_sequen
     record, simulation, data = _prepare_distribution(
         prepare_simulation,
         grid=[100.0],
-        tables=[DistributionTabulated([1.0, 45.0000001], cdf=[0.0, 1.0])],
+        tables=[DistributionTable([1.0, 45.0000001], cdf=[0.0, 1.0])],
     )
     mock_rng = mock_rng_sequence(1.0)
 
@@ -169,8 +169,8 @@ def test_delta_energy_pdf_input(prepare_simulation, mock_rng_sequence):
         prepare_simulation,
         grid=[100.0, 10_000.0],
         tables=[
-            DistributionTabulated([1.0, 9.0], pdf=[0.0, 1.0]),
-            DistributionTabulated([4.0, 36.0], pdf=[0.0, 1.0]),
+            DistributionTable([1.0, 9.0], pdf=[0.0, 1.0]),
+            DistributionTable([4.0, 36.0], pdf=[0.0, 1.0]),
         ],
     )
     mock_rng = mock_rng_sequence(0.25)

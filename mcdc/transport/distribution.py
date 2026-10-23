@@ -14,8 +14,8 @@ from mcdc.constant import (
     DISTRIBUTION_MAXWELLIAN,
     DISTRIBUTION_MULTITABLE,
     DISTRIBUTION_N_BODY,
-    DISTRIBUTION_TABULATED,
-    DISTRIBUTION_TABULATED_ENERGY_ANGLE,
+    DISTRIBUTION_TABLE,
+    DISTRIBUTION_TABLE_ENERGY_ANGLE,
     INTERPOLATION_HISTOGRAM,
     INTERPOLATION_LINEAR,
     PI,
@@ -57,9 +57,9 @@ def _sample_distribution(E, distribution, rng_state, simulation, data, scale):
     distribution_type = distribution["sub_type"]
     ID = distribution["sub_ID"]
 
-    if distribution_type == DISTRIBUTION_TABULATED:
-        table = simulation["tabulated_distributions"][ID]
-        return sample_tabulated(table, rng_state, simulation, data)
+    if distribution_type == DISTRIBUTION_TABLE:
+        table = simulation["table_distributions"][ID]
+        return sample_table(table, rng_state, simulation, data)
 
     elif distribution_type == DISTRIBUTION_MULTITABLE:
         multi_table = simulation["multi_table_distributions"][ID]
@@ -109,13 +109,13 @@ def _sample_correlated_distribution(
         kalbach_mann = simulation["kalbach_mann_distributions"][ID]
         return sample_kalbach_mann(E, rng_state, kalbach_mann, data, simulation)
 
-    elif distribution_type == DISTRIBUTION_TABULATED_ENERGY_ANGLE:
-        table = simulation["tabulated_energy_angle_distributions"][ID]
-        return sample_tabulated_energy_angle(E, rng_state, table, data)
+    elif distribution_type == DISTRIBUTION_TABLE_ENERGY_ANGLE:
+        table = simulation["table_energy_angle_distributions"][ID]
+        return sample_table_energy_angle(E, rng_state, table, data)
 
     elif distribution_type == DISTRIBUTION_N_BODY:
         nbody = simulation["nbody_distributions"][ID]
-        E_out = sample_tabulated(nbody, rng_state, simulation, data)
+        E_out = sample_table(nbody, rng_state, simulation, data)
         mu = sample_isotropic_cosine(rng_state)
         return E_out, mu
 
@@ -154,17 +154,17 @@ def sample_isotropic_direction(rng_state):
 
 
 @njit
-def sample_tabulated(table, rng_state, simulation, data):
+def sample_table(table, rng_state, simulation, data):
     """
     Sample a value from a tabulated distribution.
     """
 
-    value, _ = sample_tabulated_with_interval(table, rng_state, simulation, data)
+    value, _ = sample_table_with_interval(table, rng_state, simulation, data)
     return value
 
 
 @njit
-def sample_tabulated_with_interval(table, rng_state, simulation, data):
+def sample_table_with_interval(table, rng_state, simulation, data):
     """Sample a tabulated distribution and return its interpolation interval."""
 
     xi = rng.lcg(rng_state)
@@ -189,12 +189,12 @@ def sample_tabulated_with_interval(table, rng_state, simulation, data):
 
     interpolation = get_table_interpolation_law(idx, pdf_table, data)
 
-    value = invert_tabulated_segment(xi, c0, v0, v1, p0, p1, interpolation)
+    value = invert_table_segment(xi, c0, v0, v1, p0, p1, interpolation)
     return value, idx
 
 
 @njit
-def invert_tabulated_segment(xi, c0, v0, v1, p0, p1, interpolation):
+def invert_table_segment(xi, c0, v0, v1, p0, p1, interpolation):
     """Invert a density segment, using bounded inversion for logarithmic laws."""
 
     s = xi - c0
@@ -321,8 +321,8 @@ def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
     # Sample from the selected table
     ID = mcdc_get.multi_table_distribution.table_IDs(idx, multi_table, data)
     sub_ID = simulation["distributions"][ID]["sub_ID"]
-    table_distribution = simulation["tabulated_distributions"][sub_ID]
-    sample = sample_tabulated(table_distribution, rng_state, simulation, data)
+    table_distribution = simulation["table_distributions"][sub_ID]
+    sample = sample_table(table_distribution, rng_state, simulation, data)
 
     # No scaling needed?
     if not scale:
@@ -339,8 +339,8 @@ def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
     sub_ID0 = simulation["distributions"][ID0]["sub_ID"]
     sub_ID1 = simulation["distributions"][ID1]["sub_ID"]
     #
-    table_distribution0 = simulation["tabulated_distributions"][sub_ID0]
-    table_distribution1 = simulation["tabulated_distributions"][sub_ID1]
+    table_distribution0 = simulation["table_distributions"][sub_ID0]
+    table_distribution1 = simulation["table_distributions"][sub_ID1]
     #
     ID = table_distribution["pdf_ID"]
     ID0 = table_distribution0["pdf_ID"]
@@ -449,7 +449,7 @@ def sample_flat_density(xi, values, pdf, cdf, laws):
     """Sample a normalized flattened-table slice, returning the local interval."""
     idx = min(max(find_bin(xi, cdf), 0), len(values) - 2)
     law = INTERPOLATION_LINEAR if len(laws) == 0 else laws[idx]
-    value = invert_tabulated_segment(
+    value = invert_table_segment(
         xi, cdf[idx], values[idx], values[idx + 1], pdf[idx], pdf[idx + 1], law
     )
     return value, idx, law
@@ -529,14 +529,14 @@ def sample_kalbach_mann(E, rng_state, kalbach_mann, data, simulation=None):
 
 
 @njit
-def sample_tabulated_energy_angle(E, rng_state, table, data):
+def sample_table_energy_angle(E, rng_state, table, data):
     """Sample outgoing energy and the corresponding conditional cosine table."""
-    grid = mcdc_get.tabulated_energy_angle_distribution.energy_all(table, data)
-    offsets = mcdc_get.tabulated_energy_angle_distribution.offset_all(table, data)
-    values = mcdc_get.tabulated_energy_angle_distribution.energy_out_all(table, data)
-    pdf = mcdc_get.tabulated_energy_angle_distribution.pdf_all(table, data)
-    cdf = mcdc_get.tabulated_energy_angle_distribution.cdf_all(table, data)
-    laws = mcdc_get.tabulated_energy_angle_distribution.interpolations_all(table, data)
+    grid = mcdc_get.table_energy_angle_distribution.energy_all(table, data)
+    offsets = mcdc_get.table_energy_angle_distribution.offset_all(table, data)
+    values = mcdc_get.table_energy_angle_distribution.energy_out_all(table, data)
+    pdf = mcdc_get.table_energy_angle_distribution.pdf_all(table, data)
+    cdf = mcdc_get.table_energy_angle_distribution.cdf_all(table, data)
+    laws = mcdc_get.table_energy_angle_distribution.interpolations_all(table, data)
     xi1, xi2, xi3 = rng.lcg(rng_state), rng.lcg(rng_state), rng.lcg(rng_state)
     low, high, selected, fraction = correlated_table_indices(E, grid, xi1)
     low_end = int(offsets[low + 1]) if low + 1 < len(grid) else len(values)
@@ -562,20 +562,14 @@ def sample_tabulated_energy_angle(E, rng_state, table, data):
     index = start + interval
     if law != INTERPOLATION_HISTOGRAM and xi2 - cdf[index] > cdf[index + 1] - xi2:
         index += 1
-    cosine_offsets = mcdc_get.tabulated_energy_angle_distribution.cosine_offset__all(
+    cosine_offsets = mcdc_get.table_energy_angle_distribution.cosine_offset__all(
         table, data
     )
-    cosine = mcdc_get.tabulated_energy_angle_distribution.cosine_all(table, data)
-    cosine_pdf = mcdc_get.tabulated_energy_angle_distribution.cosine_pdf_all(
+    cosine = mcdc_get.table_energy_angle_distribution.cosine_all(table, data)
+    cosine_pdf = mcdc_get.table_energy_angle_distribution.cosine_pdf_all(table, data)
+    cosine_cdf = mcdc_get.table_energy_angle_distribution.cosine_cdf_all(table, data)
+    cosine_laws = mcdc_get.table_energy_angle_distribution.cosine_interpolations_all(
         table, data
-    )
-    cosine_cdf = mcdc_get.tabulated_energy_angle_distribution.cosine_cdf_all(
-        table, data
-    )
-    cosine_laws = (
-        mcdc_get.tabulated_energy_angle_distribution.cosine_interpolations_all(
-            table, data
-        )
     )
     start = int(cosine_offsets[index])
     end = (

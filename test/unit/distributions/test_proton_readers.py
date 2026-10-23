@@ -43,7 +43,7 @@ def test_proton_angular_tables(tmp_path, prepare_simulation, mock_rng_sequence, 
     assert result == pytest.approx(-0.5 if layout == "isotropic-subgroup" else 0.25)
 
 
-def test_proton_tabulated_spectrum(tmp_path, prepare_simulation, mock_rng_sequence):
+def test_proton_table_spectrum(tmp_path, prepare_simulation, mock_rng_sequence):
     with h5py.File(tmp_path / "spectrum.h5", "w") as group:
         group.attrs["type"] = "tabulated"
         group["energy"], group["offset"] = [1.0, 3.0], [0, 2]

@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def make_test_tabulated_energy_angle_data():
+def make_test_table_energy_angle_data():
     Ei = [1.0, 3.0]
     L_i = [0.0, 3.0]
 
