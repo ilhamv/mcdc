@@ -110,7 +110,7 @@ def test_tab1_region_boundary_and_nonlinear_projection():
         converter.write_cross_section(file, grid, table)
         np.testing.assert_array_equal(file["interpolation/boundaries"], [5, 7])
         assert file["interpolation/laws"].asstr()[:].tolist() == ["linear", "log"]
-        converter.write_tabulated(file.create_group("source"), table)
+        converter.write_table(file.create_group("source"), table)
         np.testing.assert_array_equal(file["source/interpolation/boundaries"], [3, 4])
 
 

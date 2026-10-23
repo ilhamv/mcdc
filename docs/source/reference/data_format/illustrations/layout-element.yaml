@@ -49,7 +49,7 @@ projectiles/:
 
         # Category-specific
         large-angle/:
-          xs: Data, barn  # Tabulated on its own incident-energy grid
+          xs: Data, barn  # Stored on its own incident-energy grid
           angular-cosine-distribution: Distribution, cosine
 
 
@@ -95,7 +95,7 @@ projectiles/:
         subshells/:
           '{subshell}/':
             binding-energy: float, eV
-            xs: Data, barn  # Tabulated on the subshell's own incident-energy grid
+            xs: Data, barn  # Stored on the subshell's own incident-energy grid
             secondary-energy-distribution: Distribution, eV
             cross-products/:
               '{i}': CrossProduct  # Optional relaxation photons conditional on this subshell

@@ -165,7 +165,7 @@ The following paths are relative to ``/projectiles/{projectile}`` in the appropr
      - Proton mass stopping power as a function of incident energy.
 
 ``stopping-power`` is optional for analog proton transport and required when the data supplies condensed-history energy loss.
-Its tabulated grid, when used, is its own grid rather than ``xs-energy-grid``.
+When represented as a table, it uses its own grid rather than ``xs-energy-grid``.
 Every reaction ``CrossSection`` references the grid in its containing projectile group.
 Repeated energies store the left and right limits of a discontinuity in that order.
 Interpolation applies between distinct energies, not across the zero-width interval.

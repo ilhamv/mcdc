@@ -1,10 +1,10 @@
 # Reusable Data layout illustrations for dimensionless functions of energy.
 
 # ======================================================================================
-# Tabulated function
+# Table function
 # ======================================================================================
 
-tabulated-data/:
+table-data/:
   '@type': table
   grid: float [K], eV  # Input coordinates, K >= 2
   value: float [K]  # Function values

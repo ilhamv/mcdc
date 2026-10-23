@@ -38,7 +38,7 @@ energy-distribution/:
 # ======================================================================================
 
 energy-angle-distribution/:
-  '@type': energy-angle-tabulated
+  '@type': energy-angle-table
   energy: float [I], eV
 
   tables/:

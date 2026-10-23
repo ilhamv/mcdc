@@ -237,7 +237,7 @@ All include the basic fields, with ``cross-products`` available for additional p
      - Subshell-resolved ionization and secondary electron energy data.
 
 Each ionization subshell record contains ``binding-energy`` (float, eV), ``xs`` (Data, barn), ``secondary-energy-distribution`` (Distribution, eV), and a ``cross-products`` group.
-The subshell cross section has its own incident-energy grid when tabulated.
+The subshell cross section has its own incident-energy grid when represented as a table.
 The secondary energy distribution alone does not specify a secondary angular distribution.
 Additional emission can be described at reaction level or conditional on a subshell, without duplicating the same production.
 
@@ -272,7 +272,7 @@ The coordinate definition must match the source tables; the unit alone does not 
 
 Each photoelectric subshell record contains ``designator`` (integer), ``binding-energy`` (float, eV), ``xs`` (Data, barn), and a ``cross-products`` group.
 The designator links the subshell to the element's atomic-relaxation data.
-The subshell cross section has its own incident-energy grid when tabulated.
+The subshell cross section has its own incident-energy grid when represented as a table.
 Photoelectrons and relaxation products may be specified conditionally on the subshell rather than through a shell-averaged reaction product.
 
 .. _cross-product:

@@ -274,7 +274,7 @@ def write_interpolation(group, source, count):
     Parameters
     ----------
     group : h5py.Group
-        Parent tabulated representation in which to create ``interpolation``.
+        Parent table representation in which to create ``interpolation``.
     source : object
         ACEtk interpolation data exposing ``interpolants`` and ``boundaries``.
         Source boundaries are one-based upper-point indices.
@@ -294,7 +294,7 @@ def write_interpolation(group, source, count):
     point boundaries used by MC/DC, so the final boundary remains ``count``.
     An empty source law list means a single linear region.
     The child group contains ``laws`` and ``boundaries`` datasets; existing
-    interpolation groups are not replaced. No tabulated values are modified.
+    interpolation groups are not replaced. No table values are modified.
     """
     # Translate law names and retain point counts as exclusive region boundaries.
     laws = [interpolation_law(code) for code in source.interpolants]
@@ -677,7 +677,7 @@ def write_spectrum_selection(group, source):
 
 
 def write_multiplicity(group, source):
-    """Write an ACE fission multiplicity as polynomial or tabulated Data.
+    """Write an ACE fission multiplicity as a Data polynomial or table.
 
     Parameters
     ----------
@@ -702,7 +702,7 @@ def write_multiplicity(group, source):
     ``1/eV^2``, and so on. A lone dimensionless coefficient has no unit
     attribute and retains the polynomial representation.
 
-    Tabulated records receive an eV grid, unchanged dimensionless yields,
+    Table records receive an eV grid, unchanged dimensionless yields,
     and converted interpolation regions. This function does not infer
     whether the source yield is prompt, delayed, or total; its caller must
     select the physically appropriate source record.
@@ -722,7 +722,7 @@ def write_multiplicity(group, source):
             units if len(coefficients) > 1 else None,
         )
     elif source.type == 2:
-        # Convert the incident-energy grid and preserve the tabulated yield law
+        # Convert the incident-energy grid and preserve the yield table's interpolation law
         group.attrs["type"] = "table"
         quantity(group, "grid", np.asarray(source.energies) * EV_PER_MEV, "eV")
         quantity(group, "value", source.multiplicities)
@@ -834,12 +834,12 @@ def write_angular_distribution(group, source):
         Empty destination Distribution group.
     source : object
         ACEtk ``FullyIsotropicDistribution`` or an angular distribution
-        exposing incident energies and tabulated cosine distributions.
+        exposing incident energies and cosine distribution tables.
 
     Raises
     ------
     ValueError
-        A per-energy distribution is not tabulated, a table has fewer than
+        A per-energy distribution is not a table, a table has fewer than
         two points, or its interpolation law is unsupported.
 
     Notes
@@ -860,7 +860,7 @@ def write_angular_distribution(group, source):
     tables = []
     for i, table in enumerate(source.distributions):
         if source.distribution_type(i + 1) != ACEtk.AngularDistributionType.Tabulated:
-            raise ValueError("Angular distributions must be tabulated or isotropic")
+            raise ValueError("Angular distributions must use tables or be isotropic")
         tables.append(
             (table.cosines, table.pdf, [interpolation_law(table.interpolation)], None)
         )
@@ -887,8 +887,8 @@ def write_energy_distribution(group, source):
         selection probabilities.
     source : object
         ACEtk level-scattering, evaporation, simple Maxwellian fission,
-        N-body phase-space, tabulated outgoing-energy, Kalbach--Mann, or
-        tabulated energy-angle distribution object.
+        N-body phase-space, outgoing-energy table, Kalbach--Mann, or
+        energy-angle table distribution object.
 
     Raises
     ------
@@ -905,12 +905,12 @@ def write_energy_distribution(group, source):
     dimensionless. PDF tables are copied without normalization.
 
     Level scattering writes C1 and C2. Evaporation and Maxwellian spectra
-    write restriction energy and tabulated spectral-temperature Data,
+    write restriction energy and spectral-temperature Data tables,
     preserving that function's interpolation regions. N-body data uses
     ACEtk's supplied values and PDF directly as a converted tabulation,
     with ``type = n-body`` and linear interpolation.
 
-    Tabulated outgoing-energy sources use ``multi-table`` with packed PDF
+    Outgoing-energy tables use ``multi-table`` with packed PDF
     tables on an eV incident-energy grid. Correlated sources pack outgoing
     densities in ``tables/outgoing-energy``. Energy-angle sources additionally
     pack conditional angular densities in ``tables/cosine-distributions``,
@@ -996,9 +996,7 @@ def write_energy_distribution(group, source):
         else:
             # Pack both levels of correlated tables in their original source order.
             kalbach = isinstance(source, ACEtk.continuous.KalbachMannDistributionData)
-            group.attrs["type"] = (
-                "kalbach-mann" if kalbach else "energy-angle-tabulated"
-            )
+            group.attrs["type"] = "kalbach-mann" if kalbach else "energy-angle-table"
             quantity(group, "energy", incident_energy, "eV")
             tables = group.create_group("tables")
             outgoing, angular = [], []

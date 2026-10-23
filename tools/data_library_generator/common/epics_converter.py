@@ -320,11 +320,11 @@ def read_tab1(block):
 
 
 # ======================================================================================
-# Tabulated data, interpolation, and shared-grid cross sections
+# Table data, interpolation, and shared-grid cross sections
 # ======================================================================================
 
 
-def write_tabulated(group, table, grid_unit=None, value_unit=None):
+def write_table(group, table, grid_unit=None, value_unit=None):
     """Write an ENDF TAB1 table as Data without resampling its own grid.
 
     Coordinates and values already use the requested output units. ENDF NBT
@@ -556,7 +556,7 @@ def write_photon(file, sections, shells=None, verbose=False):
             table = read_tab1(sections[key])
             if np.any(table[1] < 0):
                 raise ValueError(f"{field} values must be nonnegative")
-            write_tabulated(reaction.create_group(field), table, "1/angstrom")
+            write_table(reaction.create_group(field), table, "1/angstrom")
         elif mt in (515, 517):
             quantity(reaction, "field", "electron" if mt == 515 else "nuclear")
         elif mt == 522:
@@ -577,7 +577,7 @@ def write_photon(file, sections, shells=None, verbose=False):
                 child = parent.create_group(subshell_name(designator))
                 quantity(child, "designator", designator)
                 quantity(child, "binding-energy", table[0][0], "eV")
-                write_tabulated(child.create_group("xs"), table, "eV", "barn")
+                write_table(child.create_group("xs"), table, "eV", "barn")
                 child.create_group("cross-products")
         if verbose:
             print(f"  MT {mt}: {name} ({category})")

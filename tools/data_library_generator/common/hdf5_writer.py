@@ -135,7 +135,7 @@ def stamp(file, sources):
 
 
 # ======================================================================================
-# Datasets and reusable tabulated representations
+# Datasets and reusable table representations
 # ======================================================================================
 
 
@@ -181,7 +181,7 @@ def interpolation(group, count, laws=None, boundaries=None):
     group : h5py.Group
         Parent representation in which to create an ``interpolation`` group.
     count : int
-        Number of local tabulated points, at least two.
+        Number of local table points, at least two.
     laws : sequence of str, optional
         One name from ``INTERPOLATION_LAWS`` per region. The default is one
         ``linear`` region.
@@ -224,7 +224,7 @@ def _interpolation_arrays(count, laws=None, boundaries=None):
     packed tables so packing does not change interpolation-region semantics.
     """
     if count < 2:
-        raise ValueError("Tabulated data requires at least two points")
+        raise ValueError("Table data requires at least two points")
     laws = np.asarray(["linear"] if laws is None else laws, dtype="S16")
     boundaries = np.asarray([count] if boundaries is None else boundaries)
     if (
@@ -243,7 +243,7 @@ def _interpolation_arrays(count, laws=None, boundaries=None):
 
 
 def pdf_table(group, values, pdf, law="linear", unit="eV"):
-    """Write a one-dimensional tabulated probability-density representation.
+    """Write a one-dimensional probability-density table.
 
     Parameters
     ----------

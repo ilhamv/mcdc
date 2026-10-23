@@ -51,7 +51,7 @@ Nuclide-temperature file
 Reusable data
 -------------
 
-The following illustrations show tabulated, polynomial, and constant scalar functions.
+The following illustrations show table, polynomial, and constant scalar functions.
 Their fields and units are defined in :doc:`representations`.
 
 :download:`Download layout-data.yaml <illustrations/layout-data.yaml>`.

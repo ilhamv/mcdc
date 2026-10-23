@@ -67,16 +67,16 @@ Coefficient units are output units divided by input units raised to the coeffici
 For example, a dimensionless multiplicity polynomial of incident energy in eV has coefficient units ``1``, ``1/eV``, ``1/eV^2``, and so on.
 
 Polynomial Data does not have interpolation fields.
-Tabulated Data requires an explicit ``interpolation`` group.
-No generic extrapolation rule is implied outside a tabulated grid's range.
+Data tables require an explicit ``interpolation`` group.
+No generic extrapolation rule is implied outside a table's grid range.
 Repeated coordinates store the left and right limits of a discontinuity in that order.
 Interpolation applies between distinct coordinates, not across the zero-width interval.
 
 Interpolation
 -------------
 
-An ``interpolation`` group accompanies the tabulated representation whose intervals it describes.
-Let K be that representation's number of tabulated points and R its number of interpolation regions.
+An ``interpolation`` group accompanies the table representation whose intervals it describes.
+Let K be that representation's number of table points and R its number of interpolation regions.
 
 .. list-table:: Interpolation fields
    :header-rows: 1
@@ -123,7 +123,7 @@ For neighboring points :math:`(x_0,y_0)` and :math:`(x_1,y_1)`, define :math:`t=
      - Positive x coordinates and y values.
 
 Logarithms operate on dimensionless ratios.
-Each tabulated representation specifies its interpolation laws and any restrictions on them.
+Each table representation specifies its interpolation laws and any restrictions on them.
 
 Distribution
 ------------
@@ -133,12 +133,12 @@ An energy-only distribution samples outgoing energy in eV, an angular distributi
 The reaction's reference frame defines the frame of those quantities.
 An angular cosine is measured with respect to the incident direction; these layouts do not store an azimuth-dependent law.
 
-Tabulated density
-^^^^^^^^^^^^^^^^^
+Density table
+^^^^^^^^^^^^^
 
 ``type = table`` stores a one-dimensional continuous probability density.
 
-.. list-table:: Tabulated distribution fields
+.. list-table:: Table distribution fields
    :header-rows: 1
 
    * - Field
@@ -157,7 +157,7 @@ Tabulated density
 ``value`` carries the sampled coordinate's unit, and ``pdf`` carries its inverse.
 Both omit ``unit`` for a dimensionless cosine distribution.
 Cosines lie between -1 and 1.
-The density integrates to one over its tabulated support, within the precision of the source data and the specified interpolation law.
+The density integrates to one over its stored support, within the precision of the source data and the specified interpolation law.
 The terminal density of a histogram does not define a further interval.
 Repeated coordinates describe a jump in density; their zero-width interval carries no probability mass.
 The CDF is obtained by integrating the PDF using those laws.
@@ -191,7 +191,7 @@ All components sample the same physical quantities in the same frame.
 Multi-table distributions
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``type = multi-table`` stores a family of continuous tabulated distributions on another grid.
+``type = multi-table`` stores a family of continuous distributions represented by tables on another grid.
 It contains the following fields.
 
 .. list-table:: Multi-table fields
@@ -288,7 +288,7 @@ Spectral temperature is expressed in eV, and target temperature in kelvin.
 Correlated energy-angle distributions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``type = kalbach-mann`` and ``type = energy-angle-tabulated`` both contain ``energy`` (float [I], eV) and ``tables/outgoing-energy`` (packed PDF tables).
+``type = kalbach-mann`` and ``type = energy-angle-table`` both contain ``energy`` (float [I], eV) and ``tables/outgoing-energy`` (packed PDF tables).
 There is one outgoing-energy table per strictly increasing incident-energy point.
 Their incident-energy dependence is linear with unit-base interpolation of outgoing energy.
 
@@ -316,9 +316,9 @@ The parameters describe the conditional cosine density
 
 The limit a = 0 is isotropic.
 The precompound fraction is between zero and one, and the angular slope is nonnegative.
-When tabulated, both parameter grids match the table's outgoing-energy coordinates.
+When represented as tables, both parameter grids match the table's outgoing-energy coordinates.
 
-Energy-angle-tabulated distributions additionally contain ``tables/cosine-distributions`` (packed PDF tables, dimensionless).
+Energy-angle-table distributions additionally contain ``tables/cosine-distributions`` (packed PDF tables, dimensionless).
 There is one cosine table for every point in the concatenated ``tables/outgoing-energy/value`` array, in the same order.
 The outgoing-energy tables supply marginal densities; each cosine table is conditional on its corresponding outgoing energy and incident-energy table.
 The two collections' offsets identify both levels of conditioning.
@@ -327,5 +327,5 @@ N-body energy distribution
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ``type = n-body`` contains ``value`` (float [K], eV), ``pdf`` (float [K], 1/eV), and ``interpolation`` (Interpolation).
-It stores a tabulated N-body energy density.
-Its array and normalization constraints are the same as those of a tabulated energy distribution.
+It stores an N-body energy-density table.
+Its array and normalization constraints are the same as those of an energy distribution table.
