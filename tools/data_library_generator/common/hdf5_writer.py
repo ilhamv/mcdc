@@ -30,6 +30,7 @@ import numpy as np
 FORMAT = "mcdc-data"
 VERSION = "0.1.0"
 INTERPOLATION_LAWS = {"histogram", "linear", "semilog-x", "semilog-y", "log"}
+PROBABILITY_TOLERANCE = 1.0e-6
 SOURCE_FIELDS = (
     "title",
     "version",
@@ -242,6 +243,116 @@ def _interpolation_arrays(count, laws=None, boundaries=None):
     return laws, boundaries.astype(np.int64)
 
 
+def _log_ratio(lower, upper):
+    """Compute logarithmic endpoint ratios, including nearly equal endpoints.
+
+    All endpoints are positive. ``log1p`` avoids cancellation for nearby
+    values; log differences handle ratios that exceed the floating-point range
+    or round their relative difference to minus one.
+    """
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        result = np.log1p((upper - lower) / lower)
+    replace = ~np.isfinite(result)
+    result[replace] = np.log(upper[replace]) - np.log(lower[replace])
+    return result
+
+
+def _pdf_arrays(value, pdf, laws=None, boundaries=None):
+    """Validate one continuous density and integrate its interpolation regions.
+
+    Return the coordinate, density, law, boundary arrays and their total mass.
+    Coordinates must be finite and nondecreasing with positive support width;
+    densities must be finite and nonnegative. Repeated coordinates carry no
+    mass. Positive-width intervals must meet their logarithmic law's positivity
+    requirements. Analytic segment integrals retain the supplied weights;
+    normalization is checked separately because a mixed table may allocate
+    some or all probability to its discrete component.
+    """
+    value, pdf = np.asarray(value, dtype=float), np.asarray(pdf, dtype=float)
+    if (
+        value.ndim != 1
+        or value.shape != pdf.shape
+        or len(value) < 2
+        or not np.all(np.isfinite(value))
+        or not np.all(np.isfinite(pdf))
+        or np.any(pdf < 0)
+        or np.any(np.diff(value) < 0)
+        or value[-1] <= value[0]
+    ):
+        raise ValueError(
+            "PDF coordinates must be finite and nondecreasing with positive support "
+            "width; densities must be matching finite nonnegative vectors"
+        )
+    laws, boundaries = _interpolation_arrays(len(value), laws, boundaries)
+    mass, start = 0.0, 0
+    for law, boundary in zip(laws.astype(str), boundaries):
+        stop = boundary - 1
+        x0, x1 = value[start:stop], value[start + 1 : stop + 1]
+        y0, y1 = pdf[start:stop], pdf[start + 1 : stop + 1]
+        active = x1 > x0
+        x0, x1, y0, y1 = x0[active], x1[active], y0[active], y1[active]
+        width = x1 - x0
+        if law in ("semilog-x", "log") and np.any(x0 <= 0):
+            raise ValueError("Logarithmic PDF coordinates must be positive")
+        if law in ("semilog-y", "log") and (np.any(y0 <= 0) or np.any(y1 <= 0)):
+            raise ValueError("Logarithmic PDF densities must be positive")
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            if law == "histogram":
+                areas = width * y0
+            elif law == "linear":
+                areas = width * (0.5 * y0 + 0.5 * y1)
+            elif law == "semilog-x":
+                ratio = _log_ratio(x0, x1)
+                weight = np.empty_like(ratio)
+                small = ratio < 1.0e-3
+                r = ratio[small]
+                weight[small] = 0.5 + r / 12.0 - r**3 / 720.0 + r**5 / 30240.0
+                r = ratio[~small]
+                weight[~small] = 1.0 / (-np.expm1(-r)) - 1.0 / r
+                areas = width * ((1.0 - weight) * y0 + weight * y1)
+            elif law == "semilog-y":
+                ratio = _log_ratio(y0, y1)
+                mean = y0.copy()
+                varying = ratio != 0
+                mean[varying] = (y1[varying] - y0[varying]) / ratio[varying]
+                areas = width * mean
+            else:
+                ratio = _log_ratio(x0, x1)
+                exponent = ratio + _log_ratio(y0, y1)
+                areas = np.empty_like(ratio)
+                small = np.abs(exponent) < 1.0e-3
+                factor = np.ones(np.count_nonzero(small))
+                nonzero = exponent[small] != 0
+                factor[nonzero] = (
+                    np.expm1(exponent[small][nonzero]) / exponent[small][nonzero]
+                )
+                areas[small] = x0[small] * y0[small] * ratio[small] * factor
+                areas[~small] = (
+                    (x1[~small] * y1[~small] - x0[~small] * y0[~small])
+                    * ratio[~small]
+                    / exponent[~small]
+                )
+            if not np.all(np.isfinite(areas)) or np.any(areas < 0):
+                raise ValueError("PDF interval masses must be finite and nonnegative")
+            mass += float(np.sum(areas))
+        start = stop
+    return value, pdf, laws, boundaries, mass
+
+
+def _check_probability_mass(mass):
+    """Require unit total mass within the absolute source-precision tolerance.
+
+    Validation never rescales the source values. The same tolerance applies
+    to a standalone PDF, a discrete PMF, their combined mixed probability,
+    and every individual PDF in a packed collection.
+    """
+    if not np.isfinite(mass) or abs(mass - 1.0) > PROBABILITY_TOLERANCE:
+        raise ValueError(
+            f"Total probability {mass:.16g} must equal one within "
+            f"{PROBABILITY_TOLERANCE:g}"
+        )
+
+
 def pdf_table(group, values, pdf, law="linear", unit="eV"):
     """Write a one-dimensional probability-density table.
 
@@ -264,16 +375,16 @@ def pdf_table(group, values, pdf, law="linear", unit="eV"):
     Raises
     ------
     ValueError
-        Coordinate and density lengths differ, there are fewer than two
-        points, or the interpolation law is unsupported.
+        Coordinates, densities, interpolation domains, or normalization are
+        invalid under the common probability-table rules.
 
     Notes
     -----
     Writes ``type = table``, ``value``, ``pdf``, and a single-region
     ``interpolation`` group. The caller supplies correctly converted,
-    normalized data: this function does not normalize the PDF, construct
-    a CDF, or validate monotonicity, nonnegativity, or total probability.
-    A failure after dataset creation can leave a partial destination group.
+    normalized data. The shared validator checks the density's integral
+    under its interpolation law against ``PROBABILITY_TOLERANCE`` before
+    writing. Source values are preserved; no CDF is written.
     """
     distribution_table(group, values, pdf, laws=[law], unit=unit)
 
@@ -297,8 +408,10 @@ def distribution_table(
     those weights without independently normalizing either component.
     Interpolation describes only a continuous PDF. CDFs and CMFs are derived
     by the reader. Discrete coordinates carry the same unit as PDF coordinates;
-    probability masses are dimensionless. Invalid pairs and shapes raise
-    ValueError before datasets are written.
+    probability masses are dimensionless. Coordinates, probabilities,
+    interpolation domains, and combined normalization are validated before
+    writing. ``PROBABILITY_TOLERANCE`` is an absolute tolerance about one;
+    invalid input raises ValueError without creating datasets or attributes.
     """
     continuous, discrete = value is not None, discrete_value is not None
     if (
@@ -309,20 +422,9 @@ def distribution_table(
         raise ValueError(
             "Supply a PDF coordinate/density pair, a discrete coordinate/mass pair, or both"
         )
+    mass = 0.0
     if continuous:
-        value, pdf = np.asarray(value, dtype=float), np.asarray(pdf, dtype=float)
-        if (
-            value.ndim != 1
-            or value.shape != pdf.shape
-            or not np.all(np.isfinite(value))
-            or not np.all(np.isfinite(pdf))
-            or np.any(pdf < 0)
-            or np.any(np.diff(value) < 0)
-            or len(value) < 2
-            or value[-1] <= value[0]
-        ):
-            raise ValueError("Invalid continuous PDF table")
-        laws, boundaries = _interpolation_arrays(len(value), laws, boundaries)
+        value, pdf, laws, boundaries, mass = _pdf_arrays(value, pdf, laws, boundaries)
     elif laws is not None or boundaries is not None:
         raise ValueError("Discrete probability masses do not use interpolation")
     if discrete:
@@ -338,6 +440,9 @@ def distribution_table(
             or np.any(pmf < 0)
         ):
             raise ValueError("Invalid discrete probability table")
+        with np.errstate(over="ignore"):
+            mass += float(np.sum(pmf))
+    _check_probability_mass(mass)
     group.attrs["type"] = "table"
     if continuous:
         quantity(group, "value", value, unit)
@@ -380,18 +485,27 @@ def pdf_tables(group, tables, unit="eV"):
     Region boundaries remain local to their individual table, not the combined
     array. No normalization, resampling, or CDF construction is performed.
 
-    Empty collections, invalid array shapes, and invalid interpolation metadata
-    raise ValueError before any datasets are created. The parent distribution
-    and file publication remain the caller's responsibility.
+    Each PDF is validated under the same coordinate, density, interpolation
+    domain, and normalization rules as a standalone probability table.
+    Invalid input raises ValueError before any datasets are created.
+    The parent distribution and file publication remain the caller's
+    responsibility.
     """
+    _write_pdf_arrays(group, _packed_pdf_arrays(tables), unit)
+
+
+def _packed_pdf_arrays(tables):
+    """Validate every PDF before packing its arrays and local region metadata."""
     values, densities, rules, endpoints = [], [], [], []
     offsets, rule_offsets = [0], [0]
-    for value, pdf, laws, boundaries in tables:
-        value = np.asarray(value, dtype=np.float64)
-        pdf = np.asarray(pdf, dtype=np.float64)
-        if value.ndim != 1 or pdf.ndim != 1 or value.shape != pdf.shape:
-            raise ValueError(f"{group.name}: PDF coordinates and densities must match")
-        laws, boundaries = _interpolation_arrays(len(value), laws, boundaries)
+    for index, (value, pdf, laws, boundaries) in enumerate(tables):
+        try:
+            value, pdf, laws, boundaries, mass = _pdf_arrays(
+                value, pdf, laws, boundaries
+            )
+            _check_probability_mass(mass)
+        except ValueError as error:
+            raise ValueError(f"Packed PDF table {index}: {error}") from error
         values.append(value)
         densities.append(pdf)
         rules.append(laws)
@@ -399,16 +513,23 @@ def pdf_tables(group, tables, unit="eV"):
         offsets.append(offsets[-1] + len(value))
         rule_offsets.append(rule_offsets[-1] + len(laws))
     if not values:
-        raise ValueError(f"{group.name}: PDF table collection must not be empty")
+        raise ValueError("PDF table collection must not be empty")
+    return {
+        "offsets": np.asarray(offsets, dtype=np.int64),
+        "value": np.concatenate(values),
+        "pdf": np.concatenate(densities),
+        "interpolation/offsets": np.asarray(rule_offsets, dtype=np.int64),
+        "interpolation/laws": np.concatenate(rules),
+        "interpolation/boundaries": np.concatenate(endpoints),
+    }
 
+
+def _write_pdf_arrays(group, arrays, unit):
+    """Write an already validated packed collection with coordinate units."""
     # Point offsets delimit tables; region offsets delimit their interpolation rules.
-    quantity(group, "offsets", np.asarray(offsets, dtype=np.int64))
-    quantity(group, "value", np.concatenate(values), unit)
-    quantity(group, "pdf", np.concatenate(densities), f"1/{unit}" if unit else None)
-    rule = group.create_group("interpolation")
-    quantity(rule, "offsets", np.asarray(rule_offsets, dtype=np.int64))
-    quantity(rule, "laws", np.concatenate(rules))
-    quantity(rule, "boundaries", np.concatenate(endpoints))
+    units = {"value": unit, "pdf": f"1/{unit}" if unit else None}
+    for name, array in arrays.items():
+        quantity(group, name, array, units.get(name))
 
 
 def multi_table(
@@ -421,7 +542,8 @@ def multi_table(
     interpolation between tables, restricted to histogram or linear. Each item
     of ``tables`` follows :func:`pdf_tables` and retains its own PDF rules.
     ``unit`` describes the sampled coordinate, independently of the grid unit.
-    Invalid grid/table counts or outer interpolation raise ValueError.
+    Invalid grid/table counts, outer interpolation, or conditional PDFs raise
+    ValueError before writing any part of the representation.
     """
     grid = np.asarray(grid, dtype=np.float64)
     tables = list(tables)
@@ -435,10 +557,11 @@ def multi_table(
     laws, boundaries = _interpolation_arrays(len(grid), laws, boundaries)
     if not set(laws.astype(str)) <= {"histogram", "linear"}:
         raise ValueError("Multi-table grid interpolation must be histogram or linear")
+    arrays = _packed_pdf_arrays(tables)
     group.attrs["type"] = "multi-table"
     quantity(group, "grid", grid, grid_unit)
     interpolation(group, len(grid), laws, boundaries)
-    pdf_tables(group.create_group("tables"), tables, unit)
+    _write_pdf_arrays(group.create_group("tables"), arrays, unit)
 
 
 # ======================================================================================

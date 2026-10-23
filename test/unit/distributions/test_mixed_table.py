@@ -97,7 +97,12 @@ def test_packed_multi_table_has_no_child_distributions(
             file,
             [1, 3],
             [
-                ([1, 2, 2, 4], [1, 1, 2, 4], ["histogram", "log"], [2, 4]),
+                (
+                    [1, 2, 2, 4],
+                    np.array([1, 1, 2, 4]) / 7,
+                    ["histogram", "log"],
+                    [2, 4],
+                ),
                 ([1, 2], [1, 1], ["linear"], None),
             ],
         )

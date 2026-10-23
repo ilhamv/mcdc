@@ -161,7 +161,9 @@ Probability table
      - Nonnegative probability masses, required with ``discrete-value``.
 
 At least one coordinate/probability pair is required.
-The PMF sum plus the PDF integral equals one, within source precision.
+Coordinates and probabilities are finite, and probability values are nonnegative.
+The PMF sum plus the PDF integral differs from one by at most :math:`10^{-6}`.
+The integral follows the specified density interpolation laws.
 The two components carry their combined probabilities, rather than each being normalized to one.
 Discrete outcomes may lie inside or outside the continuous support and are sampled exactly.
 ``discrete-value`` carries the sampled coordinate's unit, and ``pmf`` is dimensionless.
