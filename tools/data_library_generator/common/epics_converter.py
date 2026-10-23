@@ -332,7 +332,7 @@ def write_tabulated(group, table, grid_unit=None, value_unit=None):
     Repeated coordinates are retained, including photoelectric opening edges.
     """
     grid, values, boundaries, laws = table
-    group.attrs["type"] = "tabulated"
+    group.attrs["type"] = "table"
     quantity(group, "grid", grid, grid_unit)
     quantity(group, "value", values, value_unit)
     interpolation(

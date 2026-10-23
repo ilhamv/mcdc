@@ -47,3 +47,26 @@ Nuclide-temperature file
 
 .. literalinclude:: illustrations/layout-nuclide-temperature.yaml
    :language: yaml
+
+Reusable data
+-------------
+
+The following illustrations show tabulated, polynomial, and constant scalar functions.
+Their fields and units are defined in :doc:`representations`.
+
+:download:`Download layout-data.yaml <illustrations/layout-data.yaml>`.
+
+.. literalinclude:: illustrations/layout-data.yaml
+   :language: yaml
+
+Reusable distributions
+----------------------
+
+The following illustrations show a single table, a multi-table distribution, and a joint energy-angle distribution.
+Their fields and offset conventions are defined in :doc:`representations`.
+For angular distributions, sampled coordinates and densities are dimensionless and omit unit attributes.
+
+:download:`Download layout-distributions.yaml <illustrations/layout-distributions.yaml>`.
+
+.. literalinclude:: illustrations/layout-distributions.yaml
+   :language: yaml

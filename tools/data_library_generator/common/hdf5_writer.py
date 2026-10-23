@@ -210,26 +210,35 @@ def interpolation(group, count, laws=None, boundaries=None):
     creating the group, but does not inspect coordinates or values, evaluate
     interpolation, or check positivity domains for logarithmic laws.
     """
-    # Validate that the interpolation regions cover every local table interval
+    laws, boundaries = _interpolation_arrays(count, laws, boundaries)
+    rule = group.create_group("interpolation")
+    quantity(rule, "laws", laws)
+    quantity(rule, "boundaries", boundaries)
+
+
+def _interpolation_arrays(count, laws=None, boundaries=None):
+    """Validate local interpolation regions and return their storage arrays.
+
+    Boundaries are inclusive, zero-based upper-point indices within one
+    table. This validation is shared by standalone and packed tables so
+    packing does not change the interpretation of interpolation regions.
+    """
     if count < 2:
-        raise ValueError(f"{group.name}: tabulated data requires at least two points")
-    if laws is None:
-        laws = ["linear"]
+        raise ValueError("Tabulated data requires at least two points")
+    laws = np.asarray(["linear"] if laws is None else laws, dtype="S16")
     boundaries = np.asarray([count - 1] if boundaries is None else boundaries)
     if (
-        boundaries.ndim != 1
+        laws.ndim != 1
+        or boundaries.ndim != 1
         or len(boundaries) == 0
         or not np.issubdtype(boundaries.dtype, np.integer)
         or len(laws) != len(boundaries)
         or boundaries[-1] != count - 1
         or np.any(np.diff(np.r_[0, boundaries]) <= 0)
-        or not set(laws) <= INTERPOLATION_LAWS
+        or not set(laws.astype(str)) <= INTERPOLATION_LAWS
     ):
-        raise ValueError(f"{group.name}: invalid interpolation regions")
-    # Store explicit interpolation laws and their local upper-point indices
-    rule = group.create_group("interpolation")
-    rule.create_dataset("laws", data=np.asarray(laws, dtype="S16"))
-    rule.create_dataset("boundaries", data=boundaries)
+        raise ValueError("Invalid interpolation regions")
+    return laws, boundaries.astype(np.int64)
 
 
 def pdf_table(group, values, pdf, law="linear", unit="eV"):
@@ -259,7 +268,7 @@ def pdf_table(group, values, pdf, law="linear", unit="eV"):
 
     Notes
     -----
-    Writes ``type = tabulated``, ``value``, ``pdf``, and a single-region
+    Writes ``type = table``, ``value``, ``pdf``, and a single-region
     ``interpolation`` group. The caller supplies correctly converted,
     normalized data: this function does not normalize the PDF, construct
     a CDF, or validate monotonicity, nonnegativity, or total probability.
@@ -269,10 +278,103 @@ def pdf_table(group, values, pdf, law="linear", unit="eV"):
         raise ValueError(
             f"{group.name}: PDF coordinates and densities differ in length"
         )
-    group.attrs["type"] = "tabulated"
+    group.attrs["type"] = "table"
     quantity(group, "value", values, unit)
     quantity(group, "pdf", pdf, f"1/{unit}" if unit is not None else None)
     interpolation(group, len(values), [law])
+
+
+# ======================================================================================
+# Packed probability-density tables
+# ======================================================================================
+
+
+def pdf_tables(group, tables, unit="eV"):
+    """Write a collection of PDF tables as concatenated arrays and offsets.
+
+    Parameters
+    ----------
+    group : h5py.Group
+        Empty destination collection. The containing distribution determines
+        how these tables are indexed; this collection has no type attribute.
+    tables : iterable of tuple
+        Each item is ``(value, pdf, laws, boundaries)`` for one table. Values
+        and densities are one-dimensional arrays of equal length. Laws and
+        boundaries follow :func:`interpolation`, including its defaults and
+        inclusive, table-local boundary convention. All tables describe the
+        same physical coordinate and have at least two points.
+    unit : str, optional
+        Coordinate unit, with the inverse attached to ``pdf``. ``None`` omits
+        both attributes for dimensionless coordinates such as angular cosine.
+
+    Notes
+    -----
+    For N tables, ``offsets`` has N + 1 entries: it starts at zero, and its
+    terminal entry is the combined point count. Table i occupies the half-open
+    slice ``offsets[i]:offsets[i + 1]`` in ``value`` and ``pdf``. The child
+    ``interpolation`` group similarly packs regions with its own N + 1 offsets.
+    Region boundaries remain local to their individual table, not the combined
+    array. No normalization, resampling, or CDF construction is performed.
+
+    Empty collections, invalid array shapes, and invalid interpolation metadata
+    raise ValueError before any datasets are created. The parent distribution
+    and file publication remain the caller's responsibility.
+    """
+    values, densities, rules, endpoints = [], [], [], []
+    offsets, rule_offsets = [0], [0]
+    for value, pdf, laws, boundaries in tables:
+        value = np.asarray(value, dtype=np.float64)
+        pdf = np.asarray(pdf, dtype=np.float64)
+        if value.ndim != 1 or pdf.ndim != 1 or value.shape != pdf.shape:
+            raise ValueError(f"{group.name}: PDF coordinates and densities must match")
+        laws, boundaries = _interpolation_arrays(len(value), laws, boundaries)
+        values.append(value)
+        densities.append(pdf)
+        rules.append(laws)
+        endpoints.append(boundaries)
+        offsets.append(offsets[-1] + len(value))
+        rule_offsets.append(rule_offsets[-1] + len(laws))
+    if not values:
+        raise ValueError(f"{group.name}: PDF table collection must not be empty")
+
+    # Point offsets delimit tables; region offsets delimit their interpolation rules.
+    quantity(group, "offsets", np.asarray(offsets, dtype=np.int64))
+    quantity(group, "value", np.concatenate(values), unit)
+    quantity(group, "pdf", np.concatenate(densities), f"1/{unit}" if unit else None)
+    rule = group.create_group("interpolation")
+    quantity(rule, "offsets", np.asarray(rule_offsets, dtype=np.int64))
+    quantity(rule, "laws", np.concatenate(rules))
+    quantity(rule, "boundaries", np.concatenate(endpoints))
+
+
+def multi_table(
+    group, grid, tables, *, grid_unit="eV", unit="eV", laws=None, boundaries=None
+):
+    """Write a grid-indexed family of distributions using packed PDF tables.
+
+    ``grid`` contains one finite, nondecreasing coordinate per table and carries
+    ``grid_unit`` when dimensional. ``laws`` and ``boundaries`` describe
+    interpolation between tables, restricted to histogram or linear. Each item
+    of ``tables`` follows :func:`pdf_tables` and retains its own PDF rules.
+    ``unit`` describes the sampled coordinate, independently of the grid unit.
+    Invalid grid/table counts or outer interpolation raise ValueError.
+    """
+    grid = np.asarray(grid, dtype=np.float64)
+    tables = list(tables)
+    if (
+        grid.ndim != 1
+        or len(grid) != len(tables)
+        or not np.all(np.isfinite(grid))
+        or np.any(np.diff(grid) < 0)
+    ):
+        raise ValueError(f"{group.name}: invalid multi-table grid or table count")
+    laws, boundaries = _interpolation_arrays(len(grid), laws, boundaries)
+    if not set(laws.astype(str)) <= {"histogram", "linear"}:
+        raise ValueError("Multi-table grid interpolation must be histogram or linear")
+    group.attrs["type"] = "multi-table"
+    quantity(group, "grid", grid, grid_unit)
+    interpolation(group, len(grid), laws, boundaries)
+    pdf_tables(group.create_group("tables"), tables, unit)
 
 
 # ======================================================================================

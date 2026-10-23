@@ -34,6 +34,8 @@ For example, neutron cross sections reside under ``/projectiles/neutron`` in a n
 HDF5 terminology follows the `HDF Group's data model <https://support.hdfgroup.org/documentation/hdf5/latest/_h5_d_m__u_g.html>`_: groups organize objects, datasets store typed arrays, and attributes attach metadata to an object.
 The scientific meaning and relationships of those objects are defined here by MC/DC.
 
+Use `myHDF5 <https://myhdf5.hdfgroup.org>`_, hosted by The HDF Group, to browse file groups, datasets, and attributes and visualize data directly in a web browser.
+
 .. toctree::
    :maxdepth: 1
 

@@ -178,7 +178,7 @@ def test_conversion_preserves_other_projectiles_and_source_records(sources):
             == "nuclear"
         )
         factor = photon["reactions/coherent-scattering/form-factor"]
-        assert factor.attrs["type"] == "tabulated"
+        assert factor.attrs["type"] == "table"
         assert factor["grid"].attrs["unit"] == "1/angstrom"
         assert "unit" not in factor["value"].attrs
         shells = photon["reactions/photoelectric/subshells"]

@@ -18,7 +18,7 @@ from numbers import Integral
 import ACEtk
 import numpy as np
 
-from .hdf5_writer import interpolation, pdf_table, quantity
+from .hdf5_writer import interpolation, multi_table, pdf_table, pdf_tables, quantity
 
 # ======================================================================================
 # ACE units, interpolation codes, and source-library conventions
@@ -716,13 +716,13 @@ def write_multiplicity(group, source):
         ]
         quantity(
             group,
-            "coefficient",
+            "coefficients",
             coefficients / EV_PER_MEV ** np.arange(len(coefficients)),
             units if len(coefficients) > 1 else None,
         )
     elif source.type == 2:
         # Convert the incident-energy grid and preserve the tabulated yield law
-        group.attrs["type"] = "tabulated"
+        group.attrs["type"] = "table"
         quantity(group, "grid", np.asarray(source.energies) * EV_PER_MEV, "eV")
         quantity(group, "value", source.multiplicities)
         write_interpolation(group, source.interpolation_data, len(source.energies))
@@ -784,8 +784,8 @@ def write_fission(group, ace):
     write_multiplicity(group.create_group("prompt-multiplicity"), prompt.multiplicity)
     delayed_yield = group.create_group("delayed-multiplicity")
     if delayed is None:
-        delayed_yield.attrs["type"] = "constant"
-        quantity(delayed_yield, "value", 0.0)
+        delayed_yield.attrs["type"] = "polynomial"
+        quantity(delayed_yield, "coefficients", np.array([0.0]))
     else:
         write_multiplicity(delayed_yield, delayed.multiplicity)
     # Keep precursor fractions, decay rates, and energy spectra aligned by index
@@ -844,9 +844,9 @@ def write_angular_distribution(group, source):
     Notes
     -----
     Fully isotropic data needs only ``type = isotropic``. Other inputs
-    receive an eV incident-energy grid, linear interpolation between
-    incident energies, and ``distributions/{i}`` groups numbered from zero.
-    Each child retains its source PDF interpolation law. Both cosine and
+    use ``type = multi-table`` with an eV ``grid``, linear interpolation
+    between incident energies, and packed conditional cosine tables.
+    Each table retains its source PDF interpolation law. Both cosine and
     cosine-density datasets are dimensionless and omit unit attributes.
     Angles stored jointly with outgoing energy are handled by the energy
     distribution writer instead of this function.
@@ -855,21 +855,20 @@ def write_angular_distribution(group, source):
     if isinstance(source, ACEtk.continuous.FullyIsotropicDistribution):
         group.attrs["type"] = "isotropic"
         return
-    # Store incident-energy dependence and its conditional cosine distributions
-    group.attrs["type"] = "incident-energy-dependent"
-    quantity(group, "energy", np.asarray(source.incident_energies) * EV_PER_MEV, "eV")
-    interpolation(group, source.number_incident_energies)
-    tables = group.create_group("distributions")
+    # Collect conditional cosine tables, retaining each local interpolation law.
+    tables = []
     for i, table in enumerate(source.distributions):
         if source.distribution_type(i + 1) != ACEtk.AngularDistributionType.Tabulated:
             raise ValueError("Angular distributions must be tabulated or isotropic")
-        pdf_table(
-            tables.create_group(str(i)),
-            table.cosines,
-            table.pdf,
-            interpolation_law(table.interpolation),
-            unit=None,
+        tables.append(
+            (table.cosines, table.pdf, [interpolation_law(table.interpolation)], None)
         )
+    multi_table(
+        group,
+        np.asarray(source.incident_energies) * EV_PER_MEV,
+        tables,
+        unit=None,
+    )
 
 
 # ======================================================================================
@@ -910,13 +909,15 @@ def write_energy_distribution(group, source):
     ACEtk's supplied values and PDF directly as a converted tabulation,
     with ``type = n-body`` and linear interpolation.
 
-    Tabulated outgoing-energy sources create one numbered distribution per
-    incident energy. Correlated sources instead create numbered ``tables``
-    containing an outgoing-energy density and either Kalbach--Mann Data
-    parameters or one conditional cosine density per outgoing-energy point.
-    Kalbach parameter grids match the outgoing-energy coordinates. These
-    correlated representations have inherent linear incident-energy
-    dependence rather than a separate outer interpolation group.
+    Tabulated outgoing-energy sources use ``multi-table`` with packed PDF
+    tables on an eV incident-energy grid. Correlated sources pack outgoing
+    densities in ``tables/outgoing-energy``. Energy-angle sources additionally
+    pack conditional angular densities in ``tables/cosine-distributions``,
+    ordered by the concatenated outgoing-energy points. Kalbach--Mann sources
+    retain one Data record per incident energy under each parameter group;
+    their parameter grids match the corresponding outgoing-energy table.
+    Correlated representations have inherent linear incident-energy dependence
+    rather than a separate outer interpolation group.
 
     Source interpolation within each PDF or parameter table is retained.
     Selection among multiple spectra is handled by ``write_spectrum_selection``.
@@ -945,7 +946,7 @@ def write_energy_distribution(group, source):
             group, "restriction-energy", source.restriction_energy * EV_PER_MEV, "eV"
         )
         temperature = group.create_group("temperature")
-        temperature.attrs["type"] = "tabulated"
+        temperature.attrs["type"] = "table"
         quantity(temperature, "grid", np.asarray(source.energies) * EV_PER_MEV, "eV")
         quantity(
             temperature, "value", np.asarray(source.temperatures) * EV_PER_MEV, "eV"
@@ -976,41 +977,43 @@ def write_energy_distribution(group, source):
             raise ValueError(
                 "This distribution requires linear interpolation between incident energies"
             )
-        quantity(
-            group, "energy", np.asarray(source.incident_energies) * EV_PER_MEV, "eV"
-        )
+        incident_energy = np.asarray(source.incident_energies) * EV_PER_MEV
         if isinstance(source, ACEtk.continuous.OutgoingEnergyDistributionData):
-            # Write an outgoing-energy density for each incident energy
-            group.attrs["type"] = "incident-energy-dependent"
-            interpolation(group, source.number_incident_energies)
-            tables = group.create_group("distributions")
+            # Pack all marginal densities while retaining their individual PDF rules.
+            tables = []
             for i in range(source.number_incident_energies):
                 table = source.distribution(i + 1)
-                pdf_table(
-                    tables.create_group(str(i)),
-                    np.asarray(table.outgoing_energies) * EV_PER_MEV,
-                    np.asarray(table.pdf) / EV_PER_MEV,
-                    interpolation_law(table.interpolation),
+                tables.append(
+                    (
+                        np.asarray(table.outgoing_energies) * EV_PER_MEV,
+                        np.asarray(table.pdf) / EV_PER_MEV,
+                        [interpolation_law(table.interpolation)],
+                        None,
+                    )
                 )
+            multi_table(group, incident_energy, tables)
         else:
-            # Pair each outgoing-energy density with its angular representation
+            # Pack both levels of correlated tables in their original source order.
             kalbach = isinstance(source, ACEtk.continuous.KalbachMannDistributionData)
             group.attrs["type"] = (
                 "kalbach-mann" if kalbach else "energy-angle-tabulated"
             )
+            quantity(group, "energy", incident_energy, "eV")
             tables = group.create_group("tables")
+            outgoing, angular = [], []
+            if kalbach:
+                parameters = {
+                    name: tables.create_group(name)
+                    for name in ("precompound-factor", "angular-slope")
+                }
             for i, source_table in enumerate(source.distributions):
-                table = tables.create_group(str(i))
                 energy = np.asarray(source_table.outgoing_energies) * EV_PER_MEV
                 law = interpolation_law(source_table.interpolation)
-                pdf_table(
-                    table.create_group("outgoing-energy"),
-                    energy,
-                    np.asarray(source_table.pdf) / EV_PER_MEV,
-                    law,
+                outgoing.append(
+                    (energy, np.asarray(source_table.pdf) / EV_PER_MEV, [law], None)
                 )
                 if kalbach:
-                    # Store Kalbach parameters on the outgoing-energy grid
+                    # Keep general Data representations for the two angular parameters.
                     for name, values in (
                         (
                             "precompound-factor",
@@ -1021,22 +1024,30 @@ def write_energy_distribution(group, source):
                             source_table.angular_distribution_slope_values,
                         ),
                     ):
-                        data = table.create_group(name)
-                        data.attrs["type"] = "tabulated"
+                        data = parameters[name].create_group(str(i))
+                        data.attrs["type"] = "table"
                         quantity(data, "grid", energy, "eV")
                         quantity(data, "value", values)
                         interpolation(data, len(energy), [law])
                 else:
-                    # Store one conditional cosine density per outgoing-energy point
-                    cosines = table.create_group("cosine-distributions")
-                    for j, cosine in enumerate(source_table.distributions):
-                        pdf_table(
-                            cosines.create_group(str(j)),
+                    cosines = list(source_table.distributions)
+                    if len(cosines) != len(energy):
+                        raise ValueError("Each outgoing energy requires a cosine table")
+                    angular.extend(
+                        (
                             cosine.cosines,
                             cosine.pdf,
-                            interpolation_law(cosine.interpolation),
-                            unit=None,
+                            [interpolation_law(cosine.interpolation)],
+                            None,
                         )
+                        for cosine in cosines
+                    )
+            pdf_tables(tables.create_group("outgoing-energy"), outgoing)
+            if not kalbach:
+                pdf_tables(
+                    tables.create_group("cosine-distributions"), angular, unit=None
+                )
+
     else:
         raise ValueError(f"Unsupported energy distribution: {type(source).__name__}")
 
