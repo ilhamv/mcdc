@@ -620,7 +620,11 @@ class DistributionNBody(DistributionBase):
     Parameters
     ----------
     values, probabilities : array_like
-        Outgoing values and their piecewise-linear relative density.
+        Outgoing values and their relative probability density.
+    interpolations : int or sequence of int, optional
+        Density interpolation laws, defaulting to linear.
+    interpolation_boundaries : sequence of int, optional
+        Exclusive upper-point indices for the interpolation regions.
     """
 
     # MC/DC framework metadata
@@ -633,6 +637,9 @@ class DistributionNBody(DistributionBase):
         self,
         values: ArrayLike,
         probabilities: ArrayLike,
+        *,
+        interpolations=INTERPOLATION_LINEAR,
+        interpolation_boundaries=None,
     ) -> None:
         super().__init__()
 
@@ -649,12 +656,15 @@ class DistributionNBody(DistributionBase):
         pdf_normalized, cdf_normalized = cdf_from_pdf(
             value_array,
             probability_array,
+            interpolations,
+            interpolation_boundaries,
         )
 
         self.pdf = DataTable(
             value_array,
             pdf_normalized,
-            INTERPOLATION_LINEAR,
+            interpolations,
+            interpolation_boundaries,
             aux=cdf_normalized,
         )
 

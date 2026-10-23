@@ -893,7 +893,7 @@ def write_energy_distribution(group, source):
     Raises
     ------
     ValueError
-        The source class is unsupported, N-body interpolation is not linear,
+        The source class is unsupported, the ACE N-body tabulation is not linear,
         a multi-incident-energy source is not linear-linear between incident
         energies, or a delegated table/interpolation writer rejects data.
 
@@ -959,7 +959,9 @@ def write_energy_distribution(group, source):
     elif isinstance(source, ACEtk.continuous.NBodyPhaseSpaceDistribution):
         # Convert the source phase-space tabulation, preserving probability density
         if source.interpolation != 2:
-            raise ValueError("N-body distributions require linear interpolation")
+            raise ValueError(
+                "ACE N-body source tabulations require linear interpolation"
+            )
         pdf_table(
             group,
             np.asarray(source.values) * EV_PER_MEV,

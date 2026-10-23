@@ -212,9 +212,12 @@ def read_distribution(group):
         )
     if kind == "n-body":
         density = read_distribution_density(group)
-        result = DistributionNBody(density.x, density.y)
-        result.pdf = density
-        return result
+        return DistributionNBody(
+            density.x,
+            density.y,
+            interpolations=density.interpolations,
+            interpolation_boundaries=density.interpolation_boundaries,
+        )
     if kind in ("kalbach-mann", "energy-angle-table"):
         return read_correlated_distribution(group, kind)
     raise ValueError(f"{group.name}: unsupported Distribution type {kind!r}")

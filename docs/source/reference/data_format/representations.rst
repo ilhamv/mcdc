@@ -342,6 +342,7 @@ N-body energy distribution
 ``type = n-body`` contains ``value`` (float [K], eV), ``pdf`` (float [K], 1/eV), and ``interpolation`` (Interpolation).
 It stores an N-body energy-density table.
 Its array and normalization constraints are the same as those of an energy distribution table.
+The density supports all five Interpolation laws and multiple interpolation regions.
 The N-body phase-space model assumes isotropic emission in the center-of-mass frame, independently of outgoing energy in that frame.
 Emission in the laboratory frame is generally anisotropic after the kinematic transformation.
 See the `NJOY manual's N-body phase-space definition <https://github.com/njoy/NJOY2016-manual/blob/master/acex.tex>`_.
