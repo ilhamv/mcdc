@@ -30,7 +30,7 @@ def test_proton_angular_tables(tmp_path, prepare_simulation, mock_rng_sequence, 
                     table.attrs["type"] = "isotropic"
                 else:
                     table["cosines"], table["pdf"] = cosines, [1.0, 1.0]
-        _, distribution = set_angular_distribution(group, None)
+        distribution = set_angular_distribution(group)
     container, data = prepare_simulation(objects=[distribution])
     simulation = container[0]
     result = sample_distribution(

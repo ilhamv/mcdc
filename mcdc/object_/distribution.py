@@ -6,6 +6,7 @@ from numpy.typing import ArrayLike, NDArray
 
 from mcdc.constant import (
     DISTRIBUTION_NONE,
+    DISTRIBUTION_ISOTROPIC,
     DISTRIBUTION_TABLE,
     DISTRIBUTION_MULTITABLE,
     DISTRIBUTION_LEVEL_SCATTERING,
@@ -42,17 +43,32 @@ class DistributionBase(MCDCPolymorphic):
 # ======================================================================================
 # None
 # ======================================================================================
-# Placeholder for a distribution that does not need to store data:
-#   - Isotropic distributions
-#   - Energy-correlated angles stored in the energy distribution
+# Placeholder for an absent distribution, including a separate angular law
+# whose angle is supplied by a joint energy-angle distribution.
 
 
 class DistributionNone(DistributionBase):
-    """Placeholder for an implicit or externally stored distribution."""
+    """An absent distribution; this placeholder must never be sampled."""
 
     # MC/DC framework metadata
     label = "none_distribution"
     sub_type = DISTRIBUTION_NONE
+
+
+# ======================================================================================
+# Isotropic
+# ======================================================================================
+
+
+class DistributionIsotropic(DistributionBase):
+    """Uniform angular cosine on [-1, 1], shared once per simulation.
+
+    No probability arrays are required. Direction-handling code supplies the
+    uniform azimuth and applies the reaction's reference-frame transformation.
+    """
+
+    label = "isotropic_distribution"
+    sub_type = DISTRIBUTION_ISOTROPIC
 
 
 # ======================================================================================
@@ -674,3 +690,24 @@ class DistributionNBody(DistributionBase):
         text += f"  - value {print_1d_array(self.pdf.x)}\n"
         text += f"  - pdf {print_1d_array(self.pdf.y)}\n"
         return text
+
+
+# ======================================================================================
+# Independent and joint angle-energy validation
+# ======================================================================================
+
+
+def validate_angle_energy(angular, spectra, path):
+    """Require either a separate cosine law or a joint law for every spectrum.
+
+    DistributionNone means that each energy spectrum must supply both energy
+    and angle. An explicit angular distribution, including isotropy, pairs
+    with energy-only spectra. Mixed independent/joint alternatives would leave
+    the reaction's angular source ambiguous and are rejected.
+    """
+    joint = (DistributionKalbachMann, DistributionTableEnergyAngle, DistributionNBody)
+    for spectrum in spectra:
+        if isinstance(angular, DistributionNone) != isinstance(spectrum, joint):
+            raise ValueError(
+                f"{path}: angular fields must agree with the energy distribution's correlation"
+            )

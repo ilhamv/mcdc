@@ -181,6 +181,11 @@ evaporation_distribution = into_dtype([
     ('base_ID', int64),
 ])
 
+isotropic_distribution = into_dtype([
+    ('ID', int64),
+    ('base_ID', int64),
+])
+
 kalbach_mann_distribution = into_dtype([
     ('energy_offset', int64),
     ('energy_length', int64),
@@ -348,7 +353,6 @@ secondary_product = into_dtype([
     ('delayed', bool_),
     ('decay_constant', float64),
     ('reference_frame', int64),
-    ('angle_type', int64),
     ('mu_ID', int64),
     ('N_spectrum_probability_bin', int64),
     ('N_spectrum', int64),
@@ -623,13 +627,11 @@ neutron_capture_reaction = into_dtype([
 
 neutron_elastic_scattering_reaction = into_dtype([
     ('mu_table_ID', int64),
-    ('angle_type', int64),
     ('ID', int64),
     ('base_ID', int64),
 ])
 
 neutron_fission_reaction = into_dtype([
-    ('angle_type', int64),
     ('mu_ID', int64),
     ('spectrum_ID', int64),
     ('prompt_multiplicity_ID', int64),
@@ -647,7 +649,6 @@ neutron_fission_reaction = into_dtype([
 
 neutron_inelastic_scattering_reaction = into_dtype([
     ('multiplicity', int64),
-    ('angle_type', int64),
     ('mu_ID', int64),
     ('N_spectrum_probability_bin', int64),
     ('N_spectrum', int64),
@@ -674,7 +675,6 @@ proton_elastic_scattering_reaction = into_dtype([
 
 proton_inelastic_scattering_reaction = into_dtype([
     ('multiplicity', int64),
-    ('angle_type', int64),
     ('mu_ID', int64),
     ('N_spectrum_probability_bin', int64),
     ('N_spectrum', int64),
@@ -985,6 +985,8 @@ def make_simulation_type(N: dict):
         ('N_distribution', int64),
         ('evaporation_distributions', evaporation_distribution, (N['evaporation_distribution'])),
         ('N_evaporation_distribution', int64),
+        ('isotropic_distributions', isotropic_distribution, (N['isotropic_distribution'])),
+        ('N_isotropic_distribution', int64),
         ('kalbach_mann_distributions', kalbach_mann_distribution, (N['kalbach_mann_distribution'])),
         ('N_kalbach_mann_distribution', int64),
         ('level_scattering_distributions', level_scattering_distribution, (N['level_scattering_distribution'])),

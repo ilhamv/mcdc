@@ -9,6 +9,8 @@ import mcdc.mcdc_get as mcdc_get
 import mcdc.transport.rng as rng
 
 from mcdc.constant import (
+    DISTRIBUTION_ISOTROPIC,
+    DISTRIBUTION_NONE,
     DISTRIBUTION_EVAPORATION,
     DISTRIBUTION_KALBACH_MANN,
     DISTRIBUTION_LEVEL_SCATTERING,
@@ -58,7 +60,13 @@ def _sample_distribution(E, distribution, rng_state, simulation, data, scale):
     distribution_type = distribution["sub_type"]
     ID = distribution["sub_ID"]
 
-    if distribution_type == DISTRIBUTION_TABLE:
+    if distribution_type == DISTRIBUTION_NONE:
+        raise ValueError("Cannot sample an absent Distribution")
+
+    elif distribution_type == DISTRIBUTION_ISOTROPIC:
+        return sample_isotropic_cosine(rng_state)
+
+    elif distribution_type == DISTRIBUTION_TABLE:
         table = simulation["table_distributions"][ID]
         return sample_table(table, rng_state, simulation, data)
 

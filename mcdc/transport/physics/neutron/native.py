@@ -14,9 +14,7 @@ import mcdc.transport.util as util
 from mcdc.constant import (
     COINCIDENCE_TOLERANCE_TIME,
     EVENT_TIME_CENSUS,
-    ANGLE_DISTRIBUTED,
-    ANGLE_ENERGY_CORRELATED,
-    ANGLE_ISOTROPIC,
+    DISTRIBUTION_NONE,
     BOLTZMANN_K,
     THERMAL_THRESHOLD_FACTOR,
     LIGHT_SPEED,
@@ -36,7 +34,6 @@ from mcdc.transport.distribution import (
     sample_correlated_distribution_with_scale,
     sample_distribution,
     sample_distribution_with_scale,
-    sample_isotropic_cosine,
     sample_isotropic_direction,
 )
 from mcdc.transport.physics.util import (
@@ -523,14 +520,8 @@ def sample_elastic_scattering(
     uy = vy / speed
     uz = vz / speed
 
-    # The elastic law explicitly distinguishes isotropic and tabulated angles.
-    if elastic_scattering["angle_type"] == ANGLE_ISOTROPIC:
-        mu0 = sample_isotropic_cosine(particle_container)
-    else:
-        mu_distribution = simulation["distributions"][elastic_scattering["mu_table_ID"]]
-        mu0 = sample_distribution(
-            E, mu_distribution, particle_container, simulation, data
-        )
+    mu_distribution = simulation["distributions"][elastic_scattering["mu_table_ID"]]
+    mu0 = sample_distribution(E, mu_distribution, particle_container, simulation, data)
 
     # Scatter the direction in COM
     azi = 2.0 * PI * rng.lcg(particle_container)
@@ -657,13 +648,8 @@ def sample_inelastic_scattering(
         # Sample angle (if not energy-correlated)
         # ==============================================================================
 
-        angle_type = inelastic_scattering["angle_type"]
-        if angle_type == ANGLE_ENERGY_CORRELATED:
-            pass
-        elif angle_type == ANGLE_ISOTROPIC:
-            mu = sample_isotropic_cosine(particle_container_new)
-        elif angle_type == ANGLE_DISTRIBUTED:
-            mu_distribution = simulation["distributions"][inelastic_scattering["mu_ID"]]
+        mu_distribution = simulation["distributions"][inelastic_scattering["mu_ID"]]
+        if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
             mu = sample_distribution(
                 E, mu_distribution, particle_container_new, simulation, data
             )
@@ -697,7 +683,7 @@ def sample_inelastic_scattering(
         spectrum = simulation["distributions"][ID]
 
         # Sample energy
-        if not angle_type == ANGLE_ENERGY_CORRELATED:
+        if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
             E_new = sample_distribution_with_scale(
                 E, spectrum, particle_container_new, simulation, data
             )
@@ -838,20 +824,15 @@ def sample_fission(
 
         if prompt:
             # Sample angle (if not energy-correlated)
-            angle_type = fission["angle_type"]
-            if angle_type == ANGLE_ENERGY_CORRELATED:
-                pass
-            elif angle_type == ANGLE_ISOTROPIC:
-                mu = sample_isotropic_cosine(particle_container_new)
-            elif angle_type == ANGLE_DISTRIBUTED:
-                mu_distribution = simulation["distributions"][fission["mu_ID"]]
+            mu_distribution = simulation["distributions"][fission["mu_ID"]]
+            if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
                 mu = sample_distribution(
                     E, mu_distribution, particle_container_new, simulation, data
                 )
 
             # Sample energy (also angle if correlated)
             spectrum = simulation["distributions"][fission["spectrum_ID"]]
-            if not angle_type == ANGLE_ENERGY_CORRELATED:
+            if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
                 E_new = sample_distribution_with_scale(
                     E,
                     spectrum,

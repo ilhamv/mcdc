@@ -6,12 +6,7 @@ import numpy as np
 
 ####
 
-import mcdc.object_.distribution as distribution
-
 from mcdc.constant import (
-    ANGLE_ISOTROPIC,
-    ANGLE_ENERGY_CORRELATED,
-    ANGLE_DISTRIBUTED,
     NEUTRON_REACTION_CAPTURE,
     NEUTRON_REACTION_ELASTIC_SCATTERING,
     NEUTRON_REACTION_FISSION,
@@ -28,10 +23,11 @@ from mcdc.object_.hdf5_reader import (
     read_distribution,
     set_xs_interpolation,
     numbered_groups,
-    text,
 )
 from mcdc.object_.distribution import (
     DistributionBase,
+    DistributionNone,
+    validate_angle_energy,
 )
 from mcdc.object_.util import decode_reference_frame
 from mcdc.print_ import print_1d_array
@@ -97,16 +93,14 @@ class NeutronReactionElasticScattering(NeutronReactionBase):
     sub_type = NEUTRON_REACTION_ELASTIC_SCATTERING
 
     mu_table: DistributionBase
-    angle_type: int
 
     def __init__(self, MT, xs, xs_offset, reference_frame, mu):
         super().__init__(MT, xs, xs_offset, reference_frame, 0.0)
+        if isinstance(mu, DistributionNone):
+            raise ValueError(
+                "Elastic scattering requires an explicit angular distribution"
+            )
         self.mu_table = mu
-        self.angle_type = (
-            ANGLE_ISOTROPIC
-            if isinstance(mu, distribution.DistributionNone)
-            else ANGLE_DISTRIBUTED
-        )
 
     @classmethod
     def from_h5_group(cls, h5_group, simulation):
@@ -116,9 +110,7 @@ class NeutronReactionElasticScattering(NeutronReactionBase):
             raise ValueError(
                 f"{h5_group.name}: elastic scattering requires center-of-mass angular data"
             )
-        _, mu = set_angular_distribution(
-            h5_group["angular-cosine-distribution"], simulation
-        )
+        mu = set_angular_distribution(h5_group["angular-cosine-distribution"])
         return set_xs_interpolation(
             cls(MT, xs, xs_offset, reference_frame, mu), h5_group
         )
@@ -168,7 +160,6 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
     sub_type = NEUTRON_REACTION_INELASTIC_SCATTERING
 
     multiplicity: int
-    angle_type: int
     mu: DistributionBase
     N_spectrum_probability_bin: int
     N_spectrum: int
@@ -186,7 +177,6 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
         reference_frame,
         q_value,
         multiplicity,
-        angle_type,
         mu,
         spectrum_probability_grid,
         spectrum_probability,
@@ -195,8 +185,8 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
         super().__init__(MT, xs, xs_offset, reference_frame, q_value)
 
         self.multiplicity = multiplicity
-        self.angle_type = angle_type
         self.mu = mu
+        validate_angle_energy(mu, energy_spectra, self.label)
         self.N_spectrum_probability_bin = len(spectrum_probability_grid) - 1
         self.N_spectrum = len(energy_spectra)
         self.spectrum_probability_grid = spectrum_probability_grid
@@ -209,9 +199,7 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
         MT, xs, xs_offset, reference_frame, q_value = set_basic_properties(h5_group)
         multiplicity = int(h5_group["multiplicity"][()])
 
-        angle_type, mu = set_angular_distribution(
-            h5_group.get("angular-cosine-distribution"), simulation
-        )
+        mu = set_angular_distribution(h5_group.get("angular-cosine-distribution"))
 
         # Energy spectra
         spectrum_probability_grid = h5_group["spectrum-probability-grid"][()]
@@ -220,7 +208,7 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
             read_distribution(child)
             for child in numbered_groups(h5_group, "energy-spectrum-")
         ]
-        validate_angle_energy(angle_type, energy_spectra, h5_group.name)
+        validate_angle_energy(mu, energy_spectra, h5_group.name)
         if (
             not energy_spectra
             or np.any(spectrum_probability < 0)
@@ -238,7 +226,6 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
                 reference_frame,
                 q_value,
                 multiplicity,
-                angle_type,
                 mu,
                 spectrum_probability_grid,
                 spectrum_probability,
@@ -249,9 +236,7 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
 
     def __repr__(self):
         text = super().__repr__()
-        if self.angle_type == ANGLE_ISOTROPIC:
-            text += f"  - Scattering cosine: Isotropic\n"
-        elif self.angle_type == ANGLE_ENERGY_CORRELATED:
+        if isinstance(self.mu, DistributionNone):
             text += f"  - Scattering cosine: Energy-correlated\n"
         else:
             text += f"  - Scattering cosine: {self.mu.label} [ID: {self.mu.ID}]\n"
@@ -274,7 +259,6 @@ class NeutronReactionFission(NeutronReactionBase):
     label = "neutron_fission_reaction"
     sub_type = NEUTRON_REACTION_FISSION
 
-    angle_type: int
     mu: DistributionBase
     spectrum: DistributionBase
     prompt_multiplicity: DataBase
@@ -291,14 +275,13 @@ class NeutronReactionFission(NeutronReactionBase):
         xs_offset,
         reference_frame,
         q_value,
-        angle_type,
         mu,
         spectrum,
     ):
         super().__init__(MT, xs, xs_offset, reference_frame, q_value)
-        self.angle_type = angle_type
         self.mu = mu
         self.spectrum = spectrum
+        validate_angle_energy(mu, [spectrum], self.label)
         self.prompt_multiplicity = DataPolynomial(np.array([0.0]))
         self.delayed_multiplicity = DataPolynomial(np.array([0.0]))
         self.N_delayed_precursor = 0
@@ -312,17 +295,15 @@ class NeutronReactionFission(NeutronReactionBase):
         MT, xs, xs_offset, reference_frame, q_value = set_basic_properties(h5_group)
 
         # Prompt angular distribution
-        angle_type, mu = set_angular_distribution(
-            h5_group.get("prompt-angular-cosine-distribution"), simulation
+        mu = set_angular_distribution(
+            h5_group.get("prompt-angular-cosine-distribution")
         )
 
         # Prompt spectrum
         spectrum = read_distribution(h5_group["prompt-energy-distribution"])
-        validate_angle_energy(angle_type, [spectrum], h5_group.name)
+        validate_angle_energy(mu, [spectrum], h5_group.name)
 
-        result = cls(
-            MT, xs, xs_offset, reference_frame, q_value, angle_type, mu, spectrum
-        )
+        result = cls(MT, xs, xs_offset, reference_frame, q_value, mu, spectrum)
         result.prompt_multiplicity = read_data(h5_group["prompt-multiplicity"])
         result.delayed_multiplicity = read_data(h5_group["delayed-multiplicity"])
         delayed = h5_group["delayed-neutrons"]
@@ -353,9 +334,7 @@ class NeutronReactionFission(NeutronReactionBase):
     def __repr__(self):
         text = super().__repr__()
         text += f"  - Prompt neutron\n"
-        if self.angle_type == ANGLE_ISOTROPIC:
-            text += f"  - Emission cosine: Isotropic\n"
-        elif self.angle_type == ANGLE_ENERGY_CORRELATED:
+        if isinstance(self.mu, DistributionNone):
             text += f"  - Emission cosine: Energy-correlated\n"
         else:
             text += f"  - Emission cosine: {self.mu.label} [ID: {self.mu.ID}]\n"
@@ -376,24 +355,8 @@ def set_basic_properties(h5_group):
     return (*read_reaction_properties(h5_group), float(h5_group["Q-value"][()]))
 
 
-def set_angular_distribution(h5_group, simulation):
+def set_angular_distribution(h5_group):
     """Read an explicit angle law, or identify an angle supplied by a joint law."""
     if h5_group is None:
-        return ANGLE_ENERGY_CORRELATED, simulation.distributions[0]
-    if text(h5_group.attrs["type"]) == "isotropic":
-        return ANGLE_ISOTROPIC, simulation.distributions[0]
-    return ANGLE_DISTRIBUTED, read_distribution(h5_group)
-
-
-def validate_angle_energy(angle_type, spectra, path):
-    """Require either a separate angle law or a joint law for every spectrum."""
-    joint = (
-        distribution.DistributionKalbachMann,
-        distribution.DistributionTableEnergyAngle,
-        distribution.DistributionNBody,
-    )
-    for spectrum in spectra:
-        if (angle_type == ANGLE_ENERGY_CORRELATED) != isinstance(spectrum, joint):
-            raise ValueError(
-                f"{path}: angular fields must agree with the energy distribution's correlation"
-            )
+        return DistributionNone()
+    return read_distribution(h5_group)

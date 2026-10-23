@@ -104,6 +104,7 @@ class Simulation(MCDCBase):
     non_numba = [
         "_next_compile_ID",
         "_next_sub_ID",
+        "_shared_objects",
         "compiled",
         "regions",
         "root_universe",
@@ -114,6 +115,8 @@ class Simulation(MCDCBase):
     ]
     _next_compile_ID: int = 1  # Non-Numba
     _next_sub_ID: dict[tuple[int, int], int]  # Non-Numba
+    # Canonical stateless objects prevent duplicate records during compilation.
+    _shared_objects: dict[type, MCDCBase]  # Non-Numba
 
     # Basic parameters
     name: str
@@ -314,6 +317,7 @@ class Simulation(MCDCBase):
     def _reset_model(self) -> None:
         # Registration state
         self._next_sub_ID = {}
+        self._shared_objects = {}
 
         # Physics
         self.data = []

@@ -11,7 +11,7 @@ from mcdc.constant import INTERPOLATION_LINEAR, REFERENCE_FRAME_COM, REFERENCE_F
 
 from mcdc.object_.data import DataPolynomial, DataTable, encode_interpolation
 from mcdc.object_.distribution import (
-    DistributionNone,
+    DistributionIsotropic,
     DistributionTable,
     DistributionMultiTable,
     DistributionLevelScattering,
@@ -180,7 +180,7 @@ def read_distribution(group):
     """
     kind = text(group.attrs["type"])
     if kind == "isotropic":
-        return DistributionNone()
+        return DistributionIsotropic()
     if kind == "table":
         arguments = {}
         if "value" in group or "pdf" in group:
