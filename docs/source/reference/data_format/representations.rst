@@ -175,31 +175,11 @@ The terminal density of a histogram does not define a further interval.
 Repeated coordinates describe a jump in density; their zero-width interval carries no probability mass.
 CDFs and cumulative probability masses are derived from the stored PDF and PMF.
 
-Isotropic and composed distributions
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Isotropic distribution
+^^^^^^^^^^^^^^^^^^^^^^
 
-.. list-table:: Representations
-   :header-rows: 1
-   :widths: 28 40 32
-
-   * - ``type`` attribute
-     - Fields
-     - Meaning
-   * - ``isotropic``
-     - None
-     - Angular cosine uniformly distributed on [-1, 1], with uniform azimuth.
-   * - ``independent-angle-energy``
-     - ``angular-cosine-distribution``: Distribution; ``energy-distribution``: Distribution
-     - Independent outgoing angle and energy, conditioned on incident energy where applicable.
-   * - ``elastic-angle-energy``
-     - ``angular-cosine-distribution``: Distribution
-     - Angle distribution with energy determined by elastic two-body kinematics.
-   * - ``mixture``
-     - ``components/{i}/probability``: Data; ``components/{i}/distribution``: Distribution
-     - Select a component by its probability, then sample its distribution.
-
-Mixture probabilities depend on incident energy in eV, are nonnegative, and sum to one at each incident energy in their common domain.
-All components sample the same physical quantities in the same frame.
+``type = isotropic`` describes an angular cosine uniformly distributed on [-1, 1], with uniform azimuth.
+It has no datasets.
 
 Multi-table distributions
 ^^^^^^^^^^^^^^^^^^^^^^^^^
