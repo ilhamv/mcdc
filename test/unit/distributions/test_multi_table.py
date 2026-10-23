@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import mcdc.transport.distribution as dist
-from mcdc.object_.distribution import DistributionMultiTable, DistributionTable
+from mcdc.object_.distribution import DistributionMultiTable
 
 
 @pytest.mark.parametrize("scale", [False, True])
@@ -13,10 +13,8 @@ def test_multi_table_distribution_first_grid_point(
     # At E = grid[0], the first table [10, 20] is sampled directly with xi = 0.25.
     distribution = DistributionMultiTable(
         grid=grid,
-        tables=[
-            DistributionTable([10.0, 20.0], cdf=[0.0, 1.0]),
-            DistributionTable([100.0, 200.0], cdf=[0.0, 1.0]),
-        ][: len(grid)],
+        value=[[10.0, 20.0], [100.0, 200.0]][: len(grid)],
+        cdf=[[0.0, 1.0], [0.0, 1.0]][: len(grid)],
     )
     simulation_container, data = prepare_simulation(objects=[distribution])
     simulation = simulation_container[0]
@@ -34,10 +32,8 @@ def test_multi_table_distribution_sample(mock_rng_sequence, prepare_simulation):
     # MCNP Theory & User Manual §2.4.3.5.4.4 (Law 4: Tabular Distribution)
     distribution = DistributionMultiTable(
         grid=[1.0, 3.0],
-        tables=[
-            DistributionTable([10.0, 20.0, 30.0], cdf=[0.0, 0.5, 1.0]),
-            DistributionTable([100.0, 200.0, 300.0], cdf=[0.0, 0.6, 1.0]),
-        ],
+        value=[[10.0, 20.0, 30.0], [100.0, 200.0, 300.0]],
+        cdf=[[0.0, 0.5, 1.0], [0.0, 0.6, 1.0]],
     )
     simulation_container, data = prepare_simulation(objects=[distribution])
     simulation = simulation_container[0]
@@ -78,11 +74,8 @@ def test_incident_regions_preserve_child_pdf_interpolation(
     # Every child has a linear, rising density with a known quantile at xi = 0.25.
     distribution = DistributionMultiTable(
         grid=[1.0, 3.0, 5.0],
-        tables=[
-            DistributionTable([10.0, 20.0], pdf=[0.0, 1.0]),
-            DistributionTable([100.0, 200.0], pdf=[0.0, 1.0]),
-            DistributionTable([1000.0, 2000.0], pdf=[0.0, 1.0]),
-        ],
+        value=[[10.0, 20.0], [100.0, 200.0], [1000.0, 2000.0]],
+        pdf=[[0.0, 1.0], [0.0, 1.0], [0.0, 1.0]],
         interpolations=[1, 2],
         interpolation_boundaries=[2, 3],
     )

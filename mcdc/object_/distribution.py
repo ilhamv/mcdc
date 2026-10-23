@@ -1,13 +1,11 @@
 import numpy as np
 
-from collections.abc import Sequence
 from numbers import Integral
 from numpy import float64, int64
 from numpy.typing import ArrayLike, NDArray
 
 from mcdc.constant import (
     DISTRIBUTION_NONE,
-    DISTRIBUTION_PMF,
     DISTRIBUTION_TABLE,
     DISTRIBUTION_MULTITABLE,
     DISTRIBUTION_LEVEL_SCATTERING,
@@ -20,12 +18,11 @@ from mcdc.constant import (
     INTERPOLATION_LINEAR,
 )
 from mcdc.object_.base import MCDCPolymorphic
-from mcdc.object_.data import DataBase, DataTable
+from mcdc.object_.data import DataBase, DataNone, DataTable, decode_interpolation
 from mcdc.object_.util import (
     cdf_from_pdf,
     pdf_from_cdf,
     multi_cdf_from_pdf,
-    cmf_from_pmf,
 )
 from mcdc.print_ import print_1d_array, print_error
 
@@ -59,134 +56,108 @@ class DistributionNone(DistributionBase):
 
 
 # ======================================================================================
-# Probability mass function
-# ======================================================================================
-
-
-class DistributionPMF(DistributionBase):
-    """Discrete probability mass function.
-
-    Parameters
-    ----------
-    value : array_like
-        Values that may be sampled.
-    pmf : array_like
-        Nonnegative relative masses, normalized internally.
-    """
-
-    # MC/DC framework metadata
-    label = "pmf_distribution"
-    sub_type = DISTRIBUTION_PMF
-
-    value: NDArray[float64]
-    pmf: NDArray[float64]
-    cmf: NDArray[float64]
-
-    def __init__(self, value: ArrayLike, pmf: ArrayLike) -> None:
-        super().__init__()
-
-        self.value = np.asarray(value, dtype=float64)
-        pmf_array = np.asarray(pmf, dtype=float64)
-
-        if self.value.ndim != 1:
-            print_error("value must be one-dimensional.")
-        if pmf_array.ndim != 1:
-            print_error("pmf must be one-dimensional.")
-        if len(self.value) == 0:
-            print_error("value and pmf must contain at least one entry.")
-        if len(self.value) != len(pmf_array):
-            print_error("value and pmf must have the same length.")
-
-        self.pmf, self.cmf = cmf_from_pmf(pmf_array)
-
-    def __repr__(self) -> str:
-        text = super().__repr__()
-
-        text += f"  - value {print_1d_array(self.value)}\n"
-        text += f"  - pmf {print_1d_array(self.pmf)}\n"
-        return text
-
-
-# ======================================================================================
 # Table
 # ======================================================================================
 
 
 class DistributionTable(DistributionBase):
-    """One-dimensional continuous tabulated distribution.
+    """One-dimensional continuous, discrete, or mixed distribution.
 
-    Exactly one of ``pdf`` or ``cdf`` must be supplied alongside ``value``.
-    PDF input uses the supplied interpolation regions, defaulting to linear.
-    CDF input produces a histogram density. The distribution is normalized
-    internally by integrating each segment under its declared law.
+    ``value`` with ``pdf`` (or a continuous ``cdf``) describes a density;
+    ``discrete_value`` with ``pmf`` describes point masses. Either component
+    may be omitted. The PDF integral and PMF sum are normalized together,
+    preserving their relative probabilities. Interpolation applies only to
+    the continuous density. CDF input describes a piecewise-linear CDF.
     """
 
-    # MC/DC framework metadata
     label = "table_distribution"
     sub_type = DISTRIBUTION_TABLE
 
-    pdf: DataTable
+    pdf: DataBase
+    discrete_value: NDArray[float64]
+    pmf: NDArray[float64]
+    cmf: NDArray[float64]
+    continuous_probability: float
 
     def __init__(
         self,
-        value: ArrayLike,
-        pdf: ArrayLike | None = None,
-        cdf: ArrayLike | None = None,
+        value=None,
+        pdf=None,
+        cdf=None,
+        *,
+        discrete_value=None,
+        pmf=None,
         interpolations=INTERPOLATION_LINEAR,
         interpolation_boundaries=None,
-    ) -> None:
+    ):
         super().__init__()
-
-        if (pdf is None) == (cdf is None):
-            print_error("Exactly one of pdf or cdf must be provided.")
-
-        value_array = np.asarray(value, dtype=float64)
-
-        if value_array.ndim != 1:
-            print_error("value must be one-dimensional.")
-        if len(value_array) == 0:
-            print_error("value must contain at least one entry.")
-
-        if pdf is not None:
-            pdf_array = np.asarray(pdf, dtype=float64)
-
-            if pdf_array.ndim != 1:
-                print_error("pdf must be one-dimensional.")
-            if len(pdf_array) != len(value_array):
-                print_error("value and pdf must have the same length.")
-
-            pdf_normalized, cdf_normalized = cdf_from_pdf(
-                value_array, pdf_array, interpolations, interpolation_boundaries
+        continuous = value is not None
+        discrete = discrete_value is not None
+        if continuous != (pdf is not None or cdf is not None):
+            raise ValueError("Continuous values require exactly one PDF or CDF")
+        if pdf is not None and cdf is not None:
+            raise ValueError("Supply either PDF or CDF, not both")
+        if discrete != (pmf is not None) or not (continuous or discrete):
+            raise ValueError(
+                "Supply a continuous density, discrete values with PMF, or both"
             )
-            interpolation = interpolations
-        else:
-            cdf_array = np.asarray(cdf, dtype=float64)
-
-            if cdf_array.ndim != 1:
-                print_error("cdf must be one-dimensional.")
-            if len(cdf_array) != len(value_array):
-                print_error("value and cdf must have the same length.")
-
-            interpolation = INTERPOLATION_HISTOGRAM
-            pdf_normalized, cdf_normalized = pdf_from_cdf(
-                value_array,
-                cdf_array,
-            )
-
-        self.pdf = DataTable(
-            value_array,
-            pdf_normalized,
-            interpolation,
-            interpolation_boundaries,
-            aux=cdf_normalized,
+        self.discrete_value = np.asarray(
+            [] if discrete_value is None else discrete_value, dtype=float64
         )
+        masses = np.asarray([] if pmf is None else pmf, dtype=float64)
+        if (
+            self.discrete_value.ndim != 1
+            or masses.ndim != 1
+            or self.discrete_value.shape != masses.shape
+            or (discrete and len(masses) == 0)
+            or not np.all(np.isfinite(self.discrete_value))
+            or not np.all(np.isfinite(masses))
+            or np.any(masses < 0)
+        ):
+            raise ValueError(
+                "Discrete values and nonnegative finite masses must be matching vectors"
+            )
+        self.pdf = DataNone()
+        continuous_mass = 0.0
+        if continuous:
+            x = np.asarray(value, dtype=float64)
+            if cdf is not None:
+                raw_cdf = np.asarray(cdf, dtype=float64)
+                density, cumulative = pdf_from_cdf(x, raw_cdf)
+                continuous_mass = float(raw_cdf[-1] - raw_cdf[0])
+                density, cumulative = (
+                    density * continuous_mass,
+                    cumulative * continuous_mass,
+                )
+                interpolations, interpolation_boundaries = INTERPOLATION_HISTOGRAM, None
+            else:
+                density, cumulative = cdf_from_pdf(
+                    x, pdf, interpolations, interpolation_boundaries, normalize=False
+                )
+                continuous_mass = float(cumulative[-1])
+        total = float(np.sum(masses)) + continuous_mass
+        if not np.isfinite(total) or total <= 0:
+            raise ValueError("Combined probability must have positive finite mass")
+        self.pmf = masses / total
+        self.cmf = np.r_[0.0, np.cumsum(self.pmf)]
+        self.continuous_probability = continuous_mass / total
+        if continuous_mass > 0:
+            self.pdf = DataTable(
+                x,
+                density / total,
+                interpolations,
+                interpolation_boundaries,
+                aux=cumulative / total,
+            )
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         text = super().__repr__()
-
-        text += f"  - value {print_1d_array(self.pdf.x)}\n"
-        text += f"  - probability density {print_1d_array(self.pdf.y)}\n"
-        text += "  - cumulative distribution " f"{print_1d_array(self.pdf.aux[0])}\n"
+        text += f"  - continuous probability: {self.continuous_probability}\n"
+        text += f"  - discrete values: {print_1d_array(self.discrete_value)}\n"
+        text += f"  - probability masses: {print_1d_array(self.pmf)}\n"
+        if self.continuous_probability > 0:
+            text += f"  - continuous values: {print_1d_array(self.pdf.x)}\n"
+            text += f"  - probability density: {print_1d_array(self.pdf.y)}\n"
         return text
 
 
@@ -196,98 +167,164 @@ class DistributionTable(DistributionBase):
 
 
 class DistributionMultiTable(DistributionBase):
-    """Family of tabulated distributions indexed by another grid.
+    """Conditional continuous PDFs stored in independent packed arrays.
 
-    ``tables`` supplies one DistributionTable object per grid point.
-
-    ``interpolations`` and ``interpolation_boundaries`` describe interpolation
-    between neighboring tables on ``grid``. Boundaries are exclusive upper
-    point indices, with the final boundary equal to ``len(grid)``. A scalar
-    law applies to the full grid; supported laws are histogram and linear.
-    Each child table separately owns its PDF interpolation rules.
+    ``value`` and ``pdf`` (or ``cdf``) may be sequences of numerical vectors,
+    one per indexing-grid point. Alternatively supply concatenated vectors
+    with N + 1 ``offsets``. No DistributionTable objects are constructed.
+    Outer interpolation is histogram or linear. Packed PDF interpolation uses
+    local exclusive boundaries and N + 1 ``pdf_interpolation_offsets``;
+    a scalar PDF law applies to every table. Every PDF is normalized separately.
     """
 
-    # MC/DC framework metadata
     label = "multi_table_distribution"
     sub_type = DISTRIBUTION_MULTITABLE
 
     grid: NDArray[float64]
+    offsets: NDArray[int64]
+    value: NDArray[float64]
+    pdf: NDArray[float64]
+    cdf: NDArray[float64]
     interpolations: NDArray[int64]
     interpolation_boundaries: NDArray[int64]
-    tables: list[DistributionTable]
+    pdf_interpolations: NDArray[int64]
+    pdf_interpolation_boundaries: NDArray[int64]
+    pdf_interpolation_offsets: NDArray[int64]
 
     def __init__(
         self,
-        grid: ArrayLike,
-        tables: list[DistributionTable],
+        grid,
+        value,
+        pdf=None,
         *,
-        interpolations: int | Sequence[int] = INTERPOLATION_LINEAR,
-        interpolation_boundaries: Sequence[int] | None = None,
-    ) -> None:
+        cdf=None,
+        offsets=None,
+        interpolations=INTERPOLATION_LINEAR,
+        interpolation_boundaries=None,
+        pdf_interpolations=INTERPOLATION_LINEAR,
+        pdf_interpolation_boundaries=None,
+        pdf_interpolation_offsets=None,
+    ):
         super().__init__()
-
         self.grid = np.asarray(grid, dtype=float64)
-        if self.grid.ndim != 1 or len(self.grid) == 0:
+        if (
+            self.grid.ndim != 1
+            or not len(self.grid)
+            or not np.all(np.isfinite(self.grid))
+            or np.any(np.diff(self.grid) < 0)
+        ):
             raise ValueError(
-                "The multi-table grid must be a nonempty one-dimensional array"
+                "Multi-table grid must be finite, nonempty, and nondecreasing"
             )
-        if not np.all(np.isfinite(self.grid)) or np.any(np.diff(self.grid) < 0):
-            raise ValueError("Grid values must be finite and nondecreasing")
-
-        # Interpolation between neighboring grid tables.
-        if isinstance(interpolations, Integral):
-            self.interpolations = np.array([interpolations], dtype=int64)
-            self.interpolation_boundaries = np.array([len(self.grid)], dtype=int64)
-        else:
-            self.interpolations = np.asarray(interpolations, dtype=int64)
-            if interpolation_boundaries is None:
+        count = len(self.grid)
+        self.interpolations, self.interpolation_boundaries = _distribution_regions(
+            count, interpolations, interpolation_boundaries, outer=True
+        )
+        if offsets is not None:
+            raw_offsets = np.asarray(offsets)
+            if (
+                raw_offsets.ndim != 1
+                or not np.issubdtype(raw_offsets.dtype, np.integer)
+                or len(raw_offsets) != count + 1
+                or raw_offsets[0] != 0
+                or np.any(np.diff(raw_offsets) < 2)
+                or raw_offsets[-1] != len(value)
+            ):
                 raise ValueError(
-                    "Interpolation boundaries are required for a sequence of laws"
+                    "Packed PDF offsets must delimit one table per grid point"
                 )
-            self.interpolation_boundaries = np.asarray(
-                interpolation_boundaries, dtype=int64
-            )
-        if (
-            self.interpolations.ndim != 1
-            or self.interpolation_boundaries.ndim != 1
-            or len(self.interpolations) == 0
-            or len(self.interpolations) != len(self.interpolation_boundaries)
-        ):
-            raise ValueError(
-                "Interpolation laws and boundaries must be nonempty vectors of equal length"
-            )
-        if (
-            self.interpolation_boundaries[0] < min(2, len(self.grid))
-            or self.interpolation_boundaries[-1] != len(self.grid)
-            or np.any(np.diff(self.interpolation_boundaries) <= 0)
-        ):
-            raise ValueError("Invalid grid interpolation boundaries")
-        if np.any(
-            ~np.isin(
-                self.interpolations, [INTERPOLATION_HISTOGRAM, INTERPOLATION_LINEAR]
-            )
-        ):
-            raise ValueError(
-                "Multi-table interpolation requires histogram or linear interpolation"
-            )
+            slices = [slice(a, b) for a, b in zip(raw_offsets[:-1], raw_offsets[1:])]
+            values = [np.asarray(value)[s] for s in slices]
+            pdfs = [None if pdf is None else np.asarray(pdf)[s] for s in slices]
+            cdfs = [None if cdf is None else np.asarray(cdf)[s] for s in slices]
+            if (pdf is not None and len(pdf) != len(value)) or (
+                cdf is not None and len(cdf) != len(value)
+            ):
+                raise ValueError("Packed density arrays must have equal lengths")
+        else:
+            values = list(value)
+            pdfs = [None] * count if pdf is None else list(pdf)
+            cdfs = [None] * count if cdf is None else list(cdf)
+        if len(values) != count or len(pdfs) != count or len(cdfs) != count:
+            raise ValueError("Grid and PDF table counts must match")
+        if not isinstance(pdf_interpolations, Integral):
+            raw_rules = np.asarray(pdf_interpolation_offsets)
+            if (
+                raw_rules.ndim != 1
+                or not np.issubdtype(raw_rules.dtype, np.integer)
+                or len(raw_rules) != count + 1
+                or raw_rules[0] != 0
+                or np.any(np.diff(raw_rules) < 1)
+                or raw_rules[-1] != len(pdf_interpolations)
+                or pdf_interpolation_boundaries is None
+                or len(pdf_interpolation_boundaries) != len(pdf_interpolations)
+            ):
+                raise ValueError("Invalid packed PDF interpolation offsets")
+        xs, ys, cs, rules, ends = [], [], [], [], []
+        self.offsets = np.r_[0, np.cumsum([len(x) for x in values])].astype(int64)
+        roffsets = [0]
+        for i, (x, y, c) in enumerate(zip(values, pdfs, cdfs)):
+            if (y is None) == (c is None):
+                raise ValueError(
+                    "Each continuous table requires exactly one PDF or CDF"
+                )
+            x = np.asarray(x, dtype=float64)
+            if isinstance(pdf_interpolations, Integral):
+                law, boundary = pdf_interpolations, None
+            else:
+                a, b = raw_rules[i : i + 2]
+                law = np.asarray(pdf_interpolations)[a:b]
+                boundary = np.asarray(pdf_interpolation_boundaries)[a:b]
+            if c is not None:
+                y, c = pdf_from_cdf(x, c)
+                law, boundary = INTERPOLATION_HISTOGRAM, None
+            else:
+                y, c = cdf_from_pdf(x, y, law, boundary)
+            law, boundary = _distribution_regions(len(x), law, boundary)
+            xs.append(x)
+            ys.append(y)
+            cs.append(c)
+            rules.append(law)
+            ends.append(boundary)
+            roffsets.append(roffsets[-1] + len(law))
+        self.value, self.pdf, self.cdf = map(np.concatenate, (xs, ys, cs))
+        self.pdf_interpolations = np.concatenate(rules)
+        self.pdf_interpolation_boundaries = np.concatenate(ends)
+        self.pdf_interpolation_offsets = np.asarray(roffsets, dtype=int64)
 
-        # PDF interpolation belongs to the individual child distributions.
-        if len(tables) != len(self.grid):
-            raise ValueError(
-                "Grid points and distribution tables must have equal lengths"
-            )
-        self.tables = tables
+    def __repr__(self):
+        return (
+            super().__repr__()
+            + f"  - grid: {print_1d_array(self.grid)}\n  - PDF tables: {len(self.grid)}\n"
+        )
 
-    def __repr__(self) -> str:
-        text = super().__repr__()
 
-        text += f"  - grid: {print_1d_array(self.grid)}\n"
-        text += f"  - tables: {len(self.tables)}\n"
-
-        for i, table in enumerate(self.tables):
-            text += f"    - table[{i}] " f"(grid={self.grid[i]:.6g}, N={table.pdf.N})\n"
-
-        return text
+def _distribution_regions(count, laws, boundaries, outer=False):
+    """Return validated exclusive interpolation regions for one local grid."""
+    if isinstance(laws, Integral):
+        laws, boundaries = np.array([laws], dtype=int64), np.array([count], dtype=int64)
+    else:
+        laws = np.asarray(laws, dtype=int64)
+        if boundaries is None:
+            raise ValueError("Interpolation boundaries are required for multiple laws")
+        boundaries = np.asarray(boundaries, dtype=int64)
+    if (
+        laws.ndim != 1
+        or boundaries.ndim != 1
+        or not len(laws)
+        or len(laws) != len(boundaries)
+        or boundaries[0] < min(2, count)
+        or boundaries[-1] != count
+        or np.any(np.diff(boundaries) <= 0)
+    ):
+        raise ValueError("Invalid interpolation regions")
+    for law in laws:
+        decode_interpolation(law)
+    if outer and np.any(
+        ~np.isin(laws, [INTERPOLATION_HISTOGRAM, INTERPOLATION_LINEAR])
+    ):
+        raise ValueError("Multi-table grid interpolation must be histogram or linear")
+    return laws, boundaries
 
 
 # ======================================================================================

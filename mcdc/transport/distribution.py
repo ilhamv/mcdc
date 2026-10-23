@@ -1,3 +1,4 @@
+import numpy as np
 import math
 
 from numba import njit
@@ -115,7 +116,9 @@ def _sample_correlated_distribution(
 
     elif distribution_type == DISTRIBUTION_N_BODY:
         nbody = simulation["nbody_distributions"][ID]
-        E_out = sample_table(nbody, rng_state, simulation, data)
+        E_out, _ = sample_density_with_interval(
+            nbody["pdf_ID"], rng.lcg(rng_state), simulation, data
+        )
         mu = sample_isotropic_cosine(rng_state)
         return E_out, mu
 
@@ -155,9 +158,7 @@ def sample_isotropic_direction(rng_state):
 
 @njit
 def sample_table(table, rng_state, simulation, data):
-    """
-    Sample a value from a tabulated distribution.
-    """
+    """Sample a continuous value or an exact discrete outcome from a table."""
 
     value, _ = sample_table_with_interval(table, rng_state, simulation, data)
     return value
@@ -165,11 +166,26 @@ def sample_table(table, rng_state, simulation, data):
 
 @njit
 def sample_table_with_interval(table, rng_state, simulation, data):
-    """Sample a tabulated distribution and return its interpolation interval."""
+    """Sample a table and return its PDF interval, or -1 for a discrete outcome."""
 
     xi = rng.lcg(rng_state)
+    masses = mcdc_get.table_distribution.cmf_all(table, data)
+    discrete_probability = masses[-1]
+    if xi < discrete_probability or table["continuous_probability"] == 0.0:
+        pmf = mcdc_get.table_distribution.pmf_all(table, data)
+        index = min(int(np.searchsorted(masses, xi, side="right")) - 1, len(pmf) - 1)
+        while index > 0 and pmf[index] == 0.0:
+            index -= 1
+        return mcdc_get.table_distribution.discrete_value(index, table, data), -1
+    return sample_density_with_interval(
+        table["pdf_ID"], xi - discrete_probability, simulation, data
+    )
 
-    pdf_data = simulation["data"][table["pdf_ID"]]
+
+@njit
+def sample_density_with_interval(pdf_ID, xi, simulation, data):
+    """Invert a continuous DataTable density at a supplied cumulative mass."""
+    pdf_data = simulation["data"][pdf_ID]
     pdf_table = simulation["table_data"][pdf_data["sub_ID"]]
 
     cdf = mcdc_get.table_data.aux_vector(0, pdf_table, data)
@@ -177,6 +193,8 @@ def sample_table_with_interval(table, rng_state, simulation, data):
     # find_bin returns -1 at the first CDF point; avoid reading before the table.
     if xi <= cdf[0]:
         return mcdc_get.table_data.x(0, pdf_table, data), 0
+    if xi >= cdf[-1]:
+        return mcdc_get.table_data.x_last(pdf_table, data), len(cdf) - 2
     idx = min(max(find_bin(xi, cdf), 0), len(cdf) - 2)
 
     c0 = mcdc_get.table_data.aux(0, idx, pdf_table, data)
@@ -234,15 +252,6 @@ def invert_table_segment(xi, c0, v0, v1, p0, p1, interpolation):
 
 
 @njit
-def sample_pmf(pmf, rng_state, data):
-    xi = rng.lcg(rng_state)
-    cmf = mcdc_get.pmf_distribution.cmf_all(pmf, data)
-
-    idx = find_bin(xi, cmf)
-    return mcdc_get.pmf_distribution.value(idx, pmf, data)
-
-
-@njit
 def sample_white_direction(nx, ny, nz, rng_state):
     """Sample a cosine-weighted hemisphere about the normalized reference."""
     # Sample polar cosine
@@ -282,7 +291,7 @@ def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
     # Below grid: use first table without unit-base scaling.
     # Include equality: find_bin returns -1 at the first point.
     if E <= grid[0]:
-        idx = 0
+        idx = int(np.searchsorted(grid, E, side="right")) - 1 if E == grid[0] else 0
         scale = False
 
     # Above grid: use last table without unit-base scaling.
@@ -293,7 +302,7 @@ def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
     # Pick the table
     else:
         # Calculate Interpolation factor
-        idx = find_bin(E, grid)
+        idx = int(np.searchsorted(grid, E, side="right")) - 1
         E0 = grid[idx]
         E1 = grid[idx + 1]
         f = (E - E0) / (E1 - E0)
@@ -318,58 +327,68 @@ def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
             idx += 1
             use_next_table = True  # For scaling later if needed
 
-    # Sample from the selected table
-    ID = mcdc_get.multi_table_distribution.table_IDs(idx, multi_table, data)
-    sub_ID = simulation["distributions"][ID]["sub_ID"]
-    table_distribution = simulation["table_distributions"][sub_ID]
-    sample = sample_table(table_distribution, rng_state, simulation, data)
-
-    # No scaling needed?
+    # Packed arrays are owned directly by MultiTable; no child IDs are needed.
+    sampled = sample_multi_table_at(idx, rng.lcg(rng_state), multi_table, data)
     if not scale:
-        return sample
+        return sampled
+    low = idx - 1 if use_next_table else idx
+    high = low + 1
+    offsets = mcdc_get.multi_table_distribution.offsets_all(multi_table, data)
+    values = mcdc_get.multi_table_distribution.value_all(multi_table, data)
+    minimum = values[int(offsets[low])] + f * (
+        values[int(offsets[high])] - values[int(offsets[low])]
+    )
+    maximum = values[int(offsets[low + 1]) - 1] + f * (
+        values[int(offsets[high + 1]) - 1] - values[int(offsets[low + 1]) - 1]
+    )
+    first = values[int(offsets[idx])]
+    last = values[int(offsets[idx + 1]) - 1]
+    return minimum + (sampled - first) / (last - first) * (maximum - minimum)
 
-    # Retrieve the interval index
-    if use_next_table:
-        idx -= 1
 
-    # PDF tables
-    ID0 = mcdc_get.multi_table_distribution.table_IDs(idx, multi_table, data)
-    ID1 = mcdc_get.multi_table_distribution.table_IDs(idx + 1, multi_table, data)
-    #
-    sub_ID0 = simulation["distributions"][ID0]["sub_ID"]
-    sub_ID1 = simulation["distributions"][ID1]["sub_ID"]
-    #
-    table_distribution0 = simulation["table_distributions"][sub_ID0]
-    table_distribution1 = simulation["table_distributions"][sub_ID1]
-    #
-    ID = table_distribution["pdf_ID"]
-    ID0 = table_distribution0["pdf_ID"]
-    ID1 = table_distribution1["pdf_ID"]
-    #
-    sub_ID = simulation["data"][ID]["sub_ID"]
-    sub_ID0 = simulation["data"][ID0]["sub_ID"]
-    sub_ID1 = simulation["data"][ID1]["sub_ID"]
-    #
-    table = simulation["table_data"][sub_ID]
-    table0 = simulation["table_data"][sub_ID0]
-    table1 = simulation["table_data"][sub_ID1]
+@njit
+def multi_table_arrays(index, table, data):
+    """Return one PDF's coordinates, densities, CDF, and local region arrays."""
+    offsets = mcdc_get.multi_table_distribution.offsets_all(table, data)
+    start, end = int(offsets[index]), int(offsets[index + 1])
+    regions = mcdc_get.multi_table_distribution.pdf_interpolation_offsets_all(
+        table, data
+    )
+    first, last = int(regions[index]), int(regions[index + 1])
+    return (
+        mcdc_get.multi_table_distribution.value_all(table, data)[start:end],
+        mcdc_get.multi_table_distribution.pdf_all(table, data)[start:end],
+        mcdc_get.multi_table_distribution.cdf_all(table, data)[start:end],
+        mcdc_get.multi_table_distribution.pdf_interpolations_all(table, data)[
+            first:last
+        ],
+        mcdc_get.multi_table_distribution.pdf_interpolation_boundaries_all(table, data)[
+            first:last
+        ],
+    )
 
-    # Table's min
-    val_min0 = mcdc_get.table_data.x(0, table0, data)
-    val_min1 = mcdc_get.table_data.x(0, table1, data)
 
-    # Table's max
-    val_max0 = mcdc_get.table_data.x_last(table0, data)
-    val_max1 = mcdc_get.table_data.x_last(table1, data)
-
-    # The effective min and max
-    val_min = val_min0 + f * (val_min1 - val_min0)
-    val_max = val_max0 + f * (val_max1 - val_max0)
-
-    # The sampled table's min and max
-    val_low = mcdc_get.table_data.x(0, table, data)
-    val_high = mcdc_get.table_data.x_last(table, data)
-    return val_min + (sample - val_low) / (val_high - val_low) * (val_max - val_min)
+@njit
+def sample_multi_table_at(index, xi, table, data):
+    """Invert one packed conditional PDF with its own interpolation regions."""
+    value, pdf, cdf, laws, boundaries = multi_table_arrays(index, table, data)
+    if xi <= cdf[0]:
+        return value[0]
+    if xi >= cdf[-1]:
+        return value[-1]
+    interval = min(max(find_bin(xi, cdf), 0), len(cdf) - 2)
+    region = 0
+    while region < len(laws) - 1 and interval + 1 >= boundaries[region]:
+        region += 1
+    return invert_table_segment(
+        xi,
+        cdf[interval],
+        value[interval],
+        value[interval + 1],
+        pdf[interval],
+        pdf[interval + 1],
+        laws[region],
+    )
 
 
 @njit

@@ -13,8 +13,25 @@ distribution/:
     laws: string [R]
     boundaries: integer [R]  # Exclusive upper-point indices
 
+# Discrete-only outcomes.
+discrete-distribution/:
+  '@type': table
+  discrete-value: float [D], eV
+  pmf: float [D]
+
+# A 30% point mass at 2 eV and a 70% uniform density on [0, 10] eV.
+mixed-distribution/:
+  '@type': table
+  discrete-value: [2.0]  # unit = eV
+  pmf: [0.3]
+  value: [0.0, 10.0]  # unit = eV
+  pdf: [0.07, 0.07]  # unit = 1/eV
+  interpolation/:
+    laws: [linear]
+    boundaries: [2]
+
 # ======================================================================================
-# Distributions indexed by another grid
+# Conditional continuous PDFs indexed by another grid
 # ======================================================================================
 
 energy-distribution/:

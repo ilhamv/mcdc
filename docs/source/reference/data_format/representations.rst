@@ -133,10 +133,10 @@ An energy-only distribution samples outgoing energy in eV, an angular distributi
 The reaction's reference frame defines the frame of those quantities.
 An angular cosine is measured with respect to the incident direction; these layouts do not store an azimuth-dependent law.
 
-Density table
-^^^^^^^^^^^^^
+Probability table
+^^^^^^^^^^^^^^^^^
 
-``type = table`` stores a one-dimensional continuous probability density.
+``type = table`` stores a continuous PDF, discrete probability masses, or both.
 
 .. list-table:: Table distribution fields
    :header-rows: 1
@@ -146,21 +146,32 @@ Density table
      - Meaning
    * - ``value``
      - float [K]
-     - Nondecreasing sampled coordinates with positive support width, K >= 2.
+     - Continuous coordinates, required with ``pdf``; nondecreasing with positive support width and K >= 2.
    * - ``pdf``
      - float [K]
-     - Nonnegative probability density at those coordinates.
+     - Nonnegative continuous density, required with ``value``.
    * - ``interpolation``
      - Interpolation
-     - Density interpolation between coordinates.
+     - Density interpolation, required only for the continuous component.
+   * - ``discrete-value``
+     - float [D]
+     - Discrete outcomes, required with ``pmf``, D >= 1.
+   * - ``pmf``
+     - float [D]
+     - Nonnegative probability masses, required with ``discrete-value``.
 
+At least one coordinate/probability pair is required.
+The PMF sum plus the PDF integral equals one, within source precision.
+The two components carry their combined probabilities, rather than each being normalized to one.
+Discrete outcomes may lie inside or outside the continuous support and are sampled exactly.
+``discrete-value`` carries the sampled coordinate's unit, and ``pmf`` is dimensionless.
 ``value`` carries the sampled coordinate's unit, and ``pdf`` carries its inverse.
 Both omit ``unit`` for a dimensionless cosine distribution.
 Cosines lie between -1 and 1.
-The density integrates to one over its stored support, within the precision of the source data and the specified interpolation law.
+A continuous-only table has a PDF integral of one; a discrete-only table has a PMF sum of one.
 The terminal density of a histogram does not define a further interval.
 Repeated coordinates describe a jump in density; their zero-width interval carries no probability mass.
-The CDF is obtained by integrating the PDF using those laws.
+CDFs and cumulative probability masses are derived from the stored PDF and PMF.
 
 Isotropic and composed distributions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -191,7 +202,8 @@ All components sample the same physical quantities in the same frame.
 Multi-table distributions
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``type = multi-table`` stores a family of continuous distributions represented by tables on another grid.
+``type = multi-table`` is a specialized conditional continuous-PDF representation with its own packed arrays.
+It does not contain reusable ``table`` Distribution objects and does not support discrete probability masses.
 It contains the following fields.
 
 .. list-table:: Multi-table fields
@@ -212,7 +224,7 @@ It contains the following fields.
 
 For incident-energy dependence, ``grid`` has unit ``eV``.
 A dimensionless indexing grid omits the unit attribute.
-All tables describe the same sampled quantity and share its physical unit.
+All PDFs describe the same sampled quantity, share its physical unit, and individually integrate to one.
 Repeated grid coordinates describe the distributions on either side of a discontinuity.
 Histogram interpolation uses the lower-grid distribution within an interval.
 Linear interpolation uses the neighboring distributions with weights 1 - t and t.
@@ -253,7 +265,7 @@ For T tables, P total points, and R total interpolation regions, the collection 
 
 Both offset arrays start at zero and are strictly increasing.
 Table i occupies the half-open slice ``offsets[i]:offsets[i + 1]``; its interpolation regions use the corresponding slice of ``interpolation/offsets``.
-Each table has at least two points and at least one interpolation region, following the same coordinate, density, normalization, and interpolation rules as ``type = table``.
+Each table has at least two points and at least one interpolation region, following the coordinate, density, and interpolation rules of a continuous-only probability table.
 Coordinates may restart at each table boundary; the concatenated array need not be globally monotonic.
 No ``type`` attribute is attached to the collection itself.
 CDFs are derived from the stored densities and interpolation rules.

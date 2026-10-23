@@ -985,6 +985,10 @@ def write_energy_distribution(group, source):
             tables = []
             for i in range(source.number_incident_energies):
                 table = source.distribution(i + 1)
+                if table.number_discrete_photon_lines:
+                    raise ValueError(
+                        "Multi-table distributions require continuous outgoing-energy PDFs"
+                    )
                 tables.append(
                     (
                         np.asarray(table.outgoing_energies) * EV_PER_MEV,

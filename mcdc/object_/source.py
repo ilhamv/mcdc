@@ -17,7 +17,6 @@ from mcdc.object_.base import MCDCObject
 from mcdc.object_.distribution import (
     DistributionBase,
     DistributionMultiTable,
-    DistributionPMF,
     DistributionTable,
 )
 from mcdc.object_.util import move_object, parse_particle_type, decode_particle_type
@@ -261,7 +260,7 @@ class Source(MCDCObject):
     energy_at_polar_cosine_is_distribution: bool
     energy: float
     energy_pdf: DistributionTable
-    energy_pmf: DistributionPMF
+    energy_pmf: DistributionTable
     energy_at_polar_cosine: NDArray[float64]
     energy_at_polar_cosine_distribution: DistributionBase
 
@@ -367,7 +366,7 @@ class Source(MCDCObject):
             np.array([1.0e6 - 1.0, 1.0e6 + 1.0]),
             np.array([1.0, 1.0]),
         )
-        self.energy_pmf = DistributionPMF(np.array([1.0e6]), np.array([1.0]))
+        self.energy_pmf = DistributionTable(discrete_value=[1.0e6], pmf=[1.0])
         self.energy_at_polar_cosine = np.zeros(0)
         self.energy_at_polar_cosine_distribution = self.energy_pdf
 
@@ -483,7 +482,9 @@ class Source(MCDCObject):
             )
             self.mono_energetic = False
             self.discrete_energy = True
-            self.energy_pmf = DistributionPMF(values, probabilities)
+            self.energy_pmf = DistributionTable(
+                discrete_value=values, pmf=probabilities
+            )
 
         # Energy
         if energy is not None:
@@ -569,10 +570,8 @@ class Source(MCDCObject):
                 self.energy_at_polar_cosine_is_distribution = True
                 self.energy_at_polar_cosine_distribution = DistributionMultiTable(
                     grid=self.polar_cosine_pdf.pdf.x,
-                    tables=[
-                        DistributionTable(values, pdf=density)
-                        for values, density in zip(energy_grid, energy_pdf)
-                    ],
+                    value=energy_grid,
+                    pdf=energy_pdf,
                 )
 
         # Time

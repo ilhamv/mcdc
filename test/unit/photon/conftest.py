@@ -85,10 +85,10 @@ def write_photon_library(
         def interpolation(group, size):
             rule = group.create_group("interpolation")
             rule["laws"] = np.array(["linear"], dtype=h5py.string_dtype())
-            rule["boundaries"] = [size - 1]
+            rule["boundaries"] = [size]
 
         def table(group, x, y, x_unit, y_unit=None):
-            group.attrs["type"] = "tabulated"
+            group.attrs["type"] = "table"
             group.create_dataset("grid", data=x).attrs["unit"] = x_unit
             value = group.create_dataset("value", data=y)
             if y_unit:

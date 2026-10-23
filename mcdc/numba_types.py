@@ -223,12 +223,24 @@ maxwellian_distribution = into_dtype([
 multi_table_distribution = into_dtype([
     ('grid_offset', int64),
     ('grid_length', int64),
+    ('offsets_offset', int64),
+    ('offsets_length', int64),
+    ('value_offset', int64),
+    ('value_length', int64),
+    ('pdf_offset', int64),
+    ('pdf_length', int64),
+    ('cdf_offset', int64),
+    ('cdf_length', int64),
     ('interpolations_offset', int64),
     ('interpolations_length', int64),
     ('interpolation_boundaries_offset', int64),
     ('interpolation_boundaries_length', int64),
-    ('N_table', int64),
-    ('table_IDs_offset', int64),
+    ('pdf_interpolations_offset', int64),
+    ('pdf_interpolations_length', int64),
+    ('pdf_interpolation_boundaries_offset', int64),
+    ('pdf_interpolation_boundaries_length', int64),
+    ('pdf_interpolation_offsets_offset', int64),
+    ('pdf_interpolation_offsets_length', int64),
     ('ID', int64),
     ('base_ID', int64),
 ])
@@ -244,19 +256,15 @@ none_distribution = into_dtype([
     ('base_ID', int64),
 ])
 
-pmf_distribution = into_dtype([
-    ('value_offset', int64),
-    ('value_length', int64),
+table_distribution = into_dtype([
+    ('pdf_ID', int64),
+    ('discrete_value_offset', int64),
+    ('discrete_value_length', int64),
     ('pmf_offset', int64),
     ('pmf_length', int64),
     ('cmf_offset', int64),
     ('cmf_length', int64),
-    ('ID', int64),
-    ('base_ID', int64),
-])
-
-table_distribution = into_dtype([
-    ('pdf_ID', int64),
+    ('continuous_probability', float64),
     ('ID', int64),
     ('base_ID', int64),
 ])
@@ -989,8 +997,6 @@ def make_simulation_type(N: dict):
         ('N_nbody_distribution', int64),
         ('none_distributions', none_distribution, (N['none_distribution'])),
         ('N_none_distribution', int64),
-        ('pmf_distributions', pmf_distribution, (N['pmf_distribution'])),
-        ('N_pmf_distribution', int64),
         ('table_distributions', table_distribution, (N['table_distribution'])),
         ('N_table_distribution', int64),
         ('table_energy_angle_distributions', table_energy_angle_distribution, (N['table_energy_angle_distribution'])),

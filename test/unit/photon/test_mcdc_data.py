@@ -59,7 +59,7 @@ def test_cross_section_interpolation_regions(photon_model):
         xs["interpolation/laws"] = np.array(
             ["histogram", "linear"], dtype=h5py.string_dtype()
         )
-        xs["interpolation/boundaries"] = [1, len(ENERGY_GRID) - 1]
+        xs["interpolation/boundaries"] = [2, len(ENERGY_GRID)]
 
     simulation, data = photon_model(edit=edit)
     element = simulation["elements"][0]
@@ -109,7 +109,7 @@ def test_table_subshell_edge_and_threshold(photon_model):
         del xs["grid"], xs["value"]
         xs["grid"] = [K_BINDING_ENERGY, K_BINDING_ENERGY, 1.0e8]
         xs["value"] = [0.0, 3.0, 3.0]
-        xs["interpolation/boundaries"][...] = [2]
+        xs["interpolation/boundaries"][...] = [3]
 
     simulation, data = photon_model(edit=edit)
     reaction = simulation["photon_photoelectric_reactions"][0]

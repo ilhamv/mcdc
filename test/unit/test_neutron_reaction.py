@@ -11,15 +11,15 @@ from mcdc.transport.data import evaluate_data_clamped
 from mcdc.transport.physics.neutron import native
 
 
-def interpolation(group, laws=("linear",), boundaries=(2,)):
+def interpolation(group, laws=("linear",), boundaries=(3,)):
     rule = group.create_group("interpolation")
     rule["laws"] = np.array(laws, dtype=h5py.string_dtype())
     rule["boundaries"] = boundaries
 
 
 def constant(group, value):
-    group.attrs["type"] = "constant"
-    group["value"] = value
+    group.attrs["type"] = "polynomial"
+    group["coefficients"] = [value]
 
 
 def basic_reaction(
@@ -29,7 +29,7 @@ def basic_reaction(
     values=(1.0, 1.0, 1.0),
     offset=0,
     laws=("linear",),
-    boundaries=(2,),
+    boundaries=(3,),
 ):
     group = parent.create_group(name)
     group.attrs["category"] = category
@@ -197,7 +197,7 @@ def test_split_identity_and_nonlinear_xs(library, prepare_simulation):
             reactions, "absorption", "capture", (1.0, 10.0, 100.0), laws=("log",)
         )
         basic_reaction(
-            reactions, "threshold", "capture", (2.0, 4.0), 1, boundaries=(1,)
+            reactions, "threshold", "capture", (2.0, 4.0), 1, boundaries=(2,)
         )
     container, data = prepare_library(prepare_simulation)
     simulation = container[0]
@@ -235,7 +235,7 @@ def test_shared_grid_jumps_and_endpoints(library, prepare_simulation, law):
             "capture",
             values,
             laws=(law,),
-            boundaries=(4,),
+            boundaries=(5,),
         )
     container, data = prepare_library(prepare_simulation)
     simulation = container[0]
@@ -288,7 +288,7 @@ def test_delayed_neutron_groups_spectra_and_directions(
         group = add_fission(
             file["projectiles/neutron/reactions"], "fission", prompt_yield
         )
-        group["delayed-multiplicity/value"][()] = 1.0 - prompt_yield
+        group["delayed-multiplicity/coefficients"][0] = 1.0 - prompt_yield
         delayed = group["delayed-neutrons"]
         del delayed["fractions"], delayed["decay-rates"]
         delayed["fractions"], delayed["decay-rates"] = [0.25, 0.75], [1.0, 2.0]
@@ -398,10 +398,10 @@ def test_elastic_angular_representations(library, prepare_simulation, isotropic)
         group["reference-frame"][()] = "COM"
         group["Q-value"][()] = 0.0
         angle = group.create_group("angular-cosine-distribution")
-        angle.attrs["type"] = "isotropic" if isotropic else "tabulated"
+        angle.attrs["type"] = "isotropic" if isotropic else "table"
         if not isotropic:
             angle["value"], angle["pdf"] = [-1.0, 1.0], [0.5, 0.5]
-            interpolation(angle, boundaries=(1,))
+            interpolation(angle, boundaries=(2,))
     container, data = prepare_library(prepare_simulation)
     simulation = container[0]
     particle = np.zeros(1, dtype=numba_types.particle)
@@ -441,19 +441,20 @@ def test_target_thermal_velocity_uses_temperature():
     assert np.mean(squares) == pytest.approx(2.0, abs=0.15)
 
 
-@pytest.mark.parametrize("kind", ["constant", "polynomial", "tabulated"])
+@pytest.mark.parametrize("kind", ["constant", "polynomial", "table"])
 def test_data_representations_keep_ev_units(tmp_path, kind, prepare_simulation):
     with h5py.File(tmp_path / "data.h5", "w") as group:
         group.attrs["type"] = kind
         if kind == "constant":
-            group["value"] = 3.0
+            group.attrs["type"] = "polynomial"
+            group["coefficients"] = [3.0]
             expected = 3.0
         elif kind == "polynomial":
-            group["coefficient"] = [2.0, 0.5]
+            group["coefficients"] = [2.0, 0.5]
             expected = 4.5
         else:
             group["grid"], group["value"] = [1.0, 10.0, 100.0], [2.0, 4.0, 8.0]
-            interpolation(group, ("histogram", "log"), (1, 2))
+            interpolation(group, ("histogram", "log"), (2, 3))
             expected = 2.0
         result = read_data(group)
     container, data = prepare_simulation(objects=[result])

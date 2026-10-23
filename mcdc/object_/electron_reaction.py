@@ -1,3 +1,4 @@
+import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
 
@@ -21,7 +22,6 @@ from mcdc.object_.data import DataBase, DataTable
 from mcdc.object_.distribution import (
     DistributionBase,
     DistributionMultiTable,
-    DistributionTable,
 )
 from mcdc.object_.util import decode_reference_frame
 from mcdc.print_ import print_1d_array, print_error
@@ -146,19 +146,14 @@ class ElectronReactionIonization(ElectronReactionBase):
             probabilities = (
                 product["CDF"][()] if "CDF" in product else product["PDF"][()]
             )
-            tables = []
-            for i, start in enumerate(offset):
-                stop = offset[i + 1] if i + 1 < len(offset) else len(values)
-                if "CDF" in product:
-                    table = DistributionTable(
-                        values[start:stop], cdf=probabilities[start:stop]
-                    )
-                else:
-                    table = DistributionTable(
-                        values[start:stop], pdf=probabilities[start:stop]
-                    )
-                tables.append(table)
-            subshell_product.append(DistributionMultiTable(product_grid, tables))
+            subshell_product.append(
+                DistributionMultiTable(
+                    product_grid,
+                    values,
+                    offsets=np.r_[offset, len(values)].astype(np.int64),
+                    **{"cdf" if "CDF" in product else "pdf": probabilities},
+                )
+            )
 
         return cls(
             MT,
@@ -228,19 +223,12 @@ class ElectronReactionElasticScattering(ElectronReactionBase):
         probabilities = (
             mu_group["CDF"][()] if "CDF" in mu_group else mu_group["PDF"][()]
         )
-        tables = []
-        for i, start in enumerate(offset):
-            stop = offset[i + 1] if i + 1 < len(offset) else len(values)
-            if "CDF" in mu_group:
-                table = DistributionTable(
-                    values[start:stop], cdf=probabilities[start:stop]
-                )
-            else:
-                table = DistributionTable(
-                    values[start:stop], pdf=probabilities[start:stop]
-                )
-            tables.append(table)
-        mu = DistributionMultiTable(read_energy(mu_group["energy_grid"]), tables)
+        mu = DistributionMultiTable(
+            read_energy(mu_group["energy_grid"]),
+            values,
+            offsets=np.r_[offset, len(values)].astype(np.int64),
+            **{"cdf" if "CDF" in mu_group else "pdf": probabilities},
+        )
 
         return cls(MT, xs, xs_offset, reference_frame, xs_large, mu)
 

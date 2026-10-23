@@ -452,7 +452,7 @@ class Simulation(MCDCBase):
                 if source.mono_energetic:
                     source_energies = np.array([source.energy])
                 elif source.discrete_energy:
-                    source_energies = source.energy_pmf.value
+                    source_energies = source.energy_pmf.discrete_value
                 else:
                     print_error(
                         "Standard neutron multigroup transport requires neutron "

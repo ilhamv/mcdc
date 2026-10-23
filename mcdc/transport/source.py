@@ -11,7 +11,6 @@ from mcdc.transport.distribution import (
     sample_uniform,
     sample_table,
     sample_table_with_interval,
-    sample_pmf,
     sample_white_direction,
     sample_isotropic_direction,
 )
@@ -138,8 +137,8 @@ def source_particle(particle_container, seed, simulation, data):
     elif source["discrete_energy"]:
         ID = source["energy_pmf_ID"]
         sub_ID = simulation["distributions"][ID]["sub_ID"]
-        pmf = simulation["pmf_distributions"][sub_ID]
-        E = sample_pmf(pmf, particle_container, data)
+        pmf = simulation["table_distributions"][sub_ID]
+        E = sample_table(pmf, particle_container, simulation, data)
     else:
         E = _sample_source_table(
             source["energy_pdf_ID"], particle_container, simulation, data

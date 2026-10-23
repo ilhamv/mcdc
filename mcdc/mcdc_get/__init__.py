@@ -16,7 +16,7 @@ import mcdc.mcdc_get.kalbach_mann_distribution as kalbach_mann_distribution
 
 import mcdc.mcdc_get.multi_table_distribution as multi_table_distribution
 
-import mcdc.mcdc_get.pmf_distribution as pmf_distribution
+import mcdc.mcdc_get.table_distribution as table_distribution
 
 import mcdc.mcdc_get.table_energy_angle_distribution as table_energy_angle_distribution
 

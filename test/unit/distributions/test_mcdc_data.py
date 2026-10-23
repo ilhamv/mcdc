@@ -1,6 +1,8 @@
 """Interpolation and conditional-sampling checks for mcdc-data representations."""
 
 import math
+import sys
+from pathlib import Path
 
 import h5py
 import numpy as np
@@ -11,6 +13,9 @@ from scipy.optimize import brentq
 from mcdc.object_.hdf5_reader import read_distribution
 from mcdc.object_.distribution import DistributionTable, DistributionMultiTable
 from mcdc.transport import distribution as sampling
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+from data_library_generator.common.hdf5_writer import pdf_tables
 
 
 @pytest.mark.parametrize("law", [1, 2, 3, 4, 5])
@@ -63,10 +68,8 @@ def test_density_regions_and_repeated_coordinates(
 def test_histogram_incident_energy_and_endpoints(mock_rng_sequence, prepare_simulation):
     distribution = DistributionMultiTable(
         [1.0, 3.0],
-        tables=[
-            DistributionTable([10.0, 20.0], pdf=[1.0, 1.0]),
-            DistributionTable([100.0, 200.0], pdf=[1.0, 1.0]),
-        ],
+        value=[[10.0, 20.0], [100.0, 200.0]],
+        pdf=[[1.0, 1.0], [1.0, 1.0]],
         interpolations=1,
     )
     container, data = prepare_simulation(objects=[distribution])
@@ -96,9 +99,9 @@ def test_analytic_temperature_data(
         group.attrs["type"] = kind
         group["restriction-energy"] = 0.0
         temperature = group.create_group("temperature")
-        temperature.attrs["type"] = temperature_kind
-        temperature["value" if temperature_kind == "constant" else "coefficient"] = (
-            1.0 if temperature_kind == "constant" else [1.0]
+        temperature.attrs["type"] = "polynomial"
+        temperature["coefficients"] = (
+            [1.0] if temperature_kind == "constant" else [1.0, 0.0]
         )
         distribution = read_distribution(group)
     container, data = prepare_simulation(objects=[distribution])
@@ -113,38 +116,49 @@ def test_analytic_temperature_data(
     assert 0.0 < sample < 10.0
 
 
-@pytest.mark.parametrize("kind", ["kalbach-mann", "energy-angle-tabulated"])
+@pytest.mark.parametrize("kind", ["kalbach-mann", "energy-angle-table"])
 def test_correlated_histogram_tables(
     tmp_path, kind, mock_rng_sequence, prepare_simulation
 ):
     """Preserve histogram densities, conditional angles, and parameter Data."""
 
-    def rule(group, size):
-        group["interpolation/laws"] = np.array(["histogram"], dtype=h5py.string_dtype())
-        group["interpolation/boundaries"] = [size - 1]
-
     with h5py.File(tmp_path / "spectrum.h5", "w") as group:
         group.attrs["type"] = kind
         group["energy"] = [10.0, 20.0]
-        for index, factor in enumerate([1.0, 2.0]):
-            child = group.create_group(f"tables/{index}")
-            outgoing = child.create_group("outgoing-energy")
-            outgoing.attrs["type"] = "tabulated"
-            outgoing["value"] = np.array([1.0, 2.0, 4.0]) * factor
-            outgoing["pdf"] = np.array([0.2, 0.4, 0.0]) / factor
-            rule(outgoing, 3)
-            if kind == "kalbach-mann":
-                child.create_group("precompound-factor").attrs["type"] = "constant"
-                child["precompound-factor/value"] = 1.0
-                child.create_group("angular-slope").attrs["type"] = "polynomial"
-                child["angular-slope/coefficient"] = [0.0]
-            else:
-                for j in range(3):
-                    angular = child.create_group(f"cosine-distributions/{j}")
-                    angular.attrs["type"] = "tabulated"
-                    angular["value"] = [-1.0, 0.0] if j < 2 else [0.0, 1.0]
-                    angular["pdf"] = [1.0, 1.0]
-                    rule(angular, 2)
+        tables = group.create_group("tables")
+        pdf_tables(
+            tables.create_group("outgoing-energy"),
+            [
+                (
+                    np.array([1.0, 2.0, 4.0]) * f,
+                    np.array([0.2, 0.4, 0.0]) / f,
+                    ["histogram"],
+                    None,
+                )
+                for f in (1, 2)
+            ],
+        )
+        if kind == "kalbach-mann":
+            for name, value in (("precompound-factor", 1.0), ("angular-slope", 0.0)):
+                for i in range(2):
+                    parameter = tables.create_group(f"{name}/{i}")
+                    parameter.attrs["type"] = "polynomial"
+                    parameter["coefficients"] = [value]
+        else:
+            pdf_tables(
+                tables.create_group("cosine-distributions"),
+                [
+                    (
+                        [-1.0, 0.0] if j < 2 else [0.0, 1.0],
+                        [1.0, 1.0],
+                        ["histogram"],
+                        None,
+                    )
+                    for i in range(2)
+                    for j in range(3)
+                ],
+                unit=None,
+            )
         distribution = read_distribution(group)
     np.testing.assert_allclose(distribution.cdf, [0.0, 0.2, 1.0] * 2)
     np.testing.assert_allclose(distribution.pdf, [0.2, 0.4, 0.0, 0.1, 0.2, 0.0])

@@ -275,14 +275,77 @@ def pdf_table(group, values, pdf, law="linear", unit="eV"):
     a CDF, or validate monotonicity, nonnegativity, or total probability.
     A failure after dataset creation can leave a partial destination group.
     """
-    if len(values) != len(pdf):
+    distribution_table(group, values, pdf, laws=[law], unit=unit)
+
+
+def distribution_table(
+    group,
+    value=None,
+    pdf=None,
+    *,
+    discrete_value=None,
+    pmf=None,
+    laws=None,
+    boundaries=None,
+    unit="eV",
+):
+    """Write a continuous, discrete, or mixed Distribution table.
+
+    Coordinate/density and discrete-coordinate/mass pairs are optional, but
+    at least one complete pair is required. The caller supplies probabilities
+    whose combined PMF sum and PDF integral equal one. This writer preserves
+    those weights without independently normalizing either component.
+    Interpolation describes only a continuous PDF. CDFs and CMFs are derived
+    by the reader. Discrete coordinates carry the same unit as PDF coordinates;
+    probability masses are dimensionless. Invalid pairs and shapes raise
+    ValueError before datasets are written.
+    """
+    continuous, discrete = value is not None, discrete_value is not None
+    if (
+        continuous != (pdf is not None)
+        or discrete != (pmf is not None)
+        or not (continuous or discrete)
+    ):
         raise ValueError(
-            f"{group.name}: PDF coordinates and densities differ in length"
+            "Supply a PDF coordinate/density pair, a discrete coordinate/mass pair, or both"
         )
+    if continuous:
+        value, pdf = np.asarray(value, dtype=float), np.asarray(pdf, dtype=float)
+        if (
+            value.ndim != 1
+            or value.shape != pdf.shape
+            or not np.all(np.isfinite(value))
+            or not np.all(np.isfinite(pdf))
+            or np.any(pdf < 0)
+            or np.any(np.diff(value) < 0)
+            or len(value) < 2
+            or value[-1] <= value[0]
+        ):
+            raise ValueError("Invalid continuous PDF table")
+        laws, boundaries = _interpolation_arrays(len(value), laws, boundaries)
+    elif laws is not None or boundaries is not None:
+        raise ValueError("Discrete probability masses do not use interpolation")
+    if discrete:
+        discrete_value, pmf = np.asarray(discrete_value, dtype=float), np.asarray(
+            pmf, dtype=float
+        )
+        if (
+            discrete_value.ndim != 1
+            or discrete_value.shape != pmf.shape
+            or not len(pmf)
+            or not np.all(np.isfinite(discrete_value))
+            or not np.all(np.isfinite(pmf))
+            or np.any(pmf < 0)
+        ):
+            raise ValueError("Invalid discrete probability table")
     group.attrs["type"] = "table"
-    quantity(group, "value", values, unit)
-    quantity(group, "pdf", pdf, f"1/{unit}" if unit is not None else None)
-    interpolation(group, len(values), [law])
+    if continuous:
+        quantity(group, "value", value, unit)
+        quantity(group, "pdf", pdf, f"1/{unit}" if unit else None)
+        interpolation(group, len(value), laws, boundaries)
+    if discrete:
+        quantity(group, "discrete-value", discrete_value, unit)
+        quantity(group, "pmf", pmf)
 
 
 # ======================================================================================

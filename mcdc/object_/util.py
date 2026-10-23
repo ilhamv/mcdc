@@ -467,6 +467,8 @@ def cdf_from_pdf(
     pdf: NDArray[float64],
     interpolations: int | Sequence[int] = INTERPOLATION_LINEAR,
     interpolation_boundaries: Sequence[int] | None = None,
+    *,
+    normalize: bool = True,
 ) -> tuple[NDArray[float64], NDArray[float64]]:
     """Normalize a continuous PDF and construct its interpolation-aware CDF.
 
@@ -482,6 +484,10 @@ def cdf_from_pdf(
     interpolation_boundaries : sequence of int, optional
         Exclusive upper point indices, matching DataTable's convention.
         Required for a sequence of laws; the final boundary equals len(value).
+
+    normalize : bool, optional
+        Normalize the integral to one by default. False preserves the supplied
+        density and cumulative mass for mixed continuous/discrete distributions.
 
     Returns
     -------
@@ -589,8 +595,10 @@ def cdf_from_pdf(
         areas[start:stop][positive_width] = area
         start = stop
     cdf = np.concatenate(([0.0], np.cumsum(areas)))
-    if not np.isfinite(cdf[-1]) or cdf[-1] <= 0:
+    if not np.isfinite(cdf[-1]) or (normalize and cdf[-1] <= 0):
         raise ValueError("A probability density must have a positive finite integral")
+    if not normalize:
+        return y.copy(), cdf
     return y / cdf[-1], cdf / cdf[-1]
 
 
@@ -616,10 +624,23 @@ def pdf_from_cdf(
         Normalized CDF.
     """
 
-    cdf = cdf.copy()
-
-    if cdf[-1] <= 0.0:
-        print_error("Final CDF value must be positive.")
+    value = np.asarray(value, dtype=float64)
+    cdf = np.array(cdf, dtype=float64, copy=True)
+    if (
+        value.ndim != 1
+        or cdf.ndim != 1
+        or value.shape != cdf.shape
+        or len(value) < 2
+        or not np.all(np.isfinite(value))
+        or not np.all(np.isfinite(cdf))
+        or np.any(np.diff(value) <= 0)
+        or cdf[0] != 0.0
+        or np.any(np.diff(cdf) < 0)
+        or cdf[-1] <= 0.0
+    ):
+        raise ValueError(
+            "A continuous CDF needs matching increasing coordinates and nondecreasing probabilities starting at zero"
+        )
 
     # Normalize CDF.
     cdf /= cdf[-1]

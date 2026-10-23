@@ -1,8 +1,8 @@
 """Read mcdc-data representations into transport objects without unit conversion.
 
-The HDF5 format uses eV and zero-based inclusive interpolation boundaries.
-DataTable stores exclusive boundaries, so this module performs that index
-conversion at the file boundary. Source-library metadata stays in the files.
+The HDF5 format and runtime use eV and exclusive interpolation boundaries.
+Packed PDF collections are read directly into specialized MultiTable arrays.
+Source-library metadata stays in the files.
 """
 
 import numpy as np
@@ -49,7 +49,7 @@ def read_interpolation(group):
         [encode_interpolation(text(law)) for law in interpolation["laws"][()]],
         dtype=np.int64,
     )
-    boundaries = np.asarray(interpolation["boundaries"][()], dtype=np.int64) + 1
+    boundaries = np.asarray(interpolation["boundaries"][()], dtype=np.int64)
     coordinate = next(name for name in ("value", "grid", "energy") if name in group)
     size = len(group[coordinate])
     if (
@@ -120,8 +120,8 @@ def set_xs_interpolation(reaction, group):
     """Validate shared-grid cross sections and attach their interpolation metadata.
 
     Neutron and photon reactions retain their own interpolation regions while
-    sharing the projectile energy grid. File boundaries are converted to the
-    exclusive point indices used by the transport objects.
+    sharing the projectile energy grid. Region boundaries are exclusive
+    point indices local to the stored cross-section segment.
     """
     laws, boundaries = read_interpolation(group["xs"])
     if (
@@ -157,11 +157,9 @@ def xs_is_linear(reaction):
 def read_data(group):
     """Load constant, polynomial, or tabulated scalar data in canonical units."""
     kind = text(group.attrs["type"])
-    if kind == "constant":
-        return DataPolynomial(np.array([float(group["value"][()])]))
     if kind == "polynomial":
-        return DataPolynomial(group["coefficient"][()])
-    if kind == "tabulated":
+        return DataPolynomial(group["coefficients"][()])
+    if kind == "table":
         return DataTable(
             group["grid"][()], group["value"][()], *read_interpolation(group)
         )
@@ -183,24 +181,22 @@ def read_distribution(group):
     kind = text(group.attrs["type"])
     if kind == "isotropic":
         return DistributionNone()
-    if kind == "tabulated":
+    if kind == "table":
+        arguments = {}
+        if "value" in group or "pdf" in group:
+            arguments.update(value=group["value"][()], pdf=group["pdf"][()])
+            arguments["interpolations"], arguments["interpolation_boundaries"] = (
+                read_interpolation(group)
+            )
+        if "discrete-value" in group or "pmf" in group:
+            arguments.update(
+                discrete_value=group["discrete-value"][()], pmf=group["pmf"][()]
+            )
+        return DistributionTable(**arguments)
+    if kind == "multi-table":
         laws, boundaries = read_interpolation(group)
-        return DistributionTable(
-            group["value"][()],
-            pdf=group["pdf"][()],
-            interpolations=laws,
-            interpolation_boundaries=boundaries,
-        )
-    if kind == "incident-energy-dependent":
-        laws, boundaries = read_interpolation(group)
-        return DistributionMultiTable(
-            group["energy"][()],
-            tables=[
-                read_distribution(child)
-                for child in numbered_groups(group["distributions"])
-            ],
-            interpolations=laws,
-            interpolation_boundaries=boundaries,
+        return read_pdf_collection(
+            group["tables"], grid=group["grid"][()], laws=laws, boundaries=boundaries
         )
     if kind == "level-scattering":
         return DistributionLevelScattering(
@@ -219,13 +215,15 @@ def read_distribution(group):
         result = DistributionNBody(density.x, density.y)
         result.pdf = density
         return result
-    if kind in ("kalbach-mann", "energy-angle-tabulated"):
+    if kind in ("kalbach-mann", "energy-angle-table"):
         return read_correlated_distribution(group, kind)
     raise ValueError(f"{group.name}: unsupported Distribution type {kind!r}")
 
 
 def read_distribution_density(group):
-    """Return a normalized density table including its cumulative probabilities."""
+    """Return a normalized continuous density and its cumulative probabilities."""
+    if "pmf" in group or "discrete-value" in group:
+        raise ValueError(f"{group.name}: this density must be continuous only")
     laws, boundaries = read_interpolation(group)
     return DistributionTable(
         group["value"][()],
@@ -235,69 +233,87 @@ def read_distribution_density(group):
     ).pdf
 
 
-def segment_laws(table):
-    """Expand interpolation regions to one code per point for flattened tables."""
-    result = np.empty(table.N, dtype=np.int64)
-    start = 0
-    for law, boundary in zip(table.interpolations, table.interpolation_boundaries):
-        result[start:boundary] = law
-        start = boundary - 1
+def read_pdf_collection(group, grid=None, laws=INTERPOLATION_LINEAR, boundaries=None):
+    """Read a continuous packed PDF collection without creating child objects."""
+    if "pmf" in group or "discrete-value" in group:
+        raise ValueError(f"{group.name}: packed PDF collections are continuous only")
+    rule = group["interpolation"]
+    count = len(group["offsets"]) - 1
+    return DistributionMultiTable(
+        np.arange(count, dtype=float) if grid is None else grid,
+        group["value"][()],
+        pdf=group["pdf"][()],
+        offsets=group["offsets"][()],
+        interpolations=laws,
+        interpolation_boundaries=boundaries,
+        pdf_interpolations=[
+            encode_interpolation(text(law)) for law in rule["laws"][()]
+        ],
+        pdf_interpolation_boundaries=rule["boundaries"][()],
+        pdf_interpolation_offsets=rule["offsets"][()],
+    )
+
+
+def packed_segment_laws(tables):
+    """Expand local PDF regions for the correlated samplers' flat point arrays."""
+    result = np.empty(len(tables.value), dtype=np.int64)
+    for i, offset in enumerate(tables.offsets[:-1]):
+        a, b = tables.pdf_interpolation_offsets[i : i + 2]
+        start = 0
+        for law, end in zip(
+            tables.pdf_interpolations[a:b], tables.pdf_interpolation_boundaries[a:b]
+        ):
+            result[offset + start : offset + end] = law
+            start = end - 1
     return result
 
 
 def read_correlated_distribution(group, kind):
-    """Flatten conditional tables while preserving local indices and interpolation."""
-    children = numbered_groups(group["tables"])
-    tables = [read_distribution_density(child["outgoing-energy"]) for child in children]
-    offset = np.cumsum([0] + [table.N for table in tables[:-1]], dtype=np.int64)
-    values = np.concatenate([table.x for table in tables])
-    pdf = np.concatenate([table.y for table in tables])
-    laws = np.concatenate([segment_laws(table) for table in tables])
-    if len(children) != len(group["energy"]):
+    """Load packed marginal PDFs and conditional angle data for a joint law."""
+    tables = group["tables"]
+    outgoing = read_pdf_collection(tables["outgoing-energy"])
+    energy = group["energy"][()]
+    if len(outgoing.grid) != len(energy):
         raise ValueError(
-            f"{group.name}: incident energies and tables must have equal lengths"
+            f"{group.name}: one outgoing PDF is required per incident energy"
         )
     if kind == "kalbach-mann":
-        factors = [read_data(child["precompound-factor"]) for child in children]
-        slopes = [read_data(child["angular-slope"]) for child in children]
-        # Parameters retain their evaluable Data representations at each incident energy.
+        factors = [
+            read_data(child) for child in numbered_groups(tables["precompound-factor"])
+        ]
+        slopes = [
+            read_data(child) for child in numbered_groups(tables["angular-slope"])
+        ]
+        if len(factors) != len(energy) or len(slopes) != len(energy):
+            raise ValueError(
+                f"{group.name}: one parameter Data record is required per incident energy"
+            )
         result = DistributionKalbachMann(
-            group["energy"][()],
-            offset,
-            values,
-            pdf,
-            np.zeros(len(values)),
-            np.zeros(len(values)),
+            energy,
+            outgoing.offsets[:-1],
+            outgoing.value,
+            outgoing.pdf,
+            np.zeros(len(outgoing.value)),
+            np.zeros(len(outgoing.value)),
         )
-        result.precompound_tables = factors
-        result.angular_slope_tables = slopes
+        result.precompound_tables, result.angular_slope_tables = factors, slopes
     else:
-        angles = []
-        for child, table in zip(children, tables):
-            row = numbered_groups(child["cosine-distributions"])
-            if len(row) != table.N:
-                raise ValueError(
-                    f"{child.name}: each outgoing energy requires a cosine distribution"
-                )
-            angles.extend(read_distribution_density(item) for item in row)
-        cosine_offset = np.cumsum(
-            [0] + [table.N for table in angles[:-1]], dtype=np.int64
-        )
+        angular = read_pdf_collection(tables["cosine-distributions"])
+        if len(angular.grid) != len(outgoing.value):
+            raise ValueError(
+                f"{group.name}: each outgoing-energy point requires a cosine PDF"
+            )
         result = DistributionTableEnergyAngle(
-            group["energy"][()],
-            offset,
-            values,
-            pdf,
-            cosine_offset,
-            np.concatenate([table.x for table in angles]),
-            np.concatenate([table.y for table in angles]),
+            energy,
+            outgoing.offsets[:-1],
+            outgoing.value,
+            outgoing.pdf,
+            angular.offsets[:-1],
+            angular.value,
+            angular.pdf,
         )
-        result.cosine_pdf = np.concatenate([table.y for table in angles])
-        result.cosine_cdf = np.concatenate([table.aux[0] for table in angles])
-        result.cosine_interpolations = np.concatenate(
-            [segment_laws(table) for table in angles]
-        )
-    result.pdf = pdf
-    result.cdf = np.concatenate([table.aux[0] for table in tables])
-    result.interpolations = laws
+        result.cosine_pdf, result.cosine_cdf = angular.pdf, angular.cdf
+        result.cosine_interpolations = packed_segment_laws(angular)
+    result.pdf, result.cdf = outgoing.pdf, outgoing.cdf
+    result.interpolations = packed_segment_laws(outgoing)
     return result
