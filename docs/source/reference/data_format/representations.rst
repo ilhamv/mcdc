@@ -316,7 +316,8 @@ The parameters describe the conditional cosine density
 
 The limit a = 0 is isotropic.
 The precompound fraction is between zero and one, and the angular slope is nonnegative.
-When represented as tables, both parameter grids match the table's outgoing-energy coordinates.
+Each parameter is evaluated as Data at outgoing energy in eV.
+When represented as tables, the parameters may use independent grids and interpolation regions, distinct from one another and from the outgoing-energy density.
 
 Energy-angle-table distributions additionally contain ``tables/cosine-distributions`` (packed PDF tables, dimensionless).
 There is one cosine table for every point in the concatenated ``tables/outgoing-energy/value`` array, in the same order.

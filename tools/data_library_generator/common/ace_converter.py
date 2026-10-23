@@ -915,8 +915,9 @@ def write_energy_distribution(group, source):
     densities in ``tables/outgoing-energy``. Energy-angle sources additionally
     pack conditional angular densities in ``tables/cosine-distributions``,
     ordered by the concatenated outgoing-energy points. Kalbach--Mann sources
-    retain one Data record per incident energy under each parameter group;
-    their parameter grids match the corresponding outgoing-energy table.
+    retain one Data record per incident energy under each parameter group.
+    ACE supplies these parameter values on the outgoing-energy grid, which
+    is retained in each parameter's Data table.
     Correlated representations have inherent linear incident-energy dependence
     rather than a separate outer interpolation group.
 
