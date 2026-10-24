@@ -318,13 +318,53 @@ There is one cosine table for every point in the concatenated ``tables/outgoing-
 The outgoing-energy tables supply marginal densities; each cosine table is conditional on its corresponding outgoing energy and incident-energy table.
 The two collections' offsets identify both levels of conditioning.
 
-N-body energy distribution
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+After selecting an incident-energy table, outgoing-energy sampling identifies an interval j and a cumulative probability u within that table.
+For histogram density interpolation, sample the cosine table associated with the interval's lower outgoing-energy point j.
+For other density interpolation laws, select point j or j + 1 according to which cumulative probability, C[j] or C[j + 1], is closer to u; ties select j.
+The comparison uses the selected table's CDF before unit-base energy scaling.
+Sample the chosen cosine PDF using its own interpolation rules and an independent random number.
+The histogram and linear cases follow the `MCNP LAW 61 sampling description (page 2-47) <https://mcnpx.lanl.gov/pdf_files/TechReport_2003_LANL_LA-UR-03-1987Revised212008_SweezyBoothEtAl.pdf#page=81>`_.
+The same CDF-distance rule applies to the logarithmic density interpolation laws in this format.
 
-``type = n-body`` contains ``value`` (float [K], eV), ``pdf`` (float [K], 1/eV), and ``interpolation`` (Interpolation).
-It stores an N-body energy-density table.
-Its array and normalization constraints are the same as those of an energy distribution table.
+N-body phase-space distribution
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``type = n-body`` stores a dimensionless energy-fraction PDF and the final-state mass parameters.
+
+.. list-table:: N-body fields
+   :header-rows: 1
+
+   * - Field
+     - Type / shape
+     - Meaning
+   * - ``number-particles``
+     - integer
+     - Number of bodies N in the final-state phase space, N >= 3.
+   * - ``total-mass-ratio``
+     - float
+     - Total final-state mass divided by the emitted particle mass, R > 1.
+   * - ``value``
+     - float [K]
+     - Normalized outgoing-energy fractions x in [0, 1].
+   * - ``pdf``
+     - float [K]
+     - Dimensionless density of the energy fraction.
+   * - ``interpolation``
+     - Interpolation
+     - Interpolation of the energy-fraction density.
+
+The PDF integrates to one under its interpolation rules, following the continuous probability-table constraints.
 The density supports all five Interpolation laws and multiple interpolation regions.
-The N-body phase-space model assumes isotropic emission in the center-of-mass frame, independently of outgoing energy in that frame.
+The phase-space density has the shape :math:`p(x)\propto\sqrt{x}(1-x)^{3N/2-4}`.
+For incident energy E, the sampled COM outgoing energy is :math:`E'=xE'_{\max}`, with
+
+.. math::
+
+   E'_{\max}=\frac{R-1}{R}\left(\frac{A}{A+1}E+Q\right).
+
+Here A is the target-to-projectile mass ratio and Q is the reaction Q-value in eV.
+The energy scale is zero when no positive energy is available.
+N-body reactions require ``reference-frame = COM`` and omit a separate angular-cosine distribution.
+Emission is isotropic in COM, independently of outgoing energy in that frame.
 Emission in the laboratory frame is generally anisotropic after the kinematic transformation.
-See the `NJOY manual's N-body phase-space definition <https://github.com/njoy/NJOY2016-manual/blob/master/acex.tex>`_.
+See the `ACE LAW 66 definition <https://github.com/NuclearData/ACEFormat/blob/master/src/ContinuousEnergyNeutron.tex#L867>`_ and `NJOY's phase-space tabulation <https://github.com/njoy/NJOY2016-manual/blob/master/acex.tex>`_.

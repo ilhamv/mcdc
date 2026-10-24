@@ -186,7 +186,7 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
 
         self.multiplicity = multiplicity
         self.mu = mu
-        validate_angle_energy(mu, energy_spectra, self.label)
+        validate_angle_energy(mu, energy_spectra, self.label, reference_frame)
         self.N_spectrum_probability_bin = len(spectrum_probability_grid) - 1
         self.N_spectrum = len(energy_spectra)
         self.spectrum_probability_grid = spectrum_probability_grid
@@ -208,7 +208,7 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
             read_distribution(child)
             for child in numbered_groups(h5_group, "energy-spectrum-")
         ]
-        validate_angle_energy(mu, energy_spectra, h5_group.name)
+        validate_angle_energy(mu, energy_spectra, h5_group.name, reference_frame)
         if (
             not energy_spectra
             or np.any(spectrum_probability < 0)
@@ -281,7 +281,7 @@ class NeutronReactionFission(NeutronReactionBase):
         super().__init__(MT, xs, xs_offset, reference_frame, q_value)
         self.mu = mu
         self.spectrum = spectrum
-        validate_angle_energy(mu, [spectrum], self.label)
+        validate_angle_energy(mu, [spectrum], self.label, reference_frame)
         self.prompt_multiplicity = DataPolynomial(np.array([0.0]))
         self.delayed_multiplicity = DataPolynomial(np.array([0.0]))
         self.N_delayed_precursor = 0
@@ -301,7 +301,7 @@ class NeutronReactionFission(NeutronReactionBase):
 
         # Prompt spectrum
         spectrum = read_distribution(h5_group["prompt-energy-distribution"])
-        validate_angle_energy(mu, [spectrum], h5_group.name)
+        validate_angle_energy(mu, [spectrum], h5_group.name, reference_frame)
 
         result = cls(MT, xs, xs_offset, reference_frame, q_value, mu, spectrum)
         result.prompt_multiplicity = read_data(h5_group["prompt-multiplicity"])

@@ -387,6 +387,76 @@ def test_capture_q_value_is_already_ev(library, prepare_simulation):
     assert interaction[0]["energy_deposition"] == 2.0 * (5.0 + 2.0e6)
 
 
+@pytest.mark.parametrize("category", ["inelastic-scattering", "fission"])
+def test_nbody_reaction_energy_scale_and_com_transformation(
+    library, prepare_simulation, category
+):
+    """Reaction context sets LAW 66's energy scale before the COM-to-LAB transform."""
+    from mcdc import numba_types
+
+    with h5py.File(library / "H2-293.6K.h5", "a") as file:
+        reactions = file["projectiles/neutron/reactions"]
+        if category == "fission":
+            group = add_fission(reactions, "nbody", 1.0)
+            del group["prompt-angular-cosine-distribution"]
+            del group["prompt-energy-distribution"]
+            spectrum = group.create_group("prompt-energy-distribution")
+        else:
+            group = basic_reaction(reactions, "nbody", category)
+            group["multiplicity"] = 1
+            group["spectrum-probability-grid"] = [1.0, 100.0]
+            group["spectrum-probability"] = [[1.0]]
+            spectrum = group.create_group("energy-spectrum-0")
+        group["reference-frame"][()] = "COM"
+        group["Q-value"][()] = -2.0
+        spectrum.attrs["type"] = "n-body"
+        spectrum["number-particles"], spectrum["total-mass-ratio"] = 3, 3.0
+        spectrum["value"], spectrum["pdf"] = [0.0, 1.0], [1.0, 1.0]
+        interpolation(spectrum, boundaries=(2,))
+    container, data = prepare_library(prepare_simulation)
+    simulation = container[0]
+    nuclide = simulation["nuclides"][0]
+    A = nuclide["atomic_weight_ratio"]
+    fractions, cosines = [], []
+    for energy in (10.0, 20.0):
+        particle = np.zeros(1, dtype=numba_types.particle)
+        particle[0]["E"], particle[0]["w"] = energy, 1.0
+        particle[0]["ux"], particle[0]["rng_seed"] = 1.0, 1234567
+        interaction = np.zeros(1, dtype=numba_types.interaction_data)
+        sampler = (
+            native.sample_fission
+            if category == "fission"
+            else native.sample_inelastic_scattering
+        )
+        sampler(
+            simulation["neutron_reactions"][0],
+            particle,
+            interaction,
+            nuclide,
+            simulation,
+            data,
+        )
+        outgoing = particle[0]["E"]
+        # Recover the COM velocity by subtracting the incident COM translation.
+        translation = np.sqrt(energy) / (A + 1)
+        forward_com = np.sqrt(outgoing) * particle[0]["ux"] - translation
+        energy_com = (
+            outgoing
+            + translation**2
+            - 2 * np.sqrt(outgoing) * particle[0]["ux"] * translation
+        )
+        maximum = (2.0 / 3.0) * (A / (A + 1) * energy - 2.0)
+        assert 0 < energy_com < maximum
+        fractions.append(energy_com / maximum)
+        cosines.append(forward_com / np.sqrt(energy_com))
+        assert outgoing + interaction[0]["energy_deposition"] == pytest.approx(
+            energy - 2.0
+        )
+    # Identical random streams sample identical normalized energy and COM angle.
+    assert fractions[0] == pytest.approx(fractions[1])
+    assert cosines[0] == pytest.approx(cosines[1])
+
+
 @pytest.mark.parametrize("isotropic", [True, False])
 def test_elastic_angular_representations(library, prepare_simulation, isotropic):
     from mcdc import numba_types

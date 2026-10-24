@@ -21,6 +21,7 @@ from mcdc.constant import (
     THERMAL_THRESHOLD_FACTOR,
     LIGHT_SPEED,
     PROTON_MASS,
+    NEUTRON_MASS,
     PI,
     PI_HALF,
     PI_SQRT,
@@ -594,7 +595,13 @@ def inelastic_scattering(
             )
         else:
             E_new, mu = sample_correlated_distribution_with_scale(
-                E, spectrum_base, particle_container_new, simulation, data
+                E,
+                spectrum_base,
+                particle_container_new,
+                simulation,
+                data,
+                nuclide["atomic_weight_ratio"] * NEUTRON_MASS / PROTON_MASS,
+                reaction["q_value"],
             )
 
         # ==============================================================================

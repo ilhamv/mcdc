@@ -155,7 +155,7 @@ class ProtonReactionInelasticScattering(ProtonReactionBase):
 
         self.multiplicity = multiplicity
         self.mu = mu
-        validate_angle_energy(mu, energy_spectra, self.label)
+        validate_angle_energy(mu, energy_spectra, self.label, reference_frame)
         self.N_spectrum_probability_bin = len(spectrum_probability_grid) - 1
         self.N_spectrum = len(energy_spectra)
         self.spectrum_probability_grid = spectrum_probability_grid
@@ -440,10 +440,15 @@ def set_energy_distribution(h5_group):
         )
 
     elif spectrum_type == "N-body":
-        value = h5_group["value"][()] * 1e6  # MeV to eV
-        pdf = h5_group["pdf"][()] / 1e6  # /MeV to /eV
+        value = h5_group["value"][()]
+        pdf = h5_group["pdf"][()]
 
-        energy_spectrum = DistributionNBody(value, pdf)
+        energy_spectrum = DistributionNBody(
+            h5_group["number_particles"][()],
+            float(h5_group["total_mass_ratio"][()]),
+            value,
+            pdf,
+        )
 
     else:
         print_error(f"Unsupported energy spectrum of type {spectrum_type}")

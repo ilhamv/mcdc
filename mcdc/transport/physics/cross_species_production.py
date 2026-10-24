@@ -15,6 +15,8 @@ from mcdc.constant import (
     PARTICLE_ELECTRON,
     PARTICLE_NEUTRON,
     PARTICLE_PROTON,
+    NEUTRON_MASS,
+    PROTON_MASS,
     PI,
     REFERENCE_FRAME_COM,
 )
@@ -102,6 +104,8 @@ def produce_cross_species(
                     particle_container_new,
                     simulation,
                     data,
+                    atomic_weight_ratio * NEUTRON_MASS / PROTON_MASS,
+                    reaction["q_value"],
                 )
             else:
                 E_new = sample_distribution_with_scale(

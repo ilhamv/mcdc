@@ -893,7 +893,7 @@ def write_energy_distribution(group, source):
     Raises
     ------
     ValueError
-        The source class is unsupported, the ACE N-body tabulation is not linear,
+        The source class or N-body parameters are unsupported,
         a multi-incident-energy source is not linear-linear between incident
         energies, or a delegated table/interpolation writer rejects data.
 
@@ -901,14 +901,16 @@ def write_energy_distribution(group, source):
     -----
     Energy coordinates and parameters are converted from MeV to eV, while
     energy PDFs are divided by ``EV_PER_MEV``. Angular cosines, cosine PDFs,
-    level-scattering C2, precompound fractions, and angular slopes remain
-    dimensionless. PDF tables are copied without normalization.
+    level-scattering C2, precompound fractions, angular slopes, and N-body
+    energy fractions remain dimensionless. PDF tables are copied without
+    normalization.
 
     Level scattering writes C1 and C2. Evaporation and Maxwellian spectra
     write restriction energy and spectral-temperature Data tables,
-    preserving that function's interpolation regions. N-body data uses
-    ACEtk's supplied values and PDF directly as a converted tabulation,
-    with ``type = n-body`` and linear interpolation.
+    preserving that function's interpolation regions. N-body data preserves
+    the particle count, total mass ratio, normalized energy-fraction grid,
+    and its PDF interpolation. Target mass and reaction Q-value supply the
+    incident-energy-dependent energy scale during transport.
 
     Outgoing-energy tables use ``multi-table`` with packed PDF
     tables on an eV incident-energy grid. Correlated sources pack outgoing
@@ -957,17 +959,24 @@ def write_energy_distribution(group, source):
             temperature, source.interpolation_data, len(source.energies)
         )
     elif isinstance(source, ACEtk.continuous.NBodyPhaseSpaceDistribution):
-        # Convert the source phase-space tabulation, preserving probability density
-        if source.interpolation != 2:
-            raise ValueError(
-                "ACE N-body source tabulations require linear interpolation"
-            )
+        # Preserve the dimensionless phase-space density and kinematic parameters.
+        count = source.number_particles
+        mass_ratio = float(source.total_mass_ratio)
+        values = np.asarray(source.values)
+        if count < 3 or not np.isfinite(mass_ratio) or mass_ratio <= 1:
+            raise ValueError("Invalid N-body particle count or total mass ratio")
+        if np.any(values < 0) or np.any(values > 1):
+            raise ValueError("N-body energy fractions must lie in [0, 1]")
         pdf_table(
             group,
-            np.asarray(source.values) * EV_PER_MEV,
-            np.asarray(source.pdf) / EV_PER_MEV,
+            values,
+            source.pdf,
+            law=interpolation_law(source.interpolation),
+            unit=None,
         )
         group.attrs["type"] = "n-body"
+        quantity(group, "number-particles", count)
+        quantity(group, "total-mass-ratio", mass_ratio)
     elif isinstance(
         source,
         (

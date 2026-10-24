@@ -17,6 +17,7 @@ from mcdc.constant import (
     DISTRIBUTION_N_BODY,
     INTERPOLATION_HISTOGRAM,
     INTERPOLATION_LINEAR,
+    REFERENCE_FRAME_COM,
 )
 from mcdc.object_.base import MCDCPolymorphic
 from mcdc.object_.data import DataBase, DataNone, DataTable, decode_interpolation
@@ -635,8 +636,16 @@ class DistributionNBody(DistributionBase):
 
     Parameters
     ----------
+    number_particles : int
+        Number of bodies in the final-state phase space, at least three.
+    total_mass_ratio : float
+        Total final-state mass divided by the emitted particle mass, greater
+        than one. Together with the reaction Q-value and target mass this
+        sets the maximum outgoing center-of-mass energy.
     values, probabilities : array_like
-        Outgoing values and their relative probability density.
+        Dimensionless outgoing-energy fractions in [0, 1] and their relative
+        probability density. Transport scales a sampled fraction by the
+        incident-energy-dependent maximum energy.
     interpolations : int or sequence of int, optional
         Density interpolation laws, defaulting to linear.
     interpolation_boundaries : sequence of int, optional
@@ -648,9 +657,13 @@ class DistributionNBody(DistributionBase):
     sub_type = DISTRIBUTION_N_BODY
 
     pdf: DataTable
+    number_particles: int
+    total_mass_ratio: float64
 
     def __init__(
         self,
+        number_particles: int,
+        total_mass_ratio: float,
         values: ArrayLike,
         probabilities: ArrayLike,
         *,
@@ -659,6 +672,14 @@ class DistributionNBody(DistributionBase):
     ) -> None:
         super().__init__()
 
+        if not isinstance(number_particles, Integral) or number_particles < 3:
+            raise ValueError("N-body phase space requires at least three particles")
+        if not np.isfinite(total_mass_ratio) or total_mass_ratio <= 1:
+            raise ValueError(
+                "N-body total mass ratio must be finite and greater than one"
+            )
+        self.number_particles = int(number_particles)
+        self.total_mass_ratio = float64(total_mass_ratio)
         value_array = np.asarray(values, dtype=float64)
         probability_array = np.asarray(probabilities, dtype=float64)
 
@@ -668,6 +689,8 @@ class DistributionNBody(DistributionBase):
             print_error("probabilities must be one-dimensional.")
         if len(value_array) != len(probability_array):
             print_error("values and probabilities must have the same length.")
+        if np.any(value_array < 0) or np.any(value_array > 1):
+            raise ValueError("N-body energy fractions must lie in [0, 1]")
 
         pdf_normalized, cdf_normalized = cdf_from_pdf(
             value_array,
@@ -687,6 +710,8 @@ class DistributionNBody(DistributionBase):
     def __repr__(self) -> str:
         text = super().__repr__()
 
+        text += f"  - Number of particles: {self.number_particles}\n"
+        text += f"  - Total mass ratio: {self.total_mass_ratio}\n"
         text += f"  - value {print_1d_array(self.pdf.x)}\n"
         text += f"  - pdf {print_1d_array(self.pdf.y)}\n"
         return text
@@ -697,7 +722,7 @@ class DistributionNBody(DistributionBase):
 # ======================================================================================
 
 
-def validate_angle_energy(angular, spectra, path):
+def validate_angle_energy(angular, spectra, path, reference_frame=None):
     """Require either a separate cosine law or a joint law for every spectrum.
 
     DistributionNone means that each energy spectrum must supply both energy
@@ -707,6 +732,14 @@ def validate_angle_energy(angular, spectra, path):
     """
     joint = (DistributionKalbachMann, DistributionTableEnergyAngle, DistributionNBody)
     for spectrum in spectra:
+        if (
+            isinstance(spectrum, DistributionNBody)
+            and reference_frame is not None
+            and reference_frame != REFERENCE_FRAME_COM
+        ):
+            raise ValueError(
+                f"{path}: N-body phase space requires the COM reference frame"
+            )
         if isinstance(angular, DistributionNone) != isinstance(spectrum, joint):
             raise ValueError(
                 f"{path}: angular fields must agree with the energy distribution's correlation"

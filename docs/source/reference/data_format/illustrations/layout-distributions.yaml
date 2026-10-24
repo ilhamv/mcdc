@@ -76,3 +76,17 @@ energy-angle-distribution/:
         offsets: integer [P + 1]
         laws: string [S]
         boundaries: integer [S]
+
+# ======================================================================================
+# N-body phase space
+# ======================================================================================
+
+n-body-distribution/:
+  '@type': n-body
+  number-particles: integer  # At least three
+  total-mass-ratio: float  # Final-state mass divided by emitted particle mass
+  value: float [K]  # Energy fractions in [0, 1]
+  pdf: float [K]
+  interpolation/:
+    laws: string [R]
+    boundaries: integer [R]

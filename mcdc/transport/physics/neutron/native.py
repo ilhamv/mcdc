@@ -689,7 +689,13 @@ def sample_inelastic_scattering(
             )
         else:
             E_new, mu = sample_correlated_distribution_with_scale(
-                E, spectrum, particle_container_new, simulation, data
+                E,
+                spectrum,
+                particle_container_new,
+                simulation,
+                data,
+                nuclide["atomic_weight_ratio"],
+                reaction["q_value"],
             )
 
         # ==============================================================================
@@ -847,6 +853,8 @@ def sample_fission(
                     particle_container_new,
                     simulation,
                     data,
+                    nuclide["atomic_weight_ratio"],
+                    reaction["q_value"],
                 )
 
             # Frame transformation

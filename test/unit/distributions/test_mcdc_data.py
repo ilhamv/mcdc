@@ -171,3 +171,61 @@ def test_correlated_histogram_tables(
         )
         assert E == pytest.approx(expected)
         assert mu == pytest.approx(0.5 if kind == "kalbach-mann" else -0.25)
+
+
+@pytest.mark.parametrize("law", ["histogram", "linear"])
+@pytest.mark.parametrize("incident_draw", [0.1, 0.9])
+@pytest.mark.parametrize("energy_draw", [0.21, 0.55, 0.6, 0.61, 0.99])
+def test_law61_conditional_angle_selection(
+    tmp_path, law, incident_draw, energy_draw, mock_rng_sequence, prepare_simulation
+):
+    """Follow MCNP LAW 61's lower-point or nearest-CDF-point angular selection."""
+    density = np.array([0.2, 0.4, 0.4] if law == "histogram" else [0.2, 0.2, 0.6])
+    with h5py.File(tmp_path / "law61.h5", "w") as group:
+        group.attrs["type"] = "energy-angle-table"
+        group["energy"] = [10.0, 20.0]
+        tables = group.create_group("tables")
+        pdf_tables(
+            tables.create_group("outgoing-energy"),
+            [
+                ([0.0, 1.0, 3.0], density, [law], None),
+                ([100.0, 102.0, 106.0], density / 2, [law], None),
+            ],
+        )
+        # Disjoint cosine supports identify which incident/outgoing point was used.
+        supports = [
+            [-1.0, -0.75],
+            [-0.75, -0.5],
+            [-0.5, -0.25],
+            [0.25, 0.5],
+            [0.5, 0.75],
+            [0.75, 1.0],
+        ]
+        pdf_tables(
+            tables.create_group("cosine-distributions"),
+            [(support, [4.0, 4.0], ["linear"], None) for support in supports],
+            unit=None,
+        )
+        distribution = read_distribution(group)
+    container, data = prepare_simulation(objects=[distribution])
+    simulation = container[0]
+    rng = mock_rng_sequence(incident_draw, energy_draw, 0.5)
+    energy, cosine = sampling.sample_correlated_distribution_with_scale(
+        15.0, simulation["distributions"][distribution.ID], rng, simulation, data
+    )
+
+    # Both selected tables have CDF [0, 0.2, 1]. In their second interval,
+    # u = 0.55 is nearer the lower CDF point, while the linear-PDF quantile
+    # lies nearer the upper energy point. CDF midpoint 0.6 selects the lower.
+    point = 2 if law == "linear" and energy_draw > 0.6 else 1
+    incident = 1 if incident_draw < 0.5 else 0
+    expected_cosine = sum(supports[3 * incident + point]) / 2
+    assert cosine == pytest.approx(expected_cosine)
+
+    if law == "histogram":
+        raw_energy = 1 + (energy_draw - 0.2) / 0.4
+    else:
+        raw_energy = 1 + (math.sqrt(0.04 + 0.4 * (energy_draw - 0.2)) - 0.2) / 0.2
+    # Interpolated support at incident energy 15 is [50, 54.5].
+    assert energy == pytest.approx(50 + 1.5 * raw_energy)
+    assert rng[0]["idx"] == 3

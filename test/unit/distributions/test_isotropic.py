@@ -148,17 +148,18 @@ def test_reactions_require_consistent_angle_energy_sources(kind, joint, missing_
     """The absence marker must agree with the energy sampler's output quantities."""
     angular = DistributionNone() if missing_angle else DistributionIsotropic()
     spectrum = (
-        DistributionNBody([0, 1], [1, 1])
+        DistributionNBody(3, 12.0, [0, 1], [1, 1])
         if joint
         else DistributionLevelScattering(0.0, 0.5)
     )
+    frame = REFERENCE_FRAME_COM if joint else REFERENCE_FRAME_LAB
 
     def build():
         if kind == "secondary-product":
             return SecondaryProduct(
                 0,
                 DataPolynomial([1.0]),
-                REFERENCE_FRAME_LAB,
+                frame,
                 angular,
                 np.array([1.0, 10.0]),
                 np.ones((1, 1)),
@@ -168,7 +169,7 @@ def test_reactions_require_consistent_angle_energy_sources(kind, joint, missing_
             18 if kind == "fission" else 16,
             np.ones(2),
             0,
-            REFERENCE_FRAME_LAB,
+            frame,
             0.0,
         )
         if kind == "fission":

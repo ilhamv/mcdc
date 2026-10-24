@@ -92,24 +92,43 @@ def _sample_distribution(E, distribution, rng_state, simulation, data, scale):
 
 
 @njit
-def sample_correlated_distribution(E, distribution, rng_state, simulation, data):
+def sample_correlated_distribution(
+    E, distribution, rng_state, simulation, data, atomic_weight_ratio=None, q_value=None
+):
+    """Sample outgoing energy and cosine in the distribution's reference frame.
+
+    N-body phase space requires the target-to-projectile mass ratio and the
+    reaction Q-value in eV to set its maximum outgoing COM energy.
+    """
     return _sample_correlated_distribution(
-        E, distribution, rng_state, simulation, data, False
+        E,
+        distribution,
+        rng_state,
+        simulation,
+        data,
+        False,
+        atomic_weight_ratio,
+        q_value,
     )
 
 
 @njit
 def sample_correlated_distribution_with_scale(
-    E, distribution, rng_state, simulation, data
+    E, distribution, rng_state, simulation, data, atomic_weight_ratio=None, q_value=None
 ):
+    """Sample a joint law with outgoing-energy support scaling.
+
+    N-body's physical scale uses the supplied target mass ratio and Q-value;
+    its tabulated coordinate is always a dimensionless energy fraction.
+    """
     return _sample_correlated_distribution(
-        E, distribution, rng_state, simulation, data, True
+        E, distribution, rng_state, simulation, data, True, atomic_weight_ratio, q_value
     )
 
 
 @njit
 def _sample_correlated_distribution(
-    E, distribution, rng_state, simulation, data, scale
+    E, distribution, rng_state, simulation, data, scale, atomic_weight_ratio, q_value
 ):
     distribution_type = distribution["sub_type"]
     ID = distribution["sub_ID"]
@@ -123,10 +142,23 @@ def _sample_correlated_distribution(
         return sample_table_energy_angle(E, rng_state, table, data)
 
     elif distribution_type == DISTRIBUTION_N_BODY:
+        if atomic_weight_ratio is None or q_value is None:
+            raise ValueError(
+                "N-body sampling requires target mass ratio and reaction Q-value"
+            )
+        if (
+            not math.isfinite(atomic_weight_ratio)
+            or atomic_weight_ratio <= 0
+            or not math.isfinite(q_value)
+        ):
+            raise ValueError("Invalid N-body target mass ratio or reaction Q-value")
         nbody = simulation["nbody_distributions"][ID]
-        E_out, _ = sample_density_with_interval(
+        fraction, _ = sample_density_with_interval(
             nbody["pdf_ID"], rng.lcg(rng_state), simulation, data
         )
+        available = atomic_weight_ratio / (atomic_weight_ratio + 1.0) * E + q_value
+        maximum = (1.0 - 1.0 / nbody["total_mass_ratio"]) * max(0.0, available)
+        E_out = fraction * maximum
         mu = sample_isotropic_cosine(rng_state)
         return E_out, mu
 

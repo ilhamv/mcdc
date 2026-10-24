@@ -83,7 +83,7 @@ class SecondaryProduct(MCDCObject):
         # Angular sampling and energy-spectrum selection
         self.reference_frame = reference_frame
         self.mu = mu
-        validate_angle_energy(mu, energy_spectra, self.label)
+        validate_angle_energy(mu, energy_spectra, self.label, reference_frame)
         self.N_spectrum_probability_bin = len(spectrum_probability_grid) - 1
         self.N_spectrum = len(energy_spectra)
         self.spectrum_probability_grid = spectrum_probability_grid

@@ -252,6 +252,8 @@ multi_table_distribution = into_dtype([
 
 nbody_distribution = into_dtype([
     ('pdf_ID', int64),
+    ('number_particles', int64),
+    ('total_mass_ratio', float64),
     ('ID', int64),
     ('base_ID', int64),
 ])

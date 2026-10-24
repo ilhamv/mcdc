@@ -213,6 +213,8 @@ def read_distribution(group):
     if kind == "n-body":
         density = read_distribution_density(group)
         return DistributionNBody(
+            group["number-particles"][()],
+            float(group["total-mass-ratio"][()]),
             density.x,
             density.y,
             interpolations=density.interpolations,
