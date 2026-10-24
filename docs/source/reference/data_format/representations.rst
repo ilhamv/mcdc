@@ -6,6 +6,7 @@ Reusable Representations
 These type names identify the layouts expanded at individual fields.
 The reusable representations are designed to be as consistent as possible with their counterparts in MC/DC's ``mcdc.object_`` and ``mcdc.transport`` modules.
 ``Data`` and ``Distribution`` select a representation through a required scalar string attribute ``type`` on the containing group.
+See :doc:`../ace_distributions` for the mapping from ACE laws to these representations and their object and transport implementations.
 
 CrossSection
 ------------
@@ -208,10 +209,7 @@ For incident-energy dependence, ``grid`` has unit ``eV``.
 A dimensionless indexing grid omits the unit attribute.
 All PDFs describe the same sampled quantity, share its physical unit, and individually integrate to one.
 Repeated grid coordinates describe the distributions on either side of a discontinuity.
-Histogram interpolation uses the lower-grid distribution within an interval.
-Linear interpolation uses the neighboring distributions with weights 1 - t and t.
-For outgoing-energy tables with different supports, use unit-base interpolation: linearly interpolate the lower and upper support limits, and map the sampled energy from the selected table's support into that interpolated support.
-For angular tables the cosine coordinate is unchanged.
+See :ref:`ace-incident-energy-sampling` for table selection and outgoing-energy support scaling.
 
 Packed PDF tables
 ^^^^^^^^^^^^^^^^^
@@ -267,24 +265,24 @@ Analytic energy spectra
      - Meaning
    * - ``level-scattering``
      - ``C1``: float, eV; ``C2``: float
-     - Outgoing energy :math:`E'=C_2(E-C_1)` for incident energy E.
+     - Deterministic level-scattering energy parameters.
    * - ``maxwellian``
      - ``temperature``: Data, eV; ``restriction-energy``: float, eV
-     - Spectrum proportional to :math:`\sqrt{E'}\exp[-E'/T(E)]`.
+     - Maxwellian spectral temperature and energy restriction.
    * - ``evaporation``
      - ``temperature``: Data, eV; ``restriction-energy``: float, eV
-     - Spectrum proportional to :math:`E'\exp[-E'/T(E)]`.
+     - Evaporation spectral temperature and energy restriction.
 
 For Maxwellian and evaporation spectra, T(E) is the positive spectral temperature, evaluated as Data at incident energy E in eV.
-The normalized spectrum is restricted to :math:`0\le E'\le E-U`, where U is ``restriction-energy`` and E - U must be positive.
 Spectral temperature is expressed in eV, and target temperature in kelvin.
+See :ref:`ace-law-3`, :ref:`ace-law-7`, and :ref:`ace-law-9` for the energy laws and their sampling.
 
 Correlated energy-angle distributions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 ``type = kalbach-mann`` and ``type = energy-angle-table`` both contain ``energy`` (float [I], eV) and ``tables/outgoing-energy`` (packed PDF tables).
 There is one outgoing-energy table per strictly increasing incident-energy point.
-Their incident-energy dependence is linear with unit-base interpolation of outgoing energy.
+These representations have inherent linear incident-energy dependence and do not store an outer interpolation group.
 
 Kalbach–Mann additionally contains:
 
@@ -301,30 +299,17 @@ Kalbach–Mann additionally contains:
      - Data
      - Dimensionless angular slope a versus outgoing energy in eV, for incident-energy index i.
 
-The parameters describe the conditional cosine density
-
-.. math::
-
-   p(\mu\mid E,E') = \frac{a}{2\sinh a}
-   \left[\cosh(a\mu)+r\sinh(a\mu)\right].
-
-The limit a = 0 is isotropic.
 The precompound fraction is between zero and one, and the angular slope is nonnegative.
 Each parameter is evaluated as Data at outgoing energy in eV.
 When represented as tables, the parameters may use independent grids and interpolation regions, distinct from one another and from the outgoing-energy density.
+See :ref:`ace-law-44` for the conditional angular law and parameter sampling.
 
 Energy-angle-table distributions additionally contain ``tables/cosine-distributions`` (packed PDF tables, dimensionless).
 There is one cosine table for every point in the concatenated ``tables/outgoing-energy/value`` array, in the same order.
 The outgoing-energy tables supply marginal densities; each cosine table is conditional on its corresponding outgoing energy and incident-energy table.
 The two collections' offsets identify both levels of conditioning.
 
-After selecting an incident-energy table, outgoing-energy sampling identifies an interval j and a cumulative probability u within that table.
-For histogram density interpolation, sample the cosine table associated with the interval's lower outgoing-energy point j.
-For other density interpolation laws, select point j or j + 1 according to which cumulative probability, C[j] or C[j + 1], is closer to u; ties select j.
-The comparison uses the selected table's CDF before unit-base energy scaling.
-Sample the chosen cosine PDF using its own interpolation rules and an independent random number.
-The histogram and linear cases follow the `MCNP LAW 61 sampling description (page 2-47) <https://mcnpx.lanl.gov/pdf_files/TechReport_2003_LANL_LA-UR-03-1987Revised212008_SweezyBoothEtAl.pdf#page=81>`_.
-The same CDF-distance rule applies to the logarithmic density interpolation laws in this format.
+See :ref:`ace-law-61` for selection and sampling of the conditional cosine tables.
 
 N-body phase-space distribution
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -355,16 +340,5 @@ N-body phase-space distribution
 
 The PDF integrates to one under its interpolation rules, following the continuous probability-table constraints.
 The density supports all five Interpolation laws and multiple interpolation regions.
-The phase-space density has the shape :math:`p(x)\propto\sqrt{x}(1-x)^{3N/2-4}`.
-For incident energy E, the sampled COM outgoing energy is :math:`E'=xE'_{\max}`, with
-
-.. math::
-
-   E'_{\max}=\frac{R-1}{R}\left(\frac{A}{A+1}E+Q\right).
-
-Here A is the target-to-projectile mass ratio and Q is the reaction Q-value in eV.
-The energy scale is zero when no positive energy is available.
 N-body reactions require ``reference-frame = COM`` and omit a separate angular-cosine distribution.
-Emission is isotropic in COM, independently of outgoing energy in that frame.
-Emission in the laboratory frame is generally anisotropic after the kinematic transformation.
-See the `ACE LAW 66 definition <https://github.com/NuclearData/ACEFormat/blob/master/src/ContinuousEnergyNeutron.tex#L867>`_ and `NJOY's phase-space tabulation <https://github.com/njoy/NJOY2016-manual/blob/master/acex.tex>`_.
+See :ref:`ace-law-66` for the phase-space model, physical energy scale, and angular sampling.

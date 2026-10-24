@@ -73,6 +73,7 @@ Prepared data
 
 Prepared data includes neutron reaction cross sections, angular and energy distributions, and prompt and delayed fission-neutron data.
 See the :doc:`reaction reference <../../reference/data_format/reactions>` for categories and fields, and the :doc:`distribution reference <../../reference/data_format/representations>` for distribution layouts.
+The :doc:`ACE distribution support reference <../../reference/ace_distributions>` lists supported laws, their representations, and conversion restrictions.
 
 Additional particle production, damage data, unresolved-resonance probability tables, and thermal-scattering laws are not included yet.
 Fission tables with delayed-neutron yields must also provide explicit prompt-neutron yields.
