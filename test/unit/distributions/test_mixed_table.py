@@ -118,11 +118,11 @@ def test_packed_multi_table_has_no_child_distributions(
     ) == pytest.approx(3)
 
 
-def test_multi_table_rejects_discrete_payload(tmp_path):
+def test_multi_table_rejects_incomplete_discrete_payload(tmp_path):
     with h5py.File(tmp_path / "discrete-multi.h5", "w") as file:
         multi_table(file, [1, 2], [([0, 1], [1, 1], None, None)] * 2)
         file["tables/pmf"] = [1]
-        with pytest.raises(ValueError, match="continuous only"):
+        with pytest.raises(ValueError, match="incomplete packed discrete"):
             read_distribution(file)
 
 

@@ -213,9 +213,7 @@ def sample_table_with_interval(table, rng_state, simulation, data):
     discrete_probability = masses[-1]
     if xi < discrete_probability or table["continuous_probability"] == 0.0:
         pmf = mcdc_get.table_distribution.pmf_all(table, data)
-        index = min(int(np.searchsorted(masses, xi, side="right")) - 1, len(pmf) - 1)
-        while index > 0 and pmf[index] == 0.0:
-            index -= 1
+        index = sample_discrete_index(xi, masses[1:], pmf)
         return mcdc_get.table_distribution.discrete_value(index, table, data), -1
     return sample_density_with_interval(
         table["pdf_ID"], xi - discrete_probability, simulation, data
@@ -316,73 +314,109 @@ def sample_multi_table(E, rng_state, multi_table, simulation, data):
 
 
 @njit
+def sample_discrete_index(xi, cmf, pmf):
+    """Select a point mass from upper cumulative bounds, skipping zero masses."""
+    index = min(int(np.searchsorted(cmf, xi, side="right")), len(pmf) - 1)
+    while index > 0 and pmf[index] == 0.0:
+        index -= 1
+    return index
+
+
+@njit
 def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
-    """Sample from a multi-table distribution."""
+    """Sample corresponding discrete lines or a unit-base continuous spectrum.
 
-    # Get the grid
+    Line probabilities and coordinates interpolate between incident tables.
+    Continuous endpoint selection is conditional on reaching the continuous
+    component; its weights include each endpoint's continuous probability.
+    """
     grid = mcdc_get.multi_table_distribution.grid_all(multi_table, data)
-
-    # Helper flag for scaling later
-    use_next_table = False
-
-    # Default interpolation factor
-    f = 0.0
-
-    # Below grid: use first table without unit-base scaling.
-    # Include equality: find_bin returns -1 at the first point.
+    interior = False
+    fraction = 0.0
     if E <= grid[0]:
-        idx = int(np.searchsorted(grid, E, side="right")) - 1 if E == grid[0] else 0
+        low = int(np.searchsorted(grid, E, side="right")) - 1 if E == grid[0] else 0
+        high = low
         scale = False
-
-    # Above grid: use last table without unit-base scaling.
     elif E >= grid[-1]:
-        idx = len(grid) - 1
+        low = len(grid) - 1
+        high = low
         scale = False
-
-    # Pick the table
     else:
-        # Calculate Interpolation factor
-        idx = int(np.searchsorted(grid, E, side="right")) - 1
-        E0 = grid[idx]
-        E1 = grid[idx + 1]
-        f = (E - E0) / (E1 - E0)
-
+        interior = True
+        low = int(np.searchsorted(grid, E, side="right")) - 1
+        high = low + 1
+        fraction = (E - grid[low]) / (grid[high] - grid[low])
         boundaries = mcdc_get.multi_table_distribution.interpolation_boundaries_all(
             multi_table, data
         )
-        region = len(boundaries) - 1
-        for i in range(len(boundaries)):
-            if idx + 1 < boundaries[i]:
-                region = i
-                break
-        interpolation = mcdc_get.multi_table_distribution.interpolations(
-            region, multi_table, data
-        )
-        if interpolation == INTERPOLATION_HISTOGRAM:
-            f = 0.0
+        region = 0
+        while region < len(boundaries) - 1 and low + 1 >= boundaries[region]:
+            region += 1
+        if (
+            mcdc_get.multi_table_distribution.interpolations(region, multi_table, data)
+            == INTERPOLATION_HISTOGRAM
+        ):
+            fraction = 0.0
+            high = low
             scale = False
 
-        # Sample which table to choose
-        if rng.lcg(rng_state) < f:
-            idx += 1
-            use_next_table = True  # For scaling later if needed
+    discrete_offsets = mcdc_get.multi_table_distribution.discrete_offsets_all(
+        multi_table, data
+    )
+    begin, end = int(discrete_offsets[low]), int(discrete_offsets[low + 1])
+    if end > begin:
+        pmf = mcdc_get.multi_table_distribution.pmf_all(multi_table, data)
+        cmf = mcdc_get.multi_table_distribution.cmf_all(multi_table, data)
+        values = mcdc_get.multi_table_distribution.discrete_value_all(multi_table, data)
+        other = int(discrete_offsets[high])
+        xi = rng.lcg(rng_state)
+        cumulative = 0.0
+        last_positive = 0
+        for j in range(end - begin):
+            probability = (1.0 - fraction) * pmf[begin + j] + fraction * pmf[other + j]
+            cumulative = (1.0 - fraction) * cmf[begin + j] + fraction * cmf[other + j]
+            if probability > 0.0:
+                last_positive = j
+                if xi < cumulative:
+                    return (1.0 - fraction) * values[begin + j] + fraction * values[
+                        other + j
+                    ]
+        probabilities = mcdc_get.multi_table_distribution.continuous_probability_all(
+            multi_table, data
+        )
+        continuous = (1.0 - fraction) * probabilities[low] + fraction * probabilities[
+            high
+        ]
+        if continuous <= 0.0:
+            return (1.0 - fraction) * values[begin + last_positive] + fraction * values[
+                other + last_positive
+            ]
+        # Rebase the remaining draw onto the normalized continuous component.
+        xi = min(1.0, max(0.0, (xi - cumulative) / continuous))
+        upper_weight = fraction * probabilities[high] / continuous
+        selected = high if low != high and rng.lcg(rng_state) < upper_weight else low
+        xi *= probabilities[selected]
+    else:
+        # A continuous-only table retains its ordinary stochastic table selection.
+        selected = high if interior and rng.lcg(rng_state) < fraction else low
+        xi = rng.lcg(rng_state)
 
-    # Packed arrays are owned directly by MultiTable; no child IDs are needed.
-    sampled = sample_multi_table_at(idx, rng.lcg(rng_state), multi_table, data)
+    sampled = sample_multi_table_at(selected, xi, multi_table, data)
     if not scale:
         return sampled
-    low = idx - 1 if use_next_table else idx
-    high = low + 1
     offsets = mcdc_get.multi_table_distribution.offsets_all(multi_table, data)
+    # If the continuum exists at only one endpoint, retain that support.
+    if offsets[low + 1] == offsets[low] or offsets[high + 1] == offsets[high]:
+        return sampled
     values = mcdc_get.multi_table_distribution.value_all(multi_table, data)
-    minimum = values[int(offsets[low])] + f * (
+    minimum = values[int(offsets[low])] + fraction * (
         values[int(offsets[high])] - values[int(offsets[low])]
     )
-    maximum = values[int(offsets[low + 1]) - 1] + f * (
+    maximum = values[int(offsets[low + 1]) - 1] + fraction * (
         values[int(offsets[high + 1]) - 1] - values[int(offsets[low + 1]) - 1]
     )
-    first = values[int(offsets[idx])]
-    last = values[int(offsets[idx + 1]) - 1]
+    first = values[int(offsets[selected])]
+    last = values[int(offsets[selected + 1]) - 1]
     return minimum + (sampled - first) / (last - first) * (maximum - minimum)
 
 

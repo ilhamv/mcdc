@@ -129,10 +129,11 @@ Each table representation specifies its interpolation laws and any restrictions 
 Distribution
 ------------
 
-A Distribution describes sampled quantities rather than a deterministic scalar function.
-An energy-only distribution samples outgoing energy in eV, an angular distribution samples a dimensionless cosine, and a joint distribution supplies both.
-The reaction's reference frame defines the frame of those quantities.
-An angular cosine is measured with respect to the incident direction; these layouts do not store an azimuth-dependent law.
+A Distribution describes sampled quantities in the reaction's declared reference frame.
+Energy distributions supply outgoing energy in eV; angular distributions supply a dimensionless cosine relative to the incident direction; joint distributions supply both.
+The layouts below define stored fields and constraints; :doc:`../ace_distributions` describes their physical models and sampling.
+
+.. _distribution-table:
 
 Probability table
 ^^^^^^^^^^^^^^^^^
@@ -150,44 +151,87 @@ Probability table
      - Continuous coordinates, required with ``pdf``; nondecreasing with positive support width and K >= 2.
    * - ``pdf``
      - float [K]
-     - Nonnegative continuous density, required with ``value``.
+     - Continuous density, required with ``value``.
    * - ``interpolation``
      - Interpolation
-     - Density interpolation, required only for the continuous component.
+     - Required for the continuous component only.
    * - ``discrete-value``
      - float [D]
      - Discrete outcomes, required with ``pmf``, D >= 1.
    * - ``pmf``
      - float [D]
-     - Nonnegative probability masses, required with ``discrete-value``.
+     - Probability masses, required with ``discrete-value``.
 
 At least one coordinate/probability pair is required.
-Coordinates and probabilities are finite, and probability values are nonnegative.
-The PMF sum plus the PDF integral differs from one by at most :math:`10^{-6}`.
-The integral follows the specified density interpolation laws.
-The two components carry their combined probabilities, rather than each being normalized to one.
-Discrete outcomes may lie inside or outside the continuous support and are sampled exactly.
-``discrete-value`` carries the sampled coordinate's unit, and ``pmf`` is dimensionless.
-``value`` carries the sampled coordinate's unit, and ``pdf`` carries its inverse.
-Both omit ``unit`` for a dimensionless cosine distribution.
-Cosines lie between -1 and 1.
-A continuous-only table has a PDF integral of one; a discrete-only table has a PMF sum of one.
-The terminal density of a histogram does not define a further interval.
-Repeated coordinates describe a jump in density; their zero-width interval carries no probability mass.
-CDFs and cumulative probability masses are derived from the stored PDF and PMF.
+Coordinates and probabilities are finite, and probabilities are nonnegative.
+The PMF sum plus the PDF integral, evaluated under its interpolation laws, differs from one by at most :math:`10^{-6}`.
+The components retain their combined probabilities rather than each being normalized to one.
+Repeated continuous coordinates describe a density jump and carry no probability mass across their zero-width interval.
+Discrete outcomes may lie inside or outside the continuous support.
 
-Isotropic distribution
-^^^^^^^^^^^^^^^^^^^^^^
+``value`` and ``discrete-value`` carry the sampled coordinate's unit; ``pdf`` carries its inverse; ``pmf`` is dimensionless.
+Cosine coordinates lie in [-1, 1], and both coordinates and densities are dimensionless.
+Unit attributes follow :doc:`conventions`.
+CDFs and cumulative probability masses are derived, not stored.
 
-``type = isotropic`` describes an angular cosine uniformly distributed on [-1, 1], with uniform azimuth.
-It has no datasets.
+.. _packed-pdf-tables:
+.. _packed-probability-tables:
 
-Multi-table distributions
+Packed probability tables
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``type = multi-table`` is a specialized conditional continuous-PDF representation with its own packed arrays.
-It does not contain reusable ``table`` Distribution objects and does not support discrete probability masses.
-It contains the following fields.
+This shared storage layout has no ``type`` attribute.
+It packs the components of multiple :ref:`probability tables <distribution-table>` into concatenated arrays.
+The containing distribution defines how the tables are indexed and which components are allowed.
+Let T be the number of tables, P the total continuous points, D the total discrete entries, and R the total PDF interpolation regions.
+
+.. list-table:: Packed probability fields
+   :header-rows: 1
+
+   * - Field
+     - Type / shape
+     - Meaning
+   * - ``offsets``
+     - integer [T + 1]
+     - Start of each table's continuous points, followed by P.
+   * - ``value``
+     - float [P]
+     - Concatenated continuous coordinates.
+   * - ``pdf``
+     - float [P]
+     - Concatenated continuous densities.
+   * - ``interpolation/offsets``
+     - integer [T + 1]
+     - Start of each table's interpolation regions, followed by R.
+   * - ``interpolation/laws``
+     - string [R]
+     - Concatenated PDF interpolation laws.
+   * - ``interpolation/boundaries``
+     - integer [R]
+     - Exclusive upper-point indices local to each table.
+   * - ``discrete-offsets``
+     - integer [T + 1]
+     - Start of each table's discrete entries, followed by D.
+   * - ``discrete-value``
+     - float [D]
+     - Concatenated discrete outcomes.
+   * - ``pmf``
+     - float [D]
+     - Concatenated probability masses.
+
+Supply all continuous fields when any table has a PDF, and all discrete fields when any table has a PMF; omit the fields of a component absent from every table.
+Offset arrays start at zero, are nondecreasing, and end at their stated total.
+Table i occupies ``offsets[i]:offsets[i + 1]`` in the continuous arrays and ``discrete-offsets[i]:discrete-offsets[i + 1]`` in the discrete arrays.
+Repeated offsets represent an absent component; an absent PDF also has no interpolation regions.
+Every nonempty PDF slice follows the standalone table's coordinate and interpolation constraints.
+Interpolation boundaries are relative to the individual PDF slice, not the concatenated array.
+Coordinates may restart at each table boundary.
+Probability normalization and units follow the standalone table rules separately for each table.
+
+Multi-table distribution
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+``type = multi-table`` indexes packed probability tables by a shared grid.
 
 .. list-table:: Multi-table fields
    :header-rows: 1
@@ -197,124 +241,95 @@ It contains the following fields.
      - Meaning
    * - ``grid``
      - float [I]
-     - Nondecreasing indexing coordinates, I >= 2, with a ``unit`` attribute when dimensional.
+     - Finite, nondecreasing indexing coordinates, I >= 2; incident energy uses eV.
    * - ``interpolation``
      - Interpolation
      - Interpolation between neighboring tables; histogram or linear only.
    * - ``tables``
-     - Packed PDF tables
-     - One conditional distribution per grid point, in grid order.
+     - Packed probability tables
+     - One continuous, discrete, or mixed table per grid point, in grid order.
 
-For incident-energy dependence, ``grid`` has unit ``eV``.
-A dimensionless indexing grid omits the unit attribute.
-All PDFs describe the same sampled quantity, share its physical unit, and individually integrate to one.
+All tables describe the same sampled quantity and use the :ref:`packed layout <packed-probability-tables>` above.
 Repeated grid coordinates describe the distributions on either side of a discontinuity.
-See :ref:`ace-incident-energy-sampling` for table selection and outgoing-energy support scaling.
+Across each linear grid interval, discrete outcomes correspond by index and have equal counts.
+See :ref:`ace-law-4` for line correspondence and :ref:`ace-incident-energy-sampling` for incident-table selection and support scaling.
 
-Packed PDF tables
-^^^^^^^^^^^^^^^^^
+Isotropic distribution
+^^^^^^^^^^^^^^^^^^^^^^
 
-A collection of PDF tables uses concatenated arrays.
-This layout is shared by multi-table and correlated distributions; its containing representation defines how the tables are indexed.
-For T tables, P total points, and R total interpolation regions, the collection contains:
+``type = isotropic`` describes an angular cosine uniformly distributed on [-1, 1], with uniform azimuth.
+It has no datasets.
 
-.. list-table:: Packed PDF table fields
+Analytic energy spectra
+^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table:: Analytic distribution fields
+   :header-rows: 1
+   :widths: 22 48 30
+
+   * - ``type`` attribute
+     - Fields
+     - Model and sampling
+   * - ``level-scattering``
+     - ``C1``: float, eV; ``C2``: float
+     - :ref:`ace-law-3`
+   * - ``maxwellian``
+     - ``temperature``: Data, eV; ``restriction-energy``: float, eV
+     - :ref:`ace-law-7`
+   * - ``evaporation``
+     - ``temperature``: Data, eV; ``restriction-energy``: float, eV
+     - :ref:`ace-law-9`
+
+``temperature`` takes incident energy in eV as its input and returns a positive spectral temperature in eV.
+
+Correlated energy-angle distributions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``type = kalbach-mann`` and ``type = energy-angle-table`` share these fields.
+
+.. list-table:: Common correlated fields
    :header-rows: 1
 
    * - Field
      - Type / shape
      - Meaning
-   * - ``offsets``
-     - integer [T + 1]
-     - Start of each table in ``value`` and ``pdf``, followed by the terminal point count P.
-   * - ``value``
-     - float [P]
-     - Concatenated sampled coordinates, carrying their physical unit when dimensional.
-   * - ``pdf``
-     - float [P]
-     - Concatenated densities, carrying the inverse coordinate unit when dimensional.
-   * - ``interpolation/offsets``
-     - integer [T + 1]
-     - Start of each table's regions in ``laws`` and ``boundaries``, followed by R.
-   * - ``interpolation/laws``
-     - string [R]
-     - Concatenated interpolation laws for the individual tables.
-   * - ``interpolation/boundaries``
-     - integer [R]
-     - Exclusive upper-point indices relative to the start of each individual table.
+   * - ``energy``
+     - float [I], eV
+     - Strictly increasing incident energies.
+   * - ``tables/outgoing-energy``
+     - Packed probability tables, continuous-only
+     - One outgoing-energy PDF per incident-energy point.
 
-Both offset arrays start at zero and are strictly increasing.
-Table i occupies the half-open slice ``offsets[i]:offsets[i + 1]``; its interpolation regions use the corresponding slice of ``interpolation/offsets``.
-Each table has at least two points and at least one interpolation region, following the coordinate, density, and interpolation rules of a continuous-only probability table.
-Coordinates may restart at each table boundary; the concatenated array need not be globally monotonic.
-No ``type`` attribute is attached to the collection itself.
-CDFs are derived from the stored densities and interpolation rules.
+These representations have inherent linear incident-energy dependence and no outer interpolation group.
+Their packed collections use the :ref:`shared layout <packed-probability-tables>` with every table containing a PDF and no PMF fields.
 
-For example, tables with 3, 2, and 4 points have ``offsets = [0, 3, 5, 9]``.
-The last table occupies points 5 through 8, and its final interpolation boundary is 4, regardless of its position in the packed array.
-
-Analytic energy spectra
-^^^^^^^^^^^^^^^^^^^^^^^
-
-.. list-table:: Representations
+.. list-table:: Additional correlated fields
    :header-rows: 1
-   :widths: 22 38 40
 
    * - ``type`` attribute
-     - Fields
-     - Meaning
-   * - ``level-scattering``
-     - ``C1``: float, eV; ``C2``: float
-     - Deterministic level-scattering energy parameters.
-   * - ``maxwellian``
-     - ``temperature``: Data, eV; ``restriction-energy``: float, eV
-     - Maxwellian spectral temperature and energy restriction.
-   * - ``evaporation``
-     - ``temperature``: Data, eV; ``restriction-energy``: float, eV
-     - Evaporation spectral temperature and energy restriction.
-
-For Maxwellian and evaporation spectra, T(E) is the positive spectral temperature, evaluated as Data at incident energy E in eV.
-Spectral temperature is expressed in eV, and target temperature in kelvin.
-See :ref:`ace-law-3`, :ref:`ace-law-7`, and :ref:`ace-law-9` for the energy laws and their sampling.
-
-Correlated energy-angle distributions
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-``type = kalbach-mann`` and ``type = energy-angle-table`` both contain ``energy`` (float [I], eV) and ``tables/outgoing-energy`` (packed PDF tables).
-There is one outgoing-energy table per strictly increasing incident-energy point.
-These representations have inherent linear incident-energy dependence and do not store an outer interpolation group.
-
-Kalbach–Mann additionally contains:
-
-.. list-table:: Kalbach–Mann parameter fields
-   :header-rows: 1
-
-   * - Field
+     - Field
      - Type
      - Meaning
-   * - ``tables/precompound-factor/{i}``
+   * - ``kalbach-mann``
+     - ``tables/precompound-factor/{i}``
      - Data
-     - Dimensionless precompound fraction r versus outgoing energy in eV, for incident-energy index i.
-   * - ``tables/angular-slope/{i}``
+     - Dimensionless precompound fraction in [0, 1] at incident-energy index i.
+   * - ``kalbach-mann``
+     - ``tables/angular-slope/{i}``
      - Data
-     - Dimensionless angular slope a versus outgoing energy in eV, for incident-energy index i.
+     - Nonnegative dimensionless angular slope at incident-energy index i.
+   * - ``energy-angle-table``
+     - ``tables/cosine-distributions``
+     - Packed probability tables, continuous-only
+     - One dimensionless cosine PDF per point in ``tables/outgoing-energy/value``, in the same order.
 
-The precompound fraction is between zero and one, and the angular slope is nonnegative.
-Each parameter is evaluated as Data at outgoing energy in eV.
-When represented as tables, the parameters may use independent grids and interpolation regions, distinct from one another and from the outgoing-energy density.
-See :ref:`ace-law-44` for the conditional angular law and parameter sampling.
-
-Energy-angle-table distributions additionally contain ``tables/cosine-distributions`` (packed PDF tables, dimensionless).
-There is one cosine table for every point in the concatenated ``tables/outgoing-energy/value`` array, in the same order.
-The outgoing-energy tables supply marginal densities; each cosine table is conditional on its corresponding outgoing energy and incident-energy table.
-The two collections' offsets identify both levels of conditioning.
-
-See :ref:`ace-law-61` for selection and sampling of the conditional cosine tables.
+Kalbach–Mann parameter Data takes outgoing energy in eV as its input; parameter tables may use independent grids and interpolation regions.
+See :ref:`ace-law-44` and :ref:`ace-law-61` for the joint models and conditional sampling.
 
 N-body phase-space distribution
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``type = n-body`` stores a dimensionless energy-fraction PDF and the final-state mass parameters.
+``type = n-body`` stores a dimensionless energy-fraction PDF and final-state mass parameters.
 
 .. list-table:: N-body fields
    :header-rows: 1
@@ -324,13 +339,13 @@ N-body phase-space distribution
      - Meaning
    * - ``number-particles``
      - integer
-     - Number of bodies N in the final-state phase space, N >= 3.
+     - Number of final-state bodies, at least three.
    * - ``total-mass-ratio``
      - float
-     - Total final-state mass divided by the emitted particle mass, R > 1.
+     - Total final-state mass divided by the emitted particle mass, greater than one.
    * - ``value``
      - float [K]
-     - Normalized outgoing-energy fractions x in [0, 1].
+     - Energy fractions in [0, 1].
    * - ``pdf``
      - float [K]
      - Dimensionless density of the energy fraction.
@@ -338,7 +353,6 @@ N-body phase-space distribution
      - Interpolation
      - Interpolation of the energy-fraction density.
 
-The PDF integrates to one under its interpolation rules, following the continuous probability-table constraints.
-The density supports all five Interpolation laws and multiple interpolation regions.
-N-body reactions require ``reference-frame = COM`` and omit a separate angular-cosine distribution.
+The continuous-only :ref:`probability-table constraints <distribution-table>` apply.
+The reaction requires ``reference-frame = COM`` and omits a separate angular-cosine distribution.
 See :ref:`ace-law-66` for the phase-space model, physical energy scale, and angular sampling.

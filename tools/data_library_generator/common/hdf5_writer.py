@@ -428,18 +428,7 @@ def distribution_table(
     elif laws is not None or boundaries is not None:
         raise ValueError("Discrete probability masses do not use interpolation")
     if discrete:
-        discrete_value, pmf = np.asarray(discrete_value, dtype=float), np.asarray(
-            pmf, dtype=float
-        )
-        if (
-            discrete_value.ndim != 1
-            or discrete_value.shape != pmf.shape
-            or not len(pmf)
-            or not np.all(np.isfinite(discrete_value))
-            or not np.all(np.isfinite(pmf))
-            or np.any(pmf < 0)
-        ):
-            raise ValueError("Invalid discrete probability table")
+        discrete_value, pmf = _pmf_arrays(discrete_value, pmf)
         with np.errstate(over="ignore"):
             mass += float(np.sum(pmf))
     _check_probability_mass(mass)
@@ -454,7 +443,7 @@ def distribution_table(
 
 
 # ======================================================================================
-# Packed probability-density tables
+# Packed probability tables
 # ======================================================================================
 
 
@@ -494,15 +483,69 @@ def pdf_tables(group, tables, unit="eV"):
     _write_pdf_arrays(group, _packed_pdf_arrays(tables), unit)
 
 
-def _packed_pdf_arrays(tables):
-    """Validate every PDF before packing its arrays and local region metadata."""
-    values, densities, rules, endpoints = [], [], [], []
-    offsets, rule_offsets = [0], [0]
-    for index, (value, pdf, laws, boundaries) in enumerate(tables):
+def _pmf_arrays(value, pmf):
+    """Validate finite discrete coordinates and nonnegative probability masses."""
+    value, pmf = np.asarray(value, dtype=float), np.asarray(pmf, dtype=float)
+    if (
+        value.ndim != 1
+        or value.shape != pmf.shape
+        or not len(pmf)
+        or not np.all(np.isfinite(value))
+        or not np.all(np.isfinite(pmf))
+        or np.any(pmf < 0)
+    ):
+        raise ValueError("Invalid discrete probability table")
+    return value, pmf
+
+
+def _packed_pdf_arrays(tables, discrete_value=None, pmf=None):
+    """Validate and pack probability components, preserving their combined mass.
+
+    Continuous-only callers supply ordinary PDF tuples. MultiTable may also
+    supply per-grid discrete vectors and use None for an absent continuous
+    part. Point and region offsets repeat for absent PDFs. Discrete offsets
+    independently delimit corresponding point masses in grid order.
+    """
+    tables = list(tables)
+    if not tables:
+        raise ValueError("PDF table collection must not be empty")
+    discrete = discrete_value is not None
+    if discrete != (pmf is not None):
+        raise ValueError("Discrete values require probability masses")
+    ds = [None] * len(tables) if not discrete else list(discrete_value)
+    ps = [None] * len(tables) if not discrete else list(pmf)
+    if len(ds) != len(tables) or len(ps) != len(tables):
+        raise ValueError("Grid and discrete table counts must match")
+    values, densities, rules, endpoints, discrete_values, masses = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
+    offsets, rule_offsets, mass_offsets = [0], [0], [0]
+    for index, (table, d, m) in enumerate(zip(tables, ds, ps)):
         try:
-            value, pdf, laws, boundaries, mass = _pdf_arrays(
-                value, pdf, laws, boundaries
-            )
+            mass = 0.0
+            value, pdf = np.array([]), np.array([])
+            laws, boundaries = np.array([], dtype="S16"), np.array([], dtype=np.int64)
+            if table is not None:
+                value, pdf, laws, boundaries, mass = _pdf_arrays(*table)
+            if d is not None and np.asarray(d).size == 0:
+                d = None
+            if m is not None and np.asarray(m).size == 0:
+                m = None
+            if (d is None) != (m is None) or (table is None and d is None):
+                raise ValueError(
+                    "Each table requires a PDF or a discrete coordinate/mass pair"
+                )
+            if d is None:
+                d, m = np.array([]), np.array([])
+            else:
+                d, m = _pmf_arrays(d, m)
+                with np.errstate(over="ignore"):
+                    mass += float(np.sum(m))
             _check_probability_mass(mass)
         except ValueError as error:
             raise ValueError(f"Packed PDF table {index}: {error}") from error
@@ -510,42 +553,72 @@ def _packed_pdf_arrays(tables):
         densities.append(pdf)
         rules.append(laws)
         endpoints.append(boundaries)
+        discrete_values.append(d)
+        masses.append(m)
         offsets.append(offsets[-1] + len(value))
         rule_offsets.append(rule_offsets[-1] + len(laws))
-    if not values:
-        raise ValueError("PDF table collection must not be empty")
-    return {
-        "offsets": np.asarray(offsets, dtype=np.int64),
-        "value": np.concatenate(values),
-        "pdf": np.concatenate(densities),
-        "interpolation/offsets": np.asarray(rule_offsets, dtype=np.int64),
-        "interpolation/laws": np.concatenate(rules),
-        "interpolation/boundaries": np.concatenate(endpoints),
-    }
+        mass_offsets.append(mass_offsets[-1] + len(d))
+    arrays = {}
+    if offsets[-1]:
+        arrays.update(
+            {
+                "offsets": np.asarray(offsets, dtype=np.int64),
+                "value": np.concatenate(values),
+                "pdf": np.concatenate(densities),
+                "interpolation/offsets": np.asarray(rule_offsets, dtype=np.int64),
+                "interpolation/laws": np.concatenate(rules),
+                "interpolation/boundaries": np.concatenate(endpoints),
+            }
+        )
+    if discrete:
+        arrays.update(
+            {
+                "discrete-offsets": np.asarray(mass_offsets, dtype=np.int64),
+                "discrete-value": np.concatenate(discrete_values),
+                "pmf": np.concatenate(masses),
+            }
+        )
+    return arrays
 
 
 def _write_pdf_arrays(group, arrays, unit):
-    """Write an already validated packed collection with coordinate units."""
-    # Point offsets delimit tables; region offsets delimit their interpolation rules.
-    units = {"value": unit, "pdf": f"1/{unit}" if unit else None}
+    """Write a validated packed collection with coordinate units."""
+    units = {
+        "value": unit,
+        "discrete-value": unit,
+        "pdf": f"1/{unit}" if unit else None,
+    }
     for name, array in arrays.items():
         quantity(group, name, array, units.get(name))
 
 
 def multi_table(
-    group, grid, tables, *, grid_unit="eV", unit="eV", laws=None, boundaries=None
+    group,
+    grid,
+    tables=None,
+    *,
+    discrete_value=None,
+    pmf=None,
+    grid_unit="eV",
+    unit="eV",
+    laws=None,
+    boundaries=None,
 ):
-    """Write a grid-indexed family of distributions using packed PDF tables.
+    """Write grid-indexed continuous, discrete, or mixed packed distributions.
 
-    ``grid`` contains one finite, nondecreasing coordinate per table and carries
-    ``grid_unit`` when dimensional. ``laws`` and ``boundaries`` describe
-    interpolation between tables, restricted to histogram or linear. Each item
-    of ``tables`` follows :func:`pdf_tables` and retains its own PDF rules.
-    ``unit`` describes the sampled coordinate, independently of the grid unit.
-    Invalid grid/table counts, outer interpolation, or conditional PDFs raise
-    ValueError before writing any part of the representation.
+    Optional PDF tuples follow pdf_tables; use None for a missing continuous
+    component. discrete_value and pmf contain one optional vector per grid
+    point. Each PDF integral plus its PMF sum must equal one within source
+    precision. Neither component is independently normalized.
+
+    Linear intervals require equal counts of corresponding discrete outcomes,
+    with zero probability retaining a line that vanishes at an endpoint.
+    Histogram intervals may have different discrete counts. All validation
+    completes before any HDF5 object is written.
     """
     grid = np.asarray(grid, dtype=np.float64)
+    if tables is None:
+        tables = [None] * len(grid) if grid.ndim == 1 else []
     tables = list(tables)
     if (
         grid.ndim != 1
@@ -557,7 +630,21 @@ def multi_table(
     laws, boundaries = _interpolation_arrays(len(grid), laws, boundaries)
     if not set(laws.astype(str)) <= {"histogram", "linear"}:
         raise ValueError("Multi-table grid interpolation must be histogram or linear")
-    arrays = _packed_pdf_arrays(tables)
+    arrays = _packed_pdf_arrays(tables, discrete_value, pmf)
+    if "discrete-offsets" in arrays:
+        counts = np.diff(arrays["discrete-offsets"])
+        region = 0
+        for i in range(len(grid) - 1):
+            while i + 1 >= boundaries[region]:
+                region += 1
+            if (
+                grid[i + 1] > grid[i]
+                and laws[region] == b"linear"
+                and counts[i] != counts[i + 1]
+            ):
+                raise ValueError(
+                    "Linear multi-table intervals require corresponding discrete lines"
+                )
     group.attrs["type"] = "multi-table"
     quantity(group, "grid", grid, grid_unit)
     interpolation(group, len(grid), laws, boundaries)

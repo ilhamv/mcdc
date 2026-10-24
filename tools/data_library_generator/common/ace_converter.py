@@ -912,8 +912,11 @@ def write_energy_distribution(group, source):
     and its PDF interpolation. Target mass and reaction Q-value supply the
     incident-energy-dependent energy scale during transport.
 
-    Outgoing-energy tables use ``multi-table`` with packed PDF
-    tables on an eV incident-energy grid. Correlated sources pack outgoing
+    Outgoing-energy tables use ``multi-table`` with packed PDF/PMF components
+    on an eV incident-energy grid. Leading discrete entries retain their
+    dimensionless masses and corresponding line indices; continuous densities
+    retain their individual interpolation laws and combined probability.
+    Correlated sources pack outgoing
     densities in ``tables/outgoing-energy``. Energy-angle sources additionally
     pack conditional angular densities in ``tables/cosine-distributions``,
     ordered by the concatenated outgoing-energy points. Kalbach--Mann sources
@@ -993,22 +996,35 @@ def write_energy_distribution(group, source):
         incident_energy = np.asarray(source.incident_energies) * EV_PER_MEV
         if isinstance(source, ACEtk.continuous.OutgoingEnergyDistributionData):
             # Pack all marginal densities while retaining their individual PDF rules.
-            tables = []
+            tables, discrete_values, masses = [], [], []
             for i in range(source.number_incident_energies):
                 table = source.distribution(i + 1)
-                if table.number_discrete_photon_lines:
-                    raise ValueError(
-                        "Multi-table distributions require continuous outgoing-energy PDFs"
-                    )
+                count = table.number_discrete_photon_lines
+                energy = np.asarray(table.outgoing_energies) * EV_PER_MEV
+                probability = np.asarray(table.pdf)
+                if count < 0 or count > len(energy):
+                    raise ValueError("Invalid number of discrete energy lines")
+                discrete_values.append(energy[:count])
+                masses.append(probability[:count])
+                # Line probabilities are dimensionless; only the continuum is a density.
                 tables.append(
-                    (
-                        np.asarray(table.outgoing_energies) * EV_PER_MEV,
-                        np.asarray(table.pdf) / EV_PER_MEV,
+                    None
+                    if count == len(energy)
+                    else (
+                        energy[count:],
+                        probability[count:] / EV_PER_MEV,
                         [interpolation_law(table.interpolation)],
                         None,
                     )
                 )
-            multi_table(group, incident_energy, tables)
+            discrete = any(len(values) for values in discrete_values)
+            multi_table(
+                group,
+                incident_energy,
+                tables,
+                discrete_value=discrete_values if discrete else None,
+                pmf=masses if discrete else None,
+            )
         else:
             # Pack both levels of correlated tables in their original source order.
             kalbach = isinstance(source, ACEtk.continuous.KalbachMannDistributionData)

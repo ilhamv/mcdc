@@ -108,63 +108,29 @@ class DistributionTable(DistributionBase):
         interpolation_boundaries=None,
     ):
         super().__init__()
-        continuous = value is not None
-        discrete = discrete_value is not None
-        if continuous != (pdf is not None or cdf is not None):
-            raise ValueError("Continuous values require exactly one PDF or CDF")
-        if pdf is not None and cdf is not None:
-            raise ValueError("Supply either PDF or CDF, not both")
-        if discrete != (pmf is not None) or not (continuous or discrete):
-            raise ValueError(
-                "Supply a continuous density, discrete values with PMF, or both"
-            )
-        self.discrete_value = np.asarray(
-            [] if discrete_value is None else discrete_value, dtype=float64
+        (
+            x,
+            density,
+            cumulative,
+            self.discrete_value,
+            self.pmf,
+            self.continuous_probability,
+            interpolations,
+            interpolation_boundaries,
+        ) = _probability_components(
+            value,
+            pdf,
+            cdf,
+            discrete_value,
+            pmf,
+            interpolations,
+            interpolation_boundaries,
         )
-        masses = np.asarray([] if pmf is None else pmf, dtype=float64)
-        if (
-            self.discrete_value.ndim != 1
-            or masses.ndim != 1
-            or self.discrete_value.shape != masses.shape
-            or (discrete and len(masses) == 0)
-            or not np.all(np.isfinite(self.discrete_value))
-            or not np.all(np.isfinite(masses))
-            or np.any(masses < 0)
-        ):
-            raise ValueError(
-                "Discrete values and nonnegative finite masses must be matching vectors"
-            )
-        self.pdf = DataNone()
-        continuous_mass = 0.0
-        if continuous:
-            x = np.asarray(value, dtype=float64)
-            if cdf is not None:
-                raw_cdf = np.asarray(cdf, dtype=float64)
-                density, cumulative = pdf_from_cdf(x, raw_cdf)
-                continuous_mass = float(raw_cdf[-1] - raw_cdf[0])
-                density, cumulative = (
-                    density * continuous_mass,
-                    cumulative * continuous_mass,
-                )
-                interpolations, interpolation_boundaries = INTERPOLATION_HISTOGRAM, None
-            else:
-                density, cumulative = cdf_from_pdf(
-                    x, pdf, interpolations, interpolation_boundaries, normalize=False
-                )
-                continuous_mass = float(cumulative[-1])
-        total = float(np.sum(masses)) + continuous_mass
-        if not np.isfinite(total) or total <= 0:
-            raise ValueError("Combined probability must have positive finite mass")
-        self.pmf = masses / total
         self.cmf = np.r_[0.0, np.cumsum(self.pmf)]
-        self.continuous_probability = continuous_mass / total
-        if continuous_mass > 0:
+        self.pdf = DataNone()
+        if self.continuous_probability > 0:
             self.pdf = DataTable(
-                x,
-                density / total,
-                interpolations,
-                interpolation_boundaries,
-                aux=cumulative / total,
+                x, density, interpolations, interpolation_boundaries, aux=cumulative
             )
 
     def __repr__(self):
@@ -179,19 +145,94 @@ class DistributionTable(DistributionBase):
 
 
 # ======================================================================================
+# Shared probability components
+# ======================================================================================
+
+
+def _probability_components(
+    value, pdf, cdf, discrete_value, pmf, interpolations, interpolation_boundaries
+):
+    """Validate and jointly normalize a table's continuous and discrete parts.
+
+    Return raw arrays rather than Distribution objects so standalone and packed
+    tables share validation without constructing per-grid child objects.
+    """
+    continuous = value is not None
+    discrete = discrete_value is not None
+    if continuous != (pdf is not None or cdf is not None):
+        raise ValueError("Continuous values require exactly one PDF or CDF")
+    if pdf is not None and cdf is not None:
+        raise ValueError("Supply either PDF or CDF, not both")
+    if discrete != (pmf is not None) or not (continuous or discrete):
+        raise ValueError(
+            "Supply a continuous density, discrete values with PMF, or both"
+        )
+    discrete_values = np.asarray(
+        [] if discrete_value is None else discrete_value, dtype=float64
+    )
+    masses = np.asarray([] if pmf is None else pmf, dtype=float64)
+    if (
+        discrete_values.ndim != 1
+        or masses.ndim != 1
+        or discrete_values.shape != masses.shape
+        or (discrete and len(masses) == 0)
+        or not np.all(np.isfinite(discrete_values))
+        or not np.all(np.isfinite(masses))
+        or np.any(masses < 0)
+    ):
+        raise ValueError(
+            "Discrete values and nonnegative finite masses must be matching vectors"
+        )
+    x, density, cumulative = np.array([]), np.array([]), np.array([])
+    continuous_mass = 0.0
+    if continuous:
+        x = np.asarray(value, dtype=float64)
+        if cdf is not None:
+            raw_cdf = np.asarray(cdf, dtype=float64)
+            density, cumulative = pdf_from_cdf(x, raw_cdf)
+            continuous_mass = float(raw_cdf[-1] - raw_cdf[0])
+            density, cumulative = (
+                density * continuous_mass,
+                cumulative * continuous_mass,
+            )
+            interpolations, interpolation_boundaries = INTERPOLATION_HISTOGRAM, None
+        else:
+            density, cumulative = cdf_from_pdf(
+                x, pdf, interpolations, interpolation_boundaries, normalize=False
+            )
+            continuous_mass = float(cumulative[-1])
+    total = float(np.sum(masses)) + continuous_mass
+    if not np.isfinite(total) or total <= 0:
+        raise ValueError("Combined probability must have positive finite mass")
+    return (
+        x,
+        density / total,
+        cumulative / total,
+        discrete_values,
+        masses / total,
+        continuous_mass / total,
+        interpolations,
+        interpolation_boundaries,
+    )
+
+
+# ======================================================================================
 # Multi-table
 # ======================================================================================
 
 
 class DistributionMultiTable(DistributionBase):
-    """Conditional continuous PDFs stored in independent packed arrays.
+    """Conditional continuous, discrete, or mixed tables in packed arrays.
 
-    ``value`` and ``pdf`` (or ``cdf``) may be sequences of numerical vectors,
-    one per indexing-grid point. Alternatively supply concatenated vectors
-    with N + 1 ``offsets``. No DistributionTable objects are constructed.
-    Outer interpolation is histogram or linear. Packed PDF interpolation uses
-    local exclusive boundaries and N + 1 ``pdf_interpolation_offsets``;
-    a scalar PDF law applies to every table. Every PDF is normalized separately.
+    Each grid point owns one jointly normalized PDF/PMF pair. Continuous arrays
+    and discrete arrays have independent N + 1 offsets; absent components occupy
+    empty slices. No child DistributionTable objects are constructed.
+    Supply per-grid vectors (using None for absent components), or concatenate
+    them and supply offsets/discrete_offsets. PDF or CDF input describes the
+    continuous component; CDF increments retain that component's probability.
+    Local PDF rules use exclusive boundaries and their own per-grid offsets.
+    Corresponding discrete outcomes retain the same index across each linear
+    grid interval. Their probabilities and coordinates interpolate separately.
     """
 
     label = "multi_table_distribution"
@@ -202,6 +243,11 @@ class DistributionMultiTable(DistributionBase):
     value: NDArray[float64]
     pdf: NDArray[float64]
     cdf: NDArray[float64]
+    discrete_offsets: NDArray[int64]
+    discrete_value: NDArray[float64]
+    pmf: NDArray[float64]
+    cmf: NDArray[float64]
+    continuous_probability: NDArray[float64]
     interpolations: NDArray[int64]
     interpolation_boundaries: NDArray[int64]
     pdf_interpolations: NDArray[int64]
@@ -211,11 +257,14 @@ class DistributionMultiTable(DistributionBase):
     def __init__(
         self,
         grid,
-        value,
+        value=None,
         pdf=None,
         *,
         cdf=None,
         offsets=None,
+        discrete_value=None,
+        pmf=None,
+        discrete_offsets=None,
         interpolations=INTERPOLATION_LINEAR,
         interpolation_boundaries=None,
         pdf_interpolations=INTERPOLATION_LINEAR,
@@ -237,33 +286,19 @@ class DistributionMultiTable(DistributionBase):
         self.interpolations, self.interpolation_boundaries = _distribution_regions(
             count, interpolations, interpolation_boundaries, outer=True
         )
-        if offsets is not None:
-            raw_offsets = np.asarray(offsets)
-            if (
-                raw_offsets.ndim != 1
-                or not np.issubdtype(raw_offsets.dtype, np.integer)
-                or len(raw_offsets) != count + 1
-                or raw_offsets[0] != 0
-                or np.any(np.diff(raw_offsets) < 2)
-                or raw_offsets[-1] != len(value)
-            ):
-                raise ValueError(
-                    "Packed PDF offsets must delimit one table per grid point"
-                )
-            slices = [slice(a, b) for a, b in zip(raw_offsets[:-1], raw_offsets[1:])]
-            values = [np.asarray(value)[s] for s in slices]
-            pdfs = [None if pdf is None else np.asarray(pdf)[s] for s in slices]
-            cdfs = [None if cdf is None else np.asarray(cdf)[s] for s in slices]
-            if (pdf is not None and len(pdf) != len(value)) or (
-                cdf is not None and len(cdf) != len(value)
-            ):
-                raise ValueError("Packed density arrays must have equal lengths")
-        else:
-            values = list(value)
-            pdfs = [None] * count if pdf is None else list(pdf)
-            cdfs = [None] * count if cdf is None else list(cdf)
-        if len(values) != count or len(pdfs) != count or len(cdfs) != count:
-            raise ValueError("Grid and PDF table counts must match")
+        if (value is None) != (pdf is None and cdf is None):
+            raise ValueError("Continuous values require a PDF or CDF")
+        if pdf is not None and cdf is not None:
+            raise ValueError("Supply either PDF or CDF, not both")
+        if (discrete_value is None) != (pmf is None):
+            raise ValueError("Discrete values require probability masses")
+        values = _packed_components(value, offsets, count, "PDF", minimum=2)
+        pdfs = _packed_components(pdf, offsets, count, "PDF", minimum=2)
+        cdfs = _packed_components(cdf, offsets, count, "CDF", minimum=2)
+        discrete_values = _packed_components(
+            discrete_value, discrete_offsets, count, "discrete", minimum=1
+        )
+        masses = _packed_components(pmf, discrete_offsets, count, "PMF", minimum=1)
         if not isinstance(pdf_interpolations, Integral):
             raw_rules = np.asarray(pdf_interpolation_offsets)
             if (
@@ -271,49 +306,109 @@ class DistributionMultiTable(DistributionBase):
                 or not np.issubdtype(raw_rules.dtype, np.integer)
                 or len(raw_rules) != count + 1
                 or raw_rules[0] != 0
-                or np.any(np.diff(raw_rules) < 1)
+                or np.any(np.diff(raw_rules) < 0)
                 or raw_rules[-1] != len(pdf_interpolations)
                 or pdf_interpolation_boundaries is None
                 or len(pdf_interpolation_boundaries) != len(pdf_interpolations)
             ):
                 raise ValueError("Invalid packed PDF interpolation offsets")
-        xs, ys, cs, rules, ends = [], [], [], [], []
-        self.offsets = np.r_[0, np.cumsum([len(x) for x in values])].astype(int64)
-        roffsets = [0]
-        for i, (x, y, c) in enumerate(zip(values, pdfs, cdfs)):
-            if (y is None) == (c is None):
-                raise ValueError(
-                    "Each continuous table requires exactly one PDF or CDF"
-                )
-            x = np.asarray(x, dtype=float64)
+        xs, ys, cs, rules, ends, ds, ps, ms, continuous = (
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+            [],
+        )
+        point_offsets, rule_offsets, mass_offsets = [0], [0], [0]
+        for i, (x, y, c, d, m) in enumerate(
+            zip(values, pdfs, cdfs, discrete_values, masses)
+        ):
             if isinstance(pdf_interpolations, Integral):
                 law, boundary = pdf_interpolations, None
             else:
                 a, b = raw_rules[i : i + 2]
                 law = np.asarray(pdf_interpolations)[a:b]
                 boundary = np.asarray(pdf_interpolation_boundaries)[a:b]
-            if c is not None:
-                y, c = pdf_from_cdf(x, c)
-                law, boundary = INTERPOLATION_HISTOGRAM, None
+                if (x is None) != (a == b):
+                    raise ValueError(
+                        "PDF interpolation regions must match continuous tables"
+                    )
+            x, y, c, d, m, probability, law, boundary = _probability_components(
+                x, y, c, d, m, law, boundary
+            )
+            if len(x):
+                law, boundary = _distribution_regions(len(x), law, boundary)
             else:
-                y, c = cdf_from_pdf(x, y, law, boundary)
-            law, boundary = _distribution_regions(len(x), law, boundary)
+                law, boundary = np.array([], dtype=int64), np.array([], dtype=int64)
             xs.append(x)
             ys.append(y)
             cs.append(c)
+            ds.append(d)
+            ps.append(m)
+            ms.append(np.cumsum(m))
+            continuous.append(probability)
             rules.append(law)
             ends.append(boundary)
-            roffsets.append(roffsets[-1] + len(law))
+            point_offsets.append(point_offsets[-1] + len(x))
+            rule_offsets.append(rule_offsets[-1] + len(law))
+            mass_offsets.append(mass_offsets[-1] + len(d))
+        self.offsets = np.asarray(point_offsets, dtype=int64)
+        self.discrete_offsets = np.asarray(mass_offsets, dtype=int64)
         self.value, self.pdf, self.cdf = map(np.concatenate, (xs, ys, cs))
+        self.discrete_value, self.pmf, self.cmf = map(np.concatenate, (ds, ps, ms))
+        self.continuous_probability = np.asarray(continuous, dtype=float64)
         self.pdf_interpolations = np.concatenate(rules)
         self.pdf_interpolation_boundaries = np.concatenate(ends)
-        self.pdf_interpolation_offsets = np.asarray(roffsets, dtype=int64)
+        self.pdf_interpolation_offsets = np.asarray(rule_offsets, dtype=int64)
+        # Line indices denote corresponding outcomes across linear intervals.
+        region = 0
+        for i in range(count - 1):
+            while i + 1 >= self.interpolation_boundaries[region]:
+                region += 1
+            if (
+                self.grid[i + 1] > self.grid[i]
+                and self.interpolations[region] == INTERPOLATION_LINEAR
+                and mass_offsets[i + 1] - mass_offsets[i]
+                != mass_offsets[i + 2] - mass_offsets[i + 1]
+            ):
+                raise ValueError(
+                    "Linear multi-table intervals require corresponding discrete lines"
+                )
 
     def __repr__(self):
         return (
             super().__repr__()
-            + f"  - grid: {print_1d_array(self.grid)}\n  - PDF tables: {len(self.grid)}\n"
+            + f"  - grid: {print_1d_array(self.grid)}\n  - Probability tables: {len(self.grid)}\n"
         )
+
+
+def _packed_components(values, offsets, count, name, minimum):
+    """Split optional packed vectors or validate a per-grid vector sequence."""
+    if values is None:
+        return [None] * count
+    if offsets is None:
+        result = list(values)
+        if len(result) != count:
+            raise ValueError(f"Grid and {name} table counts must match")
+        return [None if x is None or np.asarray(x).size == 0 else x for x in result]
+    raw = np.asarray(offsets)
+    array = np.asarray(values)
+    if (
+        raw.ndim != 1
+        or not np.issubdtype(raw.dtype, np.integer)
+        or len(raw) != count + 1
+        or raw[0] != 0
+        or array.ndim != 1
+        or raw[-1] != len(array)
+        or np.any(np.diff(raw) < 0)
+        or np.any((np.diff(raw) > 0) & (np.diff(raw) < minimum))
+    ):
+        raise ValueError(f"Invalid packed {name} offsets")
+    return [None if a == b else array[a:b] for a, b in zip(raw[:-1], raw[1:])]
 
 
 def _distribution_regions(count, laws, boundaries, outer=False):

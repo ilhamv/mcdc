@@ -196,7 +196,11 @@ def read_distribution(group):
     if kind == "multi-table":
         laws, boundaries = read_interpolation(group)
         return read_pdf_collection(
-            group["tables"], grid=group["grid"][()], laws=laws, boundaries=boundaries
+            group["tables"],
+            grid=group["grid"][()],
+            laws=laws,
+            boundaries=boundaries,
+            allow_discrete=True,
         )
     if kind == "level-scattering":
         return DistributionLevelScattering(
@@ -238,24 +242,58 @@ def read_distribution_density(group):
     ).pdf
 
 
-def read_pdf_collection(group, grid=None, laws=INTERPOLATION_LINEAR, boundaries=None):
-    """Read a continuous packed PDF collection without creating child objects."""
-    if "pmf" in group or "discrete-value" in group:
+def read_pdf_collection(
+    group,
+    grid=None,
+    laws=INTERPOLATION_LINEAR,
+    boundaries=None,
+    *,
+    allow_discrete=False,
+):
+    """Read packed probability tables without creating per-grid child objects.
+
+    Correlated laws require continuous marginal/conditional densities.
+    MultiTable additionally accepts aligned discrete components and pure PMFs.
+    """
+    discrete = any(
+        name in group for name in ("pmf", "discrete-value", "discrete-offsets")
+    )
+    if discrete and not allow_discrete:
         raise ValueError(f"{group.name}: packed PDF collections are continuous only")
-    rule = group["interpolation"]
-    count = len(group["offsets"]) - 1
+    arguments = {}
+    if any(name in group for name in ("value", "pdf", "offsets", "interpolation")):
+        if not all(
+            name in group for name in ("value", "pdf", "offsets", "interpolation")
+        ):
+            raise ValueError(f"{group.name}: incomplete packed PDF fields")
+        arguments.update(
+            value=group["value"][()], pdf=group["pdf"][()], offsets=group["offsets"][()]
+        )
+        rule = group["interpolation"]
+        arguments.update(
+            pdf_interpolations=[
+                encode_interpolation(text(law)) for law in rule["laws"][()]
+            ],
+            pdf_interpolation_boundaries=rule["boundaries"][()],
+            pdf_interpolation_offsets=rule["offsets"][()],
+        )
+    if discrete:
+        if not all(
+            name in group for name in ("pmf", "discrete-value", "discrete-offsets")
+        ):
+            raise ValueError(f"{group.name}: incomplete packed discrete fields")
+        arguments.update(
+            discrete_value=group["discrete-value"][()],
+            pmf=group["pmf"][()],
+            discrete_offsets=group["discrete-offsets"][()],
+        )
+    if not arguments:
+        raise ValueError(f"{group.name}: probability tables are missing")
+    if grid is None:
+        offsets = arguments.get("offsets", arguments.get("discrete_offsets"))
+        grid = np.arange(len(offsets) - 1, dtype=float)
     return DistributionMultiTable(
-        np.arange(count, dtype=float) if grid is None else grid,
-        group["value"][()],
-        pdf=group["pdf"][()],
-        offsets=group["offsets"][()],
-        interpolations=laws,
-        interpolation_boundaries=boundaries,
-        pdf_interpolations=[
-            encode_interpolation(text(law)) for law in rule["laws"][()]
-        ],
-        pdf_interpolation_boundaries=rule["boundaries"][()],
-        pdf_interpolation_offsets=rule["offsets"][()],
+        grid, interpolations=laws, interpolation_boundaries=boundaries, **arguments
     )
 
 

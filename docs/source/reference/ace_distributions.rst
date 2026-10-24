@@ -39,7 +39,7 @@ The ``mcdc-data`` column gives the Distribution's ``type`` attribute.
      - ``multi-table``
      - ``DistributionMultiTable``
      - ``_sample_multi_table``
-     - Continuous PDFs; linear incident-energy interpolation; separate angular Distribution
+     - Continuous, discrete, or mixed; corresponding discrete lines; linear incident-energy interpolation; separate angular Distribution
    * - 7
      - Simple Maxwellian fission spectrum
      - ``maxwellian``
@@ -71,8 +71,8 @@ The ``mcdc-data`` column gives the Distribution's ``type`` attribute.
      - ``_sample_correlated_distribution`` (N-body branch)
      - COM frame; dimensionless energy-fraction PDF; isotropic COM emission
 
-Laws 1, 2, 5, 11, 33, and 67 are not accepted by the converter.
-The standalone ``table`` Distribution supports discrete probability masses, but this does not imply conversion support for ACE discrete lines or mixed discrete-continuous energy tables.
+Laws 1, 2, 5, 11, 22, 24, 33, and 67 are not accepted by the converter.
+LAW 4's discrete-line support does not imply conversion support for LAW 2.
 
 .. _ace-incident-energy-sampling:
 
@@ -81,7 +81,8 @@ Incident-energy table sampling
 
 Laws 4, 44, and 61 use conditional tables indexed by incident energy.
 For E between neighboring incident energies E0 and E1, define :math:`t=(E-E_0)/(E_1-E_0)`.
-Select the lower or upper table with probabilities 1 - t and t, then sample its outgoing-energy PDF using that table's density interpolation.
+For continuous-only tables, select the lower or upper table with probabilities 1 - t and t, then sample its outgoing-energy PDF using that table's density interpolation.
+LAW 4 separates discrete-line selection from continuous sampling as described below.
 
 The sampled energy is mapped into the interpolated support using unit-base scaling.
 If the selected table has support [a, b] and supplies a sample y, the outgoing energy is
@@ -128,14 +129,35 @@ The reaction samples its separate angular Distribution and transforms the result
 LAW 4: Tabulated outgoing energy
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Each incident energy supplies an outgoing-energy PDF.
-The converter packs these PDFs into ``multi-table``, retaining their individual density interpolation rules.
-CDFs are derived by integrating those PDFs, and sampling inverts the selected CDF before applying :ref:`unit-base scaling <ace-incident-energy-sampling>`.
+Each incident energy supplies a continuous PDF, a discrete PMF, or both.
+The converter separates ACE's leading discrete entries from the continuous background and packs both components into ``multi-table``.
+Line probabilities remain dimensionless, while line energies and continuous coordinates are converted to eV and continuous densities to 1/eV.
+The PMF sum and PDF integral jointly equal one at each incident energy.
+The continuous component retains its own density interpolation rules.
+
+Corresponding discrete lines have the same index in neighboring incident tables.
+For line j, interpolate its probability and energy:
+
+.. math::
+
+   p_j(E)=(1-t)p_{0,j}+tp_{1,j},
+   \qquad
+   e_j(E)=(1-t)e_{0,j}+te_{1,j}.
+
+Use a uniform random number to select a line from the cumulative interpolated probabilities.
+Return its interpolated energy directly, without continuous support scaling.
+All incident tables in a converted LAW 4 distribution must retain the same number and ordering of corresponding lines; zero probabilities preserve lines that vanish at an endpoint.
+
+If the draw reaches the continuous component, rebase it onto that component's cumulative probability.
+Let q0 and q1 be the endpoint continuous probabilities, and :math:`q(E)=(1-t)q_0+tq_1`.
+Select the lower or upper continuous table with conditional probabilities :math:`(1-t)q_0/q(E)` and :math:`tq_1/q(E)`.
+These weights preserve the interpolated continuous contribution when the discrete probabilities change with incident energy.
+Invert the selected continuous CDF and apply :ref:`unit-base scaling <ace-incident-energy-sampling>` using the continuous support only.
+If a continuous component is absent at one endpoint, retain the other endpoint's support.
 Histogram and linear density segments have analytic inverses; logarithmic segments use bounded inversion.
 The separate angular Distribution is sampled independently of outgoing energy at the given incident energy.
 
-The conversion accepts continuous PDFs only.
-Discrete lines and mixed discrete-continuous ACE tables require a representation beyond the continuous-only MultiTable.
+The separate treatment of line probabilities, line energies, and the continuous background follows the `MCNP LAW 4 description (pages 2-42–2-43) <https://mcnpx.lanl.gov/pdf_files/TechReport_2003_LANL_LA-UR-03-1987Revised212008_SweezyBoothEtAl.pdf#page=76>`_.
 
 .. _ace-law-7:
 
