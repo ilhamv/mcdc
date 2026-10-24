@@ -133,6 +133,12 @@ A Distribution describes sampled quantities in the reaction's declared reference
 Energy distributions supply outgoing energy in eV; angular distributions supply a dimensionless cosine relative to the incident direction; joint distributions supply both.
 The layouts below define stored fields and constraints; :doc:`../ace_distributions` describes their physical models and sampling.
 
+Isotropic distribution
+^^^^^^^^^^^^^^^^^^^^^^
+
+``type = isotropic`` describes an angular cosine uniformly distributed on [-1, 1], with uniform azimuth.
+It has no datasets.
+
 .. _distribution-table:
 
 Probability table
@@ -174,6 +180,133 @@ Cosine coordinates lie in [-1, 1], and both coordinates and densities are dimens
 Unit attributes follow :doc:`conventions`.
 CDFs and cumulative probability masses are derived, not stored.
 
+.. _distribution-multi-table:
+
+Multi-table distribution
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+``type = multi-table`` indexes packed probability tables by a shared grid.
+
+.. list-table:: Multi-table fields
+   :header-rows: 1
+
+   * - Field
+     - Type / shape
+     - Meaning
+   * - ``grid``
+     - float [I]
+     - Finite, nondecreasing indexing coordinates, I >= 2; incident energy uses eV.
+   * - ``interpolation``
+     - Interpolation
+     - Interpolation between neighboring tables; histogram or linear only.
+   * - ``tables``
+     - Packed probability tables
+     - One continuous, discrete, or mixed table per grid point, in grid order.
+
+All tables describe the same sampled quantity and use the :ref:`packed layout <packed-probability-tables>`.
+Repeated grid coordinates describe the distributions on either side of a discontinuity.
+Across each linear grid interval, discrete outcomes correspond by index and have equal counts.
+See :ref:`ace-law-4` for line correspondence and :ref:`ace-incident-energy-sampling` for incident-table selection and support scaling.
+
+Analytic energy spectra
+^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table:: Analytic distribution fields
+   :header-rows: 1
+   :widths: 22 48 30
+
+   * - ``type`` attribute
+     - Fields
+     - Model and sampling
+   * - ``level-scattering``
+     - ``C1``: float, eV; ``C2``: float
+     - :ref:`ace-law-3`
+   * - ``maxwellian``
+     - ``temperature``: Data, eV; ``restriction-energy``: float, eV
+     - :ref:`ace-law-7`
+   * - ``evaporation``
+     - ``temperature``: Data, eV; ``restriction-energy``: float, eV
+     - :ref:`ace-law-9`
+
+``temperature`` takes incident energy in eV as its input and returns a positive spectral temperature in eV.
+
+.. _distribution-correlated:
+
+Correlated energy-angle distributions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``type = kalbach-mann`` and ``type = energy-angle-table`` share these fields.
+
+.. list-table:: Common correlated fields
+   :header-rows: 1
+
+   * - Field
+     - Type / shape
+     - Meaning
+   * - ``energy``
+     - float [I], eV
+     - Strictly increasing incident energies.
+   * - ``tables/outgoing-energy``
+     - :ref:`Packed probability tables <packed-probability-tables>`, continuous-only
+     - One outgoing-energy PDF per incident-energy point.
+
+These representations have inherent linear incident-energy dependence and no outer interpolation group.
+Their packed collections use the :ref:`shared layout <packed-probability-tables>` with every table containing a PDF and no PMF fields.
+
+.. list-table:: Additional correlated fields
+   :header-rows: 1
+
+   * - ``type`` attribute
+     - Field
+     - Type
+     - Meaning
+   * - ``kalbach-mann``
+     - ``tables/precompound-factor/{i}``
+     - Data
+     - Dimensionless precompound fraction in [0, 1] at incident-energy index i.
+   * - ``kalbach-mann``
+     - ``tables/angular-slope/{i}``
+     - Data
+     - Nonnegative dimensionless angular slope at incident-energy index i.
+   * - ``energy-angle-table``
+     - ``tables/cosine-distributions``
+     - :ref:`Packed probability tables <packed-probability-tables>`, continuous-only
+     - One dimensionless cosine PDF per point in ``tables/outgoing-energy/value``, in the same order.
+
+Kalbach–Mann parameter Data takes outgoing energy in eV as its input; parameter tables may use independent grids and interpolation regions.
+See :ref:`ace-law-44` and :ref:`ace-law-61` for the joint models and conditional sampling.
+
+N-body phase-space distribution
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``type = n-body`` stores a dimensionless energy-fraction PDF and final-state mass parameters.
+
+.. list-table:: N-body fields
+   :header-rows: 1
+
+   * - Field
+     - Type / shape
+     - Meaning
+   * - ``number-particles``
+     - integer
+     - Number of final-state bodies, at least three.
+   * - ``total-mass-ratio``
+     - float
+     - Total final-state mass divided by the emitted particle mass, greater than one.
+   * - ``value``
+     - float [K]
+     - Energy fractions in [0, 1].
+   * - ``pdf``
+     - float [K]
+     - Dimensionless density of the energy fraction.
+   * - ``interpolation``
+     - Interpolation
+     - Interpolation of the energy-fraction density.
+
+The continuous-only :ref:`probability-table constraints <distribution-table>` apply.
+The reaction requires ``reference-frame = COM`` and omits a separate angular-cosine distribution.
+See :ref:`ace-law-66` for the phase-space model, physical energy scale, and angular sampling.
+
 .. _packed-pdf-tables:
 .. _packed-probability-tables:
 
@@ -183,6 +316,25 @@ Packed probability tables
 This shared storage layout has no ``type`` attribute.
 It packs the components of multiple :ref:`probability tables <distribution-table>` into concatenated arrays.
 The containing distribution defines how the tables are indexed and which components are allowed.
+
+The layout is used in these locations:
+
+.. list-table:: Packed probability table usage
+   :header-rows: 1
+
+   * - Distribution
+     - Group
+     - Contents
+   * - :ref:`Multi-table <distribution-multi-table>`
+     - ``tables``
+     - One continuous, discrete, or mixed table per ``grid`` point.
+   * - :ref:`Kalbach–Mann and energy-angle table <distribution-correlated>`
+     - ``tables/outgoing-energy``
+     - One continuous outgoing-energy PDF per incident-energy point.
+   * - :ref:`Energy-angle table <distribution-correlated>`
+     - ``tables/cosine-distributions``
+     - One continuous cosine PDF per outgoing-energy point.
+
 Let T be the number of tables, P the total continuous points, D the total discrete entries, and R the total PDF interpolation regions.
 
 .. list-table:: Packed probability fields
@@ -227,132 +379,3 @@ Every nonempty PDF slice follows the standalone table's coordinate and interpola
 Interpolation boundaries are relative to the individual PDF slice, not the concatenated array.
 Coordinates may restart at each table boundary.
 Probability normalization and units follow the standalone table rules separately for each table.
-
-Multi-table distribution
-^^^^^^^^^^^^^^^^^^^^^^^^
-
-``type = multi-table`` indexes packed probability tables by a shared grid.
-
-.. list-table:: Multi-table fields
-   :header-rows: 1
-
-   * - Field
-     - Type / shape
-     - Meaning
-   * - ``grid``
-     - float [I]
-     - Finite, nondecreasing indexing coordinates, I >= 2; incident energy uses eV.
-   * - ``interpolation``
-     - Interpolation
-     - Interpolation between neighboring tables; histogram or linear only.
-   * - ``tables``
-     - Packed probability tables
-     - One continuous, discrete, or mixed table per grid point, in grid order.
-
-All tables describe the same sampled quantity and use the :ref:`packed layout <packed-probability-tables>` above.
-Repeated grid coordinates describe the distributions on either side of a discontinuity.
-Across each linear grid interval, discrete outcomes correspond by index and have equal counts.
-See :ref:`ace-law-4` for line correspondence and :ref:`ace-incident-energy-sampling` for incident-table selection and support scaling.
-
-Isotropic distribution
-^^^^^^^^^^^^^^^^^^^^^^
-
-``type = isotropic`` describes an angular cosine uniformly distributed on [-1, 1], with uniform azimuth.
-It has no datasets.
-
-Analytic energy spectra
-^^^^^^^^^^^^^^^^^^^^^^^
-
-.. list-table:: Analytic distribution fields
-   :header-rows: 1
-   :widths: 22 48 30
-
-   * - ``type`` attribute
-     - Fields
-     - Model and sampling
-   * - ``level-scattering``
-     - ``C1``: float, eV; ``C2``: float
-     - :ref:`ace-law-3`
-   * - ``maxwellian``
-     - ``temperature``: Data, eV; ``restriction-energy``: float, eV
-     - :ref:`ace-law-7`
-   * - ``evaporation``
-     - ``temperature``: Data, eV; ``restriction-energy``: float, eV
-     - :ref:`ace-law-9`
-
-``temperature`` takes incident energy in eV as its input and returns a positive spectral temperature in eV.
-
-Correlated energy-angle distributions
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-``type = kalbach-mann`` and ``type = energy-angle-table`` share these fields.
-
-.. list-table:: Common correlated fields
-   :header-rows: 1
-
-   * - Field
-     - Type / shape
-     - Meaning
-   * - ``energy``
-     - float [I], eV
-     - Strictly increasing incident energies.
-   * - ``tables/outgoing-energy``
-     - Packed probability tables, continuous-only
-     - One outgoing-energy PDF per incident-energy point.
-
-These representations have inherent linear incident-energy dependence and no outer interpolation group.
-Their packed collections use the :ref:`shared layout <packed-probability-tables>` with every table containing a PDF and no PMF fields.
-
-.. list-table:: Additional correlated fields
-   :header-rows: 1
-
-   * - ``type`` attribute
-     - Field
-     - Type
-     - Meaning
-   * - ``kalbach-mann``
-     - ``tables/precompound-factor/{i}``
-     - Data
-     - Dimensionless precompound fraction in [0, 1] at incident-energy index i.
-   * - ``kalbach-mann``
-     - ``tables/angular-slope/{i}``
-     - Data
-     - Nonnegative dimensionless angular slope at incident-energy index i.
-   * - ``energy-angle-table``
-     - ``tables/cosine-distributions``
-     - Packed probability tables, continuous-only
-     - One dimensionless cosine PDF per point in ``tables/outgoing-energy/value``, in the same order.
-
-Kalbach–Mann parameter Data takes outgoing energy in eV as its input; parameter tables may use independent grids and interpolation regions.
-See :ref:`ace-law-44` and :ref:`ace-law-61` for the joint models and conditional sampling.
-
-N-body phase-space distribution
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-``type = n-body`` stores a dimensionless energy-fraction PDF and final-state mass parameters.
-
-.. list-table:: N-body fields
-   :header-rows: 1
-
-   * - Field
-     - Type / shape
-     - Meaning
-   * - ``number-particles``
-     - integer
-     - Number of final-state bodies, at least three.
-   * - ``total-mass-ratio``
-     - float
-     - Total final-state mass divided by the emitted particle mass, greater than one.
-   * - ``value``
-     - float [K]
-     - Energy fractions in [0, 1].
-   * - ``pdf``
-     - float [K]
-     - Dimensionless density of the energy fraction.
-   * - ``interpolation``
-     - Interpolation
-     - Interpolation of the energy-fraction density.
-
-The continuous-only :ref:`probability-table constraints <distribution-table>` apply.
-The reaction requires ``reference-frame = COM`` and omits a separate angular-cosine distribution.
-See :ref:`ace-law-66` for the phase-space model, physical energy scale, and angular sampling.
