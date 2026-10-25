@@ -189,6 +189,10 @@ isotropic_distribution = into_dtype([
 kalbach_mann_distribution = into_dtype([
     ('energy_offset', int64),
     ('energy_length', int64),
+    ('incident_interpolations_offset', int64),
+    ('incident_interpolations_length', int64),
+    ('incident_interpolation_boundaries_offset', int64),
+    ('incident_interpolation_boundaries_length', int64),
     ('offset_offset', int64),
     ('offset_length', int64),
     ('energy_out_offset', int64),
@@ -289,6 +293,10 @@ table_distribution = into_dtype([
 table_energy_angle_distribution = into_dtype([
     ('energy_offset', int64),
     ('energy_length', int64),
+    ('incident_interpolations_offset', int64),
+    ('incident_interpolations_length', int64),
+    ('incident_interpolation_boundaries_offset', int64),
+    ('incident_interpolation_boundaries_length', int64),
     ('offset_offset', int64),
     ('offset_length', int64),
     ('energy_out_offset', int64),

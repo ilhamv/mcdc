@@ -15,7 +15,7 @@ from mcdc.object_.distribution import DistributionTable, DistributionMultiTable
 from mcdc.transport import distribution as sampling
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
-from data_library_generator.common.hdf5_writer import pdf_tables
+from data_library_generator.common.hdf5_writer import interpolation, pdf_tables
 
 
 @pytest.mark.parametrize("law", [1, 2, 3, 4, 5])
@@ -125,6 +125,7 @@ def test_correlated_histogram_tables(
     with h5py.File(tmp_path / "spectrum.h5", "w") as group:
         group.attrs["type"] = kind
         group["energy"] = [10.0, 20.0]
+        interpolation(group, 2)
         tables = group.create_group("tables")
         pdf_tables(
             tables.create_group("outgoing-energy"),
@@ -184,6 +185,7 @@ def test_law61_conditional_angle_selection(
     with h5py.File(tmp_path / "law61.h5", "w") as group:
         group.attrs["type"] = "energy-angle-table"
         group["energy"] = [10.0, 20.0]
+        interpolation(group, 2)
         tables = group.create_group("tables")
         pdf_tables(
             tables.create_group("outgoing-energy"),

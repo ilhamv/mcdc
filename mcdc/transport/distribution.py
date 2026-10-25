@@ -331,34 +331,13 @@ def _sample_multi_table(E, rng_state, multi_table, simulation, data, scale):
     component; its weights include each endpoint's continuous probability.
     """
     grid = mcdc_get.multi_table_distribution.grid_all(multi_table, data)
-    interior = False
-    fraction = 0.0
-    if E <= grid[0]:
-        low = int(np.searchsorted(grid, E, side="right")) - 1 if E == grid[0] else 0
-        high = low
+    laws = mcdc_get.multi_table_distribution.interpolations_all(multi_table, data)
+    boundaries = mcdc_get.multi_table_distribution.interpolation_boundaries_all(
+        multi_table, data
+    )
+    low, high, fraction, interior = incident_table_interval(E, grid, laws, boundaries)
+    if low == high:
         scale = False
-    elif E >= grid[-1]:
-        low = len(grid) - 1
-        high = low
-        scale = False
-    else:
-        interior = True
-        low = int(np.searchsorted(grid, E, side="right")) - 1
-        high = low + 1
-        fraction = (E - grid[low]) / (grid[high] - grid[low])
-        boundaries = mcdc_get.multi_table_distribution.interpolation_boundaries_all(
-            multi_table, data
-        )
-        region = 0
-        while region < len(boundaries) - 1 and low + 1 >= boundaries[region]:
-            region += 1
-        if (
-            mcdc_get.multi_table_distribution.interpolations(region, multi_table, data)
-            == INTERPOLATION_HISTOGRAM
-        ):
-            fraction = 0.0
-            high = low
-            scale = False
 
     discrete_offsets = mcdc_get.multi_table_distribution.discrete_offsets_all(
         multi_table, data
@@ -523,16 +502,37 @@ def sample_evaporation(E, rng_state, evaporation, simulation, data):
 
 
 @njit
-def correlated_table_indices(E, grid, xi):
-    """Select bracketing incident tables with constant endpoint extrapolation."""
-    if len(grid) == 1 or E <= grid[0]:
-        return 0, 0, 0, 0.0
+def incident_table_interval(E, grid, laws, boundaries):
+    """Locate a conditional interval and its probability interpolation fraction.
+
+    Histogram selects the lower table; linear uses the incident-energy
+    fraction between neighboring tables. Repeated grid points are
+    evaluated on their right side, and exterior values use endpoint tables.
+    """
+    if E <= grid[0]:
+        index = int(np.searchsorted(grid, E, side="right")) - 1 if E == grid[0] else 0
+        return index, index, 0.0, False
     if E >= grid[-1]:
-        last = len(grid) - 1
-        return last, last, last, 0.0
-    low = max(0, find_bin(E, grid))
+        index = len(grid) - 1
+        return index, index, 0.0, False
+    low = int(np.searchsorted(grid, E, side="right")) - 1
     high = low + 1
-    fraction = (E - grid[low]) / (grid[high] - grid[low])
+    law = INTERPOLATION_LINEAR
+    if len(laws):
+        region = 0
+        while region < len(boundaries) - 1 and low + 1 >= boundaries[region]:
+            region += 1
+        law = laws[region]
+    if law == INTERPOLATION_HISTOGRAM:
+        return low, low, 0.0, True
+    fraction = interpolate(E, grid[low], grid[high], 0.0, 1.0, law)
+    return low, high, min(1.0, max(0.0, fraction)), True
+
+
+@njit
+def correlated_table_indices(E, grid, xi, laws, boundaries):
+    """Select an incident table under its explicit interpolation regions."""
+    low, high, fraction, _ = incident_table_interval(E, grid, laws, boundaries)
     selected = high if xi < fraction else low
     return low, high, selected, fraction
 
@@ -559,7 +559,17 @@ def sample_kalbach_mann(E, rng_state, kalbach_mann, data, simulation=None):
     laws = mcdc_get.kalbach_mann_distribution.interpolations_all(kalbach_mann, data)
     xi1, xi2 = rng.lcg(rng_state), rng.lcg(rng_state)
     xi3, xi4 = rng.lcg(rng_state), rng.lcg(rng_state)
-    low, high, selected, fraction = correlated_table_indices(E, grid, xi1)
+    incident_laws = mcdc_get.kalbach_mann_distribution.incident_interpolations_all(
+        kalbach_mann, data
+    )
+    incident_boundaries = (
+        mcdc_get.kalbach_mann_distribution.incident_interpolation_boundaries_all(
+            kalbach_mann, data
+        )
+    )
+    low, high, selected, fraction = correlated_table_indices(
+        E, grid, xi1, incident_laws, incident_boundaries
+    )
     low_end = int(offsets[low + 1]) if low + 1 < len(grid) else len(values)
     high_end = int(offsets[high + 1]) if high + 1 < len(grid) else len(values)
     start = int(offsets[selected])
@@ -631,7 +641,19 @@ def sample_table_energy_angle(E, rng_state, table, data):
     cdf = mcdc_get.table_energy_angle_distribution.cdf_all(table, data)
     laws = mcdc_get.table_energy_angle_distribution.interpolations_all(table, data)
     xi1, xi2, xi3 = rng.lcg(rng_state), rng.lcg(rng_state), rng.lcg(rng_state)
-    low, high, selected, fraction = correlated_table_indices(E, grid, xi1)
+    incident_laws = (
+        mcdc_get.table_energy_angle_distribution.incident_interpolations_all(
+            table, data
+        )
+    )
+    incident_boundaries = (
+        mcdc_get.table_energy_angle_distribution.incident_interpolation_boundaries_all(
+            table, data
+        )
+    )
+    low, high, selected, fraction = correlated_table_indices(
+        E, grid, xi1, incident_laws, incident_boundaries
+    )
     low_end = int(offsets[low + 1]) if low + 1 < len(grid) else len(values)
     high_end = int(offsets[high + 1]) if high + 1 < len(grid) else len(values)
     start = int(offsets[selected])

@@ -33,6 +33,64 @@ def energy_chunk(start, length, table_energy_angle_distribution, data, value):
 
 
 @njit
+def incident_interpolations(index, table_energy_angle_distribution, data, value):
+    offset = table_energy_angle_distribution["incident_interpolations_offset"]
+    data[offset + index] = value
+
+
+@njit
+def incident_interpolations_all(table_energy_angle_distribution, data, value):
+    start = table_energy_angle_distribution["incident_interpolations_offset"]
+    size = table_energy_angle_distribution["incident_interpolations_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def incident_interpolations_last(table_energy_angle_distribution, data, value):
+    start = table_energy_angle_distribution["incident_interpolations_offset"]
+    size = table_energy_angle_distribution["incident_interpolations_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def incident_interpolations_chunk(start, length, table_energy_angle_distribution, data, value):
+    start += table_energy_angle_distribution["incident_interpolations_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
+def incident_interpolation_boundaries(index, table_energy_angle_distribution, data, value):
+    offset = table_energy_angle_distribution["incident_interpolation_boundaries_offset"]
+    data[offset + index] = value
+
+
+@njit
+def incident_interpolation_boundaries_all(table_energy_angle_distribution, data, value):
+    start = table_energy_angle_distribution["incident_interpolation_boundaries_offset"]
+    size = table_energy_angle_distribution["incident_interpolation_boundaries_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def incident_interpolation_boundaries_last(table_energy_angle_distribution, data, value):
+    start = table_energy_angle_distribution["incident_interpolation_boundaries_offset"]
+    size = table_energy_angle_distribution["incident_interpolation_boundaries_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def incident_interpolation_boundaries_chunk(start, length, table_energy_angle_distribution, data, value):
+    start += table_energy_angle_distribution["incident_interpolation_boundaries_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
 def offset(index, table_energy_angle_distribution, data, value):
     offset = table_energy_angle_distribution["offset_offset"]
     data[offset + index] = value

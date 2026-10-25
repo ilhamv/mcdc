@@ -245,12 +245,16 @@ Correlated energy-angle distributions
      - Meaning
    * - ``energy``
      - float [I], eV
-     - Strictly increasing incident energies.
+     - Finite, nondecreasing incident energies.
+   * - ``interpolation``
+     - Interpolation
+     - Interpolation between incident-energy tables; histogram or linear only.
    * - ``tables/outgoing-energy``
      - :ref:`Packed probability tables <packed-probability-tables>`, continuous-only
      - One outgoing-energy PDF per incident-energy point.
 
-These representations have inherent linear incident-energy dependence and no outer interpolation group.
+Repeated incident energies describe the distributions on either side of a discontinuity.
+Incident interpolation is independent of interpolation within each outgoing-energy or cosine PDF.
 Their packed collections use the :ref:`shared layout <packed-probability-tables>` with every table containing a PDF and no PMF fields.
 
 .. list-table:: Additional correlated fields

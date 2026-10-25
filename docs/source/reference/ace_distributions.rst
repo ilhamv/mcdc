@@ -39,7 +39,7 @@ The ``mcdc-data`` column gives the Distribution's ``type`` attribute.
      - ``multi-table``
      - ``DistributionMultiTable``
      - ``_sample_multi_table``
-     - Continuous, discrete, or mixed; corresponding discrete lines; linear incident-energy interpolation; separate angular Distribution
+     - Continuous, discrete, or mixed; corresponding discrete lines; histogram or linear incident-energy interpolation; separate angular Distribution
    * - 7
      - Simple Maxwellian fission spectrum
      - ``maxwellian``
@@ -57,13 +57,13 @@ The ``mcdc-data`` column gives the Distribution's ``type`` attribute.
      - ``kalbach-mann``
      - ``DistributionKalbachMann``
      - ``sample_kalbach_mann``
-     - Continuous energy PDFs; linear incident-energy interpolation; joint angle sampling
+     - Continuous energy PDFs; histogram or linear incident-energy interpolation; joint angle sampling
    * - 61
      - Tabulated energy with conditional angle
      - ``energy-angle-table``
      - ``DistributionTableEnergyAngle``
      - ``sample_table_energy_angle``
-     - Continuous energy and cosine PDFs; linear incident-energy interpolation; joint angle sampling
+     - Continuous energy and cosine PDFs; histogram or linear incident-energy interpolation; joint angle sampling
    * - 66
      - N-body phase space
      - ``n-body``
@@ -80,7 +80,9 @@ Incident-energy table sampling
 ------------------------------
 
 Laws 4, 44, and 61 use conditional tables indexed by incident energy.
-For E between neighboring incident energies E0 and E1, define :math:`t=(E-E_0)/(E_1-E_0)`.
+Each interpolation region supports histogram or linear dependence.
+Histogram dependence uses the lower table without support scaling.
+For linear dependence at E between neighboring incident energies E0 and E1, define :math:`t=(E-E_0)/(E_1-E_0)`.
 For continuous-only tables, select the lower or upper table with probabilities 1 - t and t, then sample its outgoing-energy PDF using that table's density interpolation.
 LAW 4 separates discrete-line selection from continuous sampling as described below.
 
@@ -99,8 +101,10 @@ Here [a0, b0] and [a1, b1] are the lower and upper incident tables' energy suppo
 Outside the incident-energy grid, use the nearest endpoint table without support scaling.
 
 Separate angular MultiTables use the same incident-table selection but leave the cosine coordinate unchanged.
-For a MultiTable with histogram incident-energy interpolation, use the lower table without support scaling.
-The ACE converter requires linear incident-energy interpolation for laws 4, 44, and 61.
+Repeated incident energies describe a discontinuity; sampling at that energy uses the right-hand table.
+The converter preserves ACE's incident-energy ``NBT``/``INT`` regions, with linear interpolation when ``NR = 0``.
+Incident interpolation is distinct from the within-PDF ``INTT`` flag, for which ACE permits histogram or linear segments.
+Other incident interpolation codes are not converted.
 
 Sampling by law
 ---------------
@@ -146,7 +150,8 @@ For line j, interpolate its probability and energy:
 
 Use a uniform random number to select a line from the cumulative interpolated probabilities.
 Return its interpolated energy directly, without continuous support scaling.
-All incident tables in a converted LAW 4 distribution must retain the same number and ordering of corresponding lines; zero probabilities preserve lines that vanish at an endpoint.
+Neighboring tables across a linear incident-energy interval must retain the same number and ordering of corresponding lines; zero probabilities preserve lines that vanish at an endpoint.
+Histogram intervals may have different line counts.
 
 If the draw reaches the continuous component, rebase it onto that component's cumulative probability.
 Let q0 and q1 be the endpoint continuous probabilities, and :math:`q(E)=(1-t)q_0+tq_1`.

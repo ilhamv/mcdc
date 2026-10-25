@@ -272,20 +272,10 @@ class DistributionMultiTable(DistributionBase):
         pdf_interpolation_offsets=None,
     ):
         super().__init__()
-        self.grid = np.asarray(grid, dtype=float64)
-        if (
-            self.grid.ndim != 1
-            or not len(self.grid)
-            or not np.all(np.isfinite(self.grid))
-            or np.any(np.diff(self.grid) < 0)
-        ):
-            raise ValueError(
-                "Multi-table grid must be finite, nonempty, and nondecreasing"
-            )
-        count = len(self.grid)
-        self.interpolations, self.interpolation_boundaries = _distribution_regions(
-            count, interpolations, interpolation_boundaries, outer=True
+        self.grid, self.interpolations, self.interpolation_boundaries = (
+            _incident_regions(grid, interpolations, interpolation_boundaries)
         )
+        count = len(self.grid)
         if (value is None) != (pdf is None and cdf is None):
             raise ValueError("Continuous values require a PDF or CDF")
         if pdf is not None and cdf is not None:
@@ -364,7 +354,7 @@ class DistributionMultiTable(DistributionBase):
         self.pdf_interpolations = np.concatenate(rules)
         self.pdf_interpolation_boundaries = np.concatenate(ends)
         self.pdf_interpolation_offsets = np.asarray(rule_offsets, dtype=int64)
-        # Line indices denote corresponding outcomes across linear intervals.
+        # Line indices identify corresponding outcomes across linear intervals.
         region = 0
         for i in range(count - 1):
             while i + 1 >= self.interpolation_boundaries[region]:
@@ -435,8 +425,28 @@ def _distribution_regions(count, laws, boundaries, outer=False):
     if outer and np.any(
         ~np.isin(laws, [INTERPOLATION_HISTOGRAM, INTERPOLATION_LINEAR])
     ):
-        raise ValueError("Multi-table grid interpolation must be histogram or linear")
+        raise ValueError("Distribution grid interpolation must be histogram or linear")
     return laws, boundaries
+
+
+def _incident_regions(grid, laws, boundaries):
+    """Validate a finite conditional grid and histogram/linear table selection.
+
+    Repeated coordinates encode a discontinuity; sampling uses the distribution
+    to the right of that coordinate. Region boundaries are exclusive point indices.
+    """
+    grid = np.asarray(grid, dtype=float64)
+    if (
+        grid.ndim != 1
+        or not len(grid)
+        or not np.all(np.isfinite(grid))
+        or np.any(np.diff(grid) < 0)
+    ):
+        raise ValueError(
+            "Distribution grid must be finite, nonempty, and nondecreasing"
+        )
+    laws, boundaries = _distribution_regions(len(grid), laws, boundaries, outer=True)
+    return grid, laws, boundaries
 
 
 # ======================================================================================
@@ -550,6 +560,8 @@ class DistributionKalbachMann(DistributionBase):
 
     Incident-energy tables are stored in flattened arrays delimited by
     ``offset``. Probability densities are normalized per table.
+    ``incident_interpolations`` selects histogram or linear dependence between
+    these tables; ``interpolations`` describes the outgoing-energy PDF segments.
     """
 
     # MC/DC framework metadata
@@ -557,6 +569,8 @@ class DistributionKalbachMann(DistributionBase):
     sub_type = DISTRIBUTION_KALBACH_MANN
 
     energy: NDArray[float64]
+    incident_interpolations: NDArray[int64]
+    incident_interpolation_boundaries: NDArray[int64]
     offset: NDArray[int64]
     energy_out: NDArray[float64]
     pdf: NDArray[float64]
@@ -575,10 +589,19 @@ class DistributionKalbachMann(DistributionBase):
         pdf: ArrayLike,
         precompound_factor: ArrayLike,
         angular_slope: ArrayLike,
+        *,
+        incident_interpolations=INTERPOLATION_LINEAR,
+        incident_interpolation_boundaries=None,
     ) -> None:
         super().__init__()
 
-        self.energy = np.asarray(energy, dtype=float64)
+        (
+            self.energy,
+            self.incident_interpolations,
+            self.incident_interpolation_boundaries,
+        ) = _incident_regions(
+            energy, incident_interpolations, incident_interpolation_boundaries
+        )
         self.offset = np.asarray(offset, dtype=int64)
         self.energy_out = np.asarray(energy_out, dtype=float64)
         pdf_array = np.array(pdf, dtype=float64, copy=True)
@@ -620,7 +643,9 @@ class DistributionTableEnergyAngle(DistributionBase):
     """Correlated tabulated outgoing energy and scattering-angle distribution.
 
     ``offset`` delimits outgoing-energy tables and ``cosine_offset`` delimits
-    conditional cosine tables in the flattened arrays.
+    conditional cosine tables in the flattened arrays. Incident interpolation
+    selects between whole energy-angle tables, separately from the local energy
+    and cosine PDF interpolation.
     """
 
     # MC/DC framework metadata
@@ -628,6 +653,8 @@ class DistributionTableEnergyAngle(DistributionBase):
     sub_type = DISTRIBUTION_TABLE_ENERGY_ANGLE
 
     energy: NDArray[float64]
+    incident_interpolations: NDArray[int64]
+    incident_interpolation_boundaries: NDArray[int64]
     offset: NDArray[int64]
     energy_out: NDArray[float64]
     pdf: NDArray[float64]
@@ -648,10 +675,19 @@ class DistributionTableEnergyAngle(DistributionBase):
         cosine_offset: ArrayLike,
         cosine: ArrayLike,
         cosine_pdf: ArrayLike,
+        *,
+        incident_interpolations=INTERPOLATION_LINEAR,
+        incident_interpolation_boundaries=None,
     ) -> None:
         super().__init__()
 
-        self.energy = np.asarray(energy, dtype=float64)
+        (
+            self.energy,
+            self.incident_interpolations,
+            self.incident_interpolation_boundaries,
+        ) = _incident_regions(
+            energy, incident_interpolations, incident_interpolation_boundaries
+        )
         self.offset = np.asarray(offset, dtype=int64)
         self.energy_out = np.asarray(energy_out, dtype=float64)
         pdf_array = np.array(pdf, dtype=float64, copy=True)

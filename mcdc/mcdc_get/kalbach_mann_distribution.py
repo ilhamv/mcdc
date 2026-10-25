@@ -40,6 +40,64 @@ def energy_chunk(start, length, kalbach_mann_distribution, data):
 
 
 @njit
+def incident_interpolations(index, kalbach_mann_distribution, data):
+    offset = kalbach_mann_distribution["incident_interpolations_offset"]
+    return int64(data[offset + index])
+
+
+@array_return(nb.types.float64)
+def incident_interpolations_all(kalbach_mann_distribution, data):
+    start = kalbach_mann_distribution["incident_interpolations_offset"]
+    size = kalbach_mann_distribution["incident_interpolations_length"]
+    end = start + size
+    return array_result(data[start:end])
+
+
+@njit
+def incident_interpolations_last(kalbach_mann_distribution, data):
+    start = kalbach_mann_distribution["incident_interpolations_offset"]
+    size = kalbach_mann_distribution["incident_interpolations_length"]
+    end = start + size
+    return int64(data[end - 1])
+
+
+@array_return(nb.types.float64)
+def incident_interpolations_chunk(start, length, kalbach_mann_distribution, data):
+    start += kalbach_mann_distribution["incident_interpolations_offset"]
+    end = start + length
+    return array_result(data[start:end])
+
+
+@njit
+def incident_interpolation_boundaries(index, kalbach_mann_distribution, data):
+    offset = kalbach_mann_distribution["incident_interpolation_boundaries_offset"]
+    return int64(data[offset + index])
+
+
+@array_return(nb.types.float64)
+def incident_interpolation_boundaries_all(kalbach_mann_distribution, data):
+    start = kalbach_mann_distribution["incident_interpolation_boundaries_offset"]
+    size = kalbach_mann_distribution["incident_interpolation_boundaries_length"]
+    end = start + size
+    return array_result(data[start:end])
+
+
+@njit
+def incident_interpolation_boundaries_last(kalbach_mann_distribution, data):
+    start = kalbach_mann_distribution["incident_interpolation_boundaries_offset"]
+    size = kalbach_mann_distribution["incident_interpolation_boundaries_length"]
+    end = start + size
+    return int64(data[end - 1])
+
+
+@array_return(nb.types.float64)
+def incident_interpolation_boundaries_chunk(start, length, kalbach_mann_distribution, data):
+    start += kalbach_mann_distribution["incident_interpolation_boundaries_offset"]
+    end = start + length
+    return array_result(data[start:end])
+
+
+@njit
 def offset(index, kalbach_mann_distribution, data):
     offset = kalbach_mann_distribution["offset_offset"]
     return int64(data[offset + index])

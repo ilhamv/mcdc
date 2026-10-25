@@ -91,6 +91,9 @@ discrete-energy-distribution/:
 energy-angle-distribution/:
   '@type': energy-angle-table
   energy: float [I], eV
+  interpolation/:
+    laws: string [G]  # Histogram or linear between incident-energy tables
+    boundaries: integer [G]
 
   tables/:
     outgoing-energy/:

@@ -592,6 +592,27 @@ def _write_pdf_arrays(group, arrays, unit):
         quantity(group, name, array, units.get(name))
 
 
+def _incident_interpolation_arrays(grid, laws=None, boundaries=None):
+    """Validate histogram/linear regions on a finite nondecreasing grid."""
+    grid = np.asarray(grid, dtype=float)
+    if grid.ndim != 1 or not np.all(np.isfinite(grid)) or np.any(np.diff(grid) < 0):
+        raise ValueError("Distribution grid must be finite and nondecreasing")
+    laws, boundaries = _interpolation_arrays(len(grid), laws, boundaries)
+    if not set(laws.astype(str)) <= {"histogram", "linear"}:
+        raise ValueError("Distribution grid interpolation must be histogram or linear")
+    return laws, boundaries
+
+
+def incident_interpolation(group, grid, laws=None, boundaries=None):
+    """Write a conditional distribution's incident-energy Interpolation group.
+
+    The same region boundaries and domain checks apply to MultiTable and joint
+    energy-angle laws. The grid is stored by the containing representation.
+    """
+    laws, boundaries = _incident_interpolation_arrays(grid, laws, boundaries)
+    interpolation(group, len(grid), laws, boundaries)
+
+
 def multi_table(
     group,
     grid,
@@ -627,9 +648,7 @@ def multi_table(
         or np.any(np.diff(grid) < 0)
     ):
         raise ValueError(f"{group.name}: invalid multi-table grid or table count")
-    laws, boundaries = _interpolation_arrays(len(grid), laws, boundaries)
-    if not set(laws.astype(str)) <= {"histogram", "linear"}:
-        raise ValueError("Multi-table grid interpolation must be histogram or linear")
+    laws, boundaries = _incident_interpolation_arrays(grid, laws, boundaries)
     arrays = _packed_pdf_arrays(tables, discrete_value, pmf)
     if "discrete-offsets" in arrays:
         counts = np.diff(arrays["discrete-offsets"])

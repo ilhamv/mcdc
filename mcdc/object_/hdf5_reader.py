@@ -313,6 +313,7 @@ def packed_segment_laws(tables):
 
 def read_correlated_distribution(group, kind):
     """Load packed marginal PDFs and conditional angle data for a joint law."""
+    laws, boundaries = read_interpolation(group)
     tables = group["tables"]
     outgoing = read_pdf_collection(tables["outgoing-energy"])
     energy = group["energy"][()]
@@ -338,6 +339,8 @@ def read_correlated_distribution(group, kind):
             outgoing.pdf,
             np.zeros(len(outgoing.value)),
             np.zeros(len(outgoing.value)),
+            incident_interpolations=laws,
+            incident_interpolation_boundaries=boundaries,
         )
         result.precompound_tables, result.angular_slope_tables = factors, slopes
     else:
@@ -354,6 +357,8 @@ def read_correlated_distribution(group, kind):
             angular.offsets[:-1],
             angular.value,
             angular.pdf,
+            incident_interpolations=laws,
+            incident_interpolation_boundaries=boundaries,
         )
         result.cosine_pdf, result.cosine_cdf = angular.pdf, angular.cdf
         result.cosine_interpolations = packed_segment_laws(angular)

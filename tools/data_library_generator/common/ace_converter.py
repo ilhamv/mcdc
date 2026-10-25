@@ -18,7 +18,14 @@ from numbers import Integral
 import ACEtk
 import numpy as np
 
-from .hdf5_writer import interpolation, multi_table, pdf_table, pdf_tables, quantity
+from .hdf5_writer import (
+    incident_interpolation,
+    interpolation,
+    multi_table,
+    pdf_table,
+    pdf_tables,
+    quantity,
+)
 
 # ======================================================================================
 # ACE units, interpolation codes, and source-library conventions
@@ -296,12 +303,17 @@ def write_interpolation(group, source, count):
     The child group contains ``laws`` and ``boundaries`` datasets; existing
     interpolation groups are not replaced. No table values are modified.
     """
-    # Translate law names and retain point counts as exclusive region boundaries.
+    laws, boundaries = _interpolation_regions(source, count)
+    interpolation(group, count, laws, boundaries)
+
+
+def _interpolation_regions(source, count):
+    """Translate source rules into named laws and exclusive point boundaries."""
     laws = [interpolation_law(code) for code in source.interpolants]
     boundaries = np.asarray(source.boundaries, dtype=np.int64)
     if not laws:
         laws, boundaries = ["linear"], [count]
-    interpolation(group, count, laws, boundaries)
+    return laws, boundaries
 
 
 # ======================================================================================
@@ -894,8 +906,8 @@ def write_energy_distribution(group, source):
     ------
     ValueError
         The source class or N-body parameters are unsupported,
-        a multi-incident-energy source is not linear-linear between incident
-        energies, or a delegated table/interpolation writer rejects data.
+        incident-energy interpolation is not histogram or linear,
+        or a delegated table/interpolation writer rejects data.
 
     Notes
     -----
@@ -923,8 +935,9 @@ def write_energy_distribution(group, source):
     retain one Data record per incident energy under each parameter group.
     ACE supplies these parameter values on the outgoing-energy grid, which
     is retained in each parameter's Data table.
-    Correlated representations have inherent linear incident-energy dependence
-    rather than a separate outer interpolation group.
+    Histogram/linear incident-energy interpolation regions are retained for
+    outgoing-energy and correlated tables in a separate outer interpolation
+    group. They are independent of each table's PDF interpolation.
 
     Source interpolation within each PDF or parameter table is retained.
     Selection among multiple spectra is handled by ``write_spectrum_selection``.
@@ -989,11 +1002,10 @@ def write_energy_distribution(group, source):
         ),
     ):
         # Establish the incident-energy grid shared by the outgoing distributions
-        if not source.interpolation_data.is_linear_linear:
-            raise ValueError(
-                "This distribution requires linear interpolation between incident energies"
-            )
         incident_energy = np.asarray(source.incident_energies) * EV_PER_MEV
+        laws, boundaries = _interpolation_regions(
+            source.interpolation_data, len(incident_energy)
+        )
         if isinstance(source, ACEtk.continuous.OutgoingEnergyDistributionData):
             # Pack all marginal densities while retaining their individual PDF rules.
             tables, discrete_values, masses = [], [], []
@@ -1024,12 +1036,15 @@ def write_energy_distribution(group, source):
                 tables,
                 discrete_value=discrete_values if discrete else None,
                 pmf=masses if discrete else None,
+                laws=laws,
+                boundaries=boundaries,
             )
         else:
             # Pack both levels of correlated tables in their original source order.
             kalbach = isinstance(source, ACEtk.continuous.KalbachMannDistributionData)
             group.attrs["type"] = "kalbach-mann" if kalbach else "energy-angle-table"
             quantity(group, "energy", incident_energy, "eV")
+            incident_interpolation(group, incident_energy, laws, boundaries)
             tables = group.create_group("tables")
             outgoing, angular = [], []
             if kalbach:
