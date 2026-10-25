@@ -292,7 +292,11 @@ Separate angular data come from ACE's LAND/AND blocks rather than the numbered e
      - ``isotropic``
      - ``DistributionIsotropic``
      - ``sample_isotropic_cosine``
-   * - Incident-energy-dependent tabulated cosine PDFs
+   * - Single tabulated PDF or equiprobable-bin entry
+     - ``table``
+     - ``DistributionTable``
+     - ``sample_table``
+   * - Incident-energy-dependent angular sequences
      - ``multi-table``
      - ``DistributionMultiTable``
      - ``_sample_multi_table`` without outgoing-energy support scaling
@@ -301,8 +305,11 @@ Separate angular data come from ACE's LAND/AND blocks rather than the numbered e
      - ``DistributionNone`` for the separate angular field
      - Angle sampled together with energy by law 44, 61, or 66
 
-Separate incident-energy-dependent angular records must contain tabulated PDFs at every incident energy.
-The converter does not accept 32-equiprobable-bin angular records or isotropic entries embedded within such a table sequence.
+Tabulated cosine PDFs retain their interpolation rules.
+Equiprobable-bin entries become histogram PDFs with probability 1/32 in each bin.
+Isotropic entries within a sequence become uniform cosine PDFs on [-1, 1].
+The three entry types may appear together in one angular MultiTable.
+A single incident-energy entry supplies the same angular distribution at every energy.
 An omitted angular field denotes joint angle sampling, not isotropy.
 
 Composition and runtime

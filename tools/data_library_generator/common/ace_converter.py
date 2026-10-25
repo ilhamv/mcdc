@@ -846,21 +846,31 @@ def write_angular_distribution(group, source):
         Empty destination Distribution group.
     source : object
         ACEtk ``FullyIsotropicDistribution`` or an angular distribution
-        exposing incident energies and cosine distribution tables.
+        exposing incident energies and isotropic, equiprobable-bin, or
+        tabulated cosine distributions.
 
     Raises
     ------
     ValueError
-        A per-energy distribution is not a table, a table has fewer than
-        two points, or its interpolation law is unsupported.
+        A per-energy distribution type is unsupported, equiprobable-bin
+        boundaries are invalid, or a delegated probability-table writer
+        rejects the coordinates, densities, or interpolation.
 
     Notes
     -----
-    Fully isotropic data needs only ``type = isotropic``. Other inputs
-    use ``type = multi-table`` with an eV ``grid``, linear interpolation
-    between incident energies, and packed conditional cosine tables.
-    Each table retains its source PDF interpolation law. Both cosine and
-    cosine-density datasets are dimensionless and omit unit attributes.
+    Fully isotropic data needs only ``type = isotropic``. A single incident
+    entry uses a standalone ``table``, or ``isotropic`` for an isotropic entry.
+    Longer sequences use ``multi-table`` with an eV ``grid``, linear
+    interpolation between incident energies, and packed cosine tables.
+    Tabulated entries retain their source PDF interpolation law. An embedded
+    isotropic entry becomes a uniform cosine PDF on [-1, 1]. Equiprobable
+    entries become histogram PDFs: each of the 32 bins has density
+    ``1 / (32 * bin_width)``. Bin boundaries must be finite, strictly
+    increasing, and within [-1, 1]; the final histogram ordinate is unused.
+    The three entry types may appear together in the same sequence.
+
+    Both cosine and cosine-density datasets are dimensionless and omit unit
+    attributes.
     Angles stored jointly with outgoing energy are handled by the energy
     distribution writer instead of this function.
     """
@@ -871,11 +881,43 @@ def write_angular_distribution(group, source):
     # Collect conditional cosine tables, retaining each local interpolation law.
     tables = []
     for i, table in enumerate(source.distributions):
-        if source.distribution_type(i + 1) != ACEtk.AngularDistributionType.Tabulated:
-            raise ValueError("Angular distributions must use tables or be isotropic")
-        tables.append(
-            (table.cosines, table.pdf, [interpolation_law(table.interpolation)], None)
-        )
+        kind = source.distribution_type(i + 1)
+        if kind == ACEtk.AngularDistributionType.Isotropic:
+            tables.append(([-1.0, 1.0], [0.5, 0.5], ["histogram"], None))
+        elif kind == ACEtk.AngularDistributionType.Equiprobable:
+            cosines = np.asarray(table.cosines, dtype=float)
+            widths = np.diff(cosines)
+            if (
+                cosines.shape != (33,)
+                or not np.all(np.isfinite(cosines))
+                or np.any(cosines < -1.0)
+                or np.any(cosines > 1.0)
+                or np.any(widths <= 0.0)
+            ):
+                raise ValueError(
+                    f"Angular entry {i}: equiprobable bins require 33 finite, "
+                    "strictly increasing cosine boundaries within [-1, 1]"
+                )
+            density = np.r_[1.0 / (32 * widths), 0.0]
+            tables.append((cosines, density, ["histogram"], None))
+        elif kind == ACEtk.AngularDistributionType.Tabulated:
+            tables.append(
+                (
+                    table.cosines,
+                    table.pdf,
+                    [interpolation_law(table.interpolation)],
+                    None,
+                )
+            )
+        else:
+            raise ValueError(f"Angular entry {i}: unsupported distribution type {kind}")
+    if len(tables) == 1:
+        if source.distribution_type(1) == ACEtk.AngularDistributionType.Isotropic:
+            group.attrs["type"] = "isotropic"
+        else:
+            cosines, density, laws, _ = tables[0]
+            pdf_table(group, cosines, density, law=laws[0], unit=None)
+        return
     multi_table(
         group,
         np.asarray(source.incident_energies) * EV_PER_MEV,
