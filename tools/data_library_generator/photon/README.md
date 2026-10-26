@@ -12,6 +12,7 @@ export MCDC_EPICS_LIB="/path/to/input/epics2025"
 python tools/data_library_generator/photon/generate.py --elements H Mg Si
 ```
 
+Photon files are named `photon-{element}.h5`; shared EADL records are stored in `atoms.h5`.
 Place `EPDL.ZA<ZZZ>000.endf` and matching `EADL.ZA<ZZZ>000.endf` files directly in `MCDC_EPICS_LIB`.
 Omit `--elements` to process all EPDL inputs; use `--rewrite` to regenerate photon data or `--verbose` for reaction details.
 See the [photon preparation guide](../../../docs/source/user_guide/data_preparation/photon.rst) for source libraries, conversion behavior, and validation.

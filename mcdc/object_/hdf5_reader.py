@@ -6,6 +6,7 @@ Source-library metadata stays in the files.
 """
 
 import numpy as np
+import warnings
 
 from mcdc.constant import INTERPOLATION_LINEAR, REFERENCE_FRAME_COM, REFERENCE_FRAME_LAB
 
@@ -24,7 +25,7 @@ from mcdc.object_.distribution import (
 )
 
 # ======================================================================================
-# File identity and interpolation
+# File identity and target properties
 # ======================================================================================
 
 
@@ -41,6 +42,51 @@ def check_format(file):
         raise ValueError(
             f"{file.filename}: expected mcdc-data 0.1.0, found {name!r} {version!r}"
         )
+
+
+def load_target_properties(target, group, fields, *, identity=None, peers=()):
+    """Resolve repeated target properties in file-loading order.
+
+    Named fields map hyphenated HDF5 names to underscored object attributes.
+    First contributions establish provenance for this compilation. Subsequent
+    differing values warn with both sources and use the incoming value without
+    replacing the target object. Identity fields must agree with the target.
+    Peers with the same target name receive the resolved value as well, so
+    nuclides at different temperatures share their basic properties.
+    Values are already in runtime units; no implicit unit conversion is applied.
+    """
+    shared = [
+        target,
+        *(peer for peer in peers if peer is not target and peer.name == target.name),
+    ]
+    sources = target._property_sources
+    for field in fields:
+        attribute = field.replace("-", "_")
+        value = group[field][()]
+        if isinstance(value, np.generic):
+            value = value.item()
+        if identity and attribute in identity and value != identity[attribute]:
+            raise ValueError(
+                f"{group.file.filename}:{group.name}: {field} contradicts target {target.name}"
+            )
+        location = f"{group.file.filename}:{group[field].name}"
+        if attribute in sources and not np.array_equal(
+            getattr(target, attribute), value
+        ):
+            warnings.warn(
+                f"{target.name}: conflicting {field}: {getattr(target, attribute)!r} "
+                f"from {sources[attribute]}; using {value!r} from {location}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        for peer in shared:
+            setattr(peer, attribute, value)
+            peer._property_sources[attribute] = location
+
+
+# ======================================================================================
+# Interpolation metadata and indexed records
+# ======================================================================================
 
 
 def read_interpolation(group):

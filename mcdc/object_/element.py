@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from mcdc.object_.base import MCDCObject
 from mcdc.object_.hdf5_reader import (
     check_format,
+    load_target_properties,
     read_xs_energy_grid,
     text,
     xs_is_linear,
@@ -29,7 +30,7 @@ from mcdc.object_.photon_reaction import (
     PhotonReactionPairProduction,
     PhotonReactionPhotoelectric,
 )
-from mcdc.print_ import print_error
+from mcdc.object_.util import atomic_number_from_element_name
 
 # ======================================================================================
 # Element
@@ -42,13 +43,13 @@ class Element(MCDCObject):
     Parameters
     ----------
     element_name : str
-        Chemical symbol used to locate ``<element_name>.h5`` under ``MCDC_LIB``.
+        Chemical symbol identifying the target in projectile and atomic files.
 
     Notes
     -----
     Construction records the element identity without accessing the data
-    library. Basic properties are loaded when the element is compiled into a
-    simulation. Electron reaction cross sections and secondary distributions
+    library. Projectile loaders resolve basic properties during compilation.
+    Electron reaction cross sections and secondary distributions
     are loaded later by :meth:`set_electron_data`, and the photon ones by
     :meth:`set_photon_data`.
     Isotopes and temperature-specific nuclides share one element object per
@@ -103,6 +104,8 @@ class Element(MCDCObject):
         super().__init__()
 
         self.name = element_name
+        self.atomic_number = atomic_number_from_element_name(element_name)
+        self._property_sources = {}
 
         # Every annotated field must be present for the Numba layer generator to
         # pack this object, but which loader runs depends on which particle
@@ -155,28 +158,24 @@ class Element(MCDCObject):
         self.photon_relaxation_subshell_designator = np.zeros(0)
 
     def _compile_into_simulation(self, simulation) -> bool:
-        """Load basic properties and register with the owning simulation."""
+        """Register this target and its shared references with the simulation."""
         if self.compile_ID == simulation.compile_ID:
             return False
 
-        dir_name = os.getenv("MCDC_LIB")
-        if dir_name is None:
-            print_error("Environment variable MCDC_LIB is not set")
-
-        file_name = f"{self.name}.h5"
-        file_path = os.path.join(dir_name, file_name)
-        if not os.path.isfile(file_path):
-            print_error(f"Element {self.name} is not available in the library")
-
-        with h5py.File(file_path, "r") as file:
-            if "format" in file.attrs:
-                check_format(file)
-                self.atomic_number = int(file["atomic-number"][()])
-            else:
-                # TODO: Remove this fallback once element libraries use mcdc-data.
-                self.atomic_number = int(file["atomic_number"][()])
-
+        self._property_sources = {}
         return super()._compile_into_simulation(simulation)
+
+    def _load_properties(self, group, field="atomic-number"):
+        """Load element properties while checking their chemical identity."""
+        expected = atomic_number_from_element_name(self.name)
+        if not expected and "atomic_number" in self._property_sources:
+            expected = self.atomic_number
+        load_target_properties(
+            self,
+            group,
+            (field,),
+            identity={"atomic_number": expected} if expected else None,
+        )
 
     def set_electron_data(self, simulation):
         """Load and register electron reaction data from ``MCDC_LIB``."""
@@ -186,6 +185,10 @@ class Element(MCDCObject):
         dir_name = os.getenv("MCDC_LIB")
         file_name = f"{element_name}.h5"
         file = h5py.File(f"{dir_name}/{file_name}", "r")
+
+        self._load_properties(
+            file, field="atomic_number" if "atomic_number" in file else "atomic-number"
+        )
 
         # The reactions
         rx_names = [
@@ -291,18 +294,12 @@ class Element(MCDCObject):
 
         # Load data library
         dir_name = os.getenv("MCDC_LIB")
-        file_name = f"{element_name}.h5"
+        file_name = f"photon-{element_name}.h5"
         file = h5py.File(f"{dir_name}/{file_name}", "r")
 
         check_format(file)
-        if "projectiles/photon" not in file:
-            file.close()
-            print_error(
-                f"Element {element_name} carries no projectiles/photon group; the "
-                "library was not built for photon transport"
-            )
-
-        photon = file["projectiles/photon"]
+        self._load_properties(file)
+        photon = file
 
         # The reaction categories
         rx_names = [
@@ -403,6 +400,34 @@ class Element(MCDCObject):
 
         self.photon_photoelectric_subshell_binding_energy = np.asarray(binding_energy)
 
+        file.close()
+        self.set_atomic_data(simulation)
+
+        # Register data loaded during object-model finalization.
+        for reaction_container in rx_containers:
+            for reaction in reaction_container:
+                reaction._compile_into_simulation(simulation)
+
+    def set_atomic_data(self, simulation):
+        """Load this element's EADL record when atoms.h5 supplies one.
+
+        Atomic data belongs to the shared Element. Missing records leave empty
+        transition arrays, while malformed records or inconsistent identities
+        raise errors. Only the requested element is read from the collection.
+        """
+        self._set_atomic_relaxation({})
+        path = os.path.join(os.environ["MCDC_LIB"], "atoms.h5")
+        if not os.path.isfile(path):
+            return
+        with h5py.File(path, "r") as file:
+            check_format(file)
+            if self.name in file:
+                record = file[self.name]
+                self._load_properties(record)
+                self._set_atomic_relaxation(record)
+
+    def _set_atomic_relaxation(self, record):
+        """Flatten atomic transition tables using their explicit shell designators."""
         # ==========================================================================
         # Atomic relaxation
         # ==========================================================================
@@ -418,7 +443,7 @@ class Element(MCDCObject):
         subshell_count = []
         subshell_designator = []
 
-        relaxation = file.get("atomic-relaxation/subshells", {})
+        relaxation = record.get("atomic-relaxation/subshells", {})
         subshells = ordered_subshells(relaxation)
         designators = {int(subshell["designator"][()]) for subshell in subshells}
 
@@ -483,13 +508,6 @@ class Element(MCDCObject):
         self.photon_relaxation_subshell_designator = np.asarray(
             subshell_designator, dtype=float64
         )
-
-        file.close()
-
-        # Register data loaded during object-model finalization.
-        for reaction_container in rx_containers:
-            for reaction in reaction_container:
-                reaction._compile_into_simulation(simulation)
 
     def __repr__(self):
         text = "\n"

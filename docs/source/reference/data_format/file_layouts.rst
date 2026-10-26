@@ -2,43 +2,122 @@
 File Layouts
 ============
 
-All three file types carry the root attributes defined in :doc:`conventions`.
-The target's identity follows its filename, and projectile data is stored under ``/projectiles/{projectile}``.
-Projectile names include ``neutron``, ``photon``, ``electron``, and ``proton``; an ion uses its nuclide identifier, such as ``Si32``.
-Only the projectile groups applicable to the file's target and data are present.
+All files carry the root attributes and source-library records defined in :doc:`conventions`.
+Projectile files contain the target properties and transport data for one incident particle.
+Atomic evaluations are stored separately in ``atoms.h5`` and shared by interactions that require them.
 
-Element files
--------------
+Projectile files
+----------------
 
-``{element}.h5`` stores properties shared by the element's isotopes and element-based projectile data.
+Filenames follow ``{projectile}-{target}[-{temperature}K].h5``, with the temperature token present for temperature-dependent data.
+Projectile identifiers are ``neutron``, ``electron``, and ``photon`` for those particles, and nuclide identifiers for nuclear projectiles, such as ``H1`` for protons, ``H2`` for deuterons, and ``He4`` for alpha particles.
+Other ions use the same notation, for example ``Si32``.
+The target is an element or nuclide identifier appropriate to the evaluation.
 
-.. list-table:: Root fields
+.. list-table:: Example filenames
+   :header-rows: 1
+
+   * - Filename
+     - Contents
+   * - ``neutron-Si32-293.6K.h5``
+     - Neutron transport on Si32 at 293.6 K.
+   * - ``photon-Si.h5``
+     - Photon transport on elemental silicon.
+   * - ``electron-Si.h5``
+     - Electron transport on elemental silicon.
+   * - ``H1-Si32.h5``
+     - Proton transport on Si32.
+   * - ``He4-Si32.h5``
+     - Alpha-particle transport on Si32.
+
+Target properties
+^^^^^^^^^^^^^^^^^
+
+A projectile file includes its own target properties, even when another projectile file contains the same properties.
+
+.. list-table:: Root target fields
    :header-rows: 1
    :widths: 30 25 45
 
    * - Field
      - Type / shape / unit
      - Meaning
-   * - ``source-libraries/``
-     - group
-     - Contributing library records; see :doc:`conventions`.
    * - ``atomic-number``
      - integer
-     - Number of protons in the nucleus.
-   * - ``atomic-relaxation/``
-     - group, optional
-     - Subshell identities and vacancy transition tables.
-   * - ``projectiles/electron/``
-     - group, optional
-     - Electron data; see :doc:`reactions`.
-   * - ``projectiles/photon/``
-     - group, optional
-     - Photon data; see :doc:`reactions`.
+     - Target element's number of protons.
+   * - ``mass-number``
+     - integer, nuclide targets
+     - Target nucleus's number of protons and neutrons.
+   * - ``atomic-weight-ratio``
+     - float, nuclide targets
+     - Target mass divided by neutron mass.
+   * - ``excitation-level``
+     - integer, nuclide targets
+     - Excitation-state index; zero denotes the ground state.
+   * - ``fissionable``
+     - boolean, neutron files
+     - Whether the target has fission data.
+   * - ``radiation-length``
+     - float, g/cm2, optional
+     - Radiation length expressed as areal mass.
+   * - ``temperature``
+     - float, K, temperature-dependent files
+     - Target temperature.
+   * - ``kT``
+     - float, eV, temperature-dependent files
+     - Boltzmann constant times target temperature.
+
+The parent element follows from the nuclide identifier.
+``temperature`` and ``kT`` describe the same thermodynamic state and must agree to the precision of the data.
+A spectrum's ``temperature`` parameter is a separate quantity in eV, defined in :doc:`representations`.
+
+During simulation compilation, loaded properties populate the existing shared Element and Nuclide objects.
+If repeated properties differ, a warning identifies the values and source files, and the last loaded value is used.
+Loading order is deterministic, and the resolved objects are packed after data loading finishes.
+A property that contradicts the target's chemical or nuclide identity is an error.
+
+Projectile transport fields
+---------------------------
+
+The following fields are stored directly at the projectile file root.
+
+.. list-table:: Projectile fields
+   :header-rows: 1
+   :widths: 30 25 45
+
+   * - Field
+     - Type / shape / unit
+     - Meaning
+   * - ``xs-energy-grid``
+     - float [N], eV
+     - Shared, nondecreasing incident-energy grid for reaction cross sections, with at least two distinct energies.
+   * - ``reactions/``
+     - group
+     - Named reactions, each described in :doc:`reactions`.
+   * - ``stopping-power``
+     - Data, eV cm2/g, conditional
+     - Proton mass stopping power as a function of incident energy.
+
+``stopping-power`` is optional for analog proton transport and required when the data supplies condensed-history energy loss.
+When represented as a table, it uses its own grid rather than ``xs-energy-grid``.
+Every reaction ``CrossSection`` references the grid in its projectile file.
+Repeated energies store the left and right limits of a discontinuity in that order.
+Interpolation applies between distinct energies, not across the zero-width interval.
+Reaction names identify individual channels, while category attributes identify their transport behavior.
+
+Atomic library
+--------------
+
+``atoms.h5`` collects atomic structure and relaxation data, with one group per element at ``/{element}``.
+Each element record contains ``atomic-number``, ``source-libraries/``, and ``atomic-relaxation/``.
+Source-library records are stored only within each element group and preserve its evaluation-specific provenance.
+Projectile generators can prepare the required records through the shared atomic-data preparation function.
+Compilation reads only the element records required by the simulation.
 
 Atomic relaxation
 ^^^^^^^^^^^^^^^^^
 
-Each record under ``/atomic-relaxation/subshells/{subshell}`` describes one subshell.
+Each record under ``/{element}/atomic-relaxation/subshells/{subshell}`` describes one subshell.
 The subshell name is a record identifier; its ``designator`` supplies the shell identity used by transition tables.
 
 .. list-table:: Subshell fields
@@ -73,100 +152,6 @@ The subshell name is a record identifier; its ``designator`` supplies the shell 
 The transition arrays have equal length and matching indices.
 Terminal subshells have length-zero transition arrays.
 Probabilities are nonnegative and sum to one for a nonempty transition table.
-Nonzero shell references must resolve to subshell designators in the same element file.
+Nonzero shell references must resolve to subshell designators in the same element record.
 Relaxation data is shared by all interactions that create a vacancy.
 Reaction products and relaxation transitions must not count the same emitted contribution twice.
-
-Nuclide files
--------------
-
-``{nuclide}.h5`` stores nuclide identity and temperature-independent nuclear data.
-
-.. list-table:: Root fields
-   :header-rows: 1
-   :widths: 30 25 45
-
-   * - Field
-     - Type / shape / unit
-     - Meaning
-   * - ``source-libraries/``
-     - group
-     - Contributing library records; see :doc:`conventions`.
-   * - ``mass-number``
-     - integer
-     - Total number of protons and neutrons.
-   * - ``atomic-weight-ratio``
-     - float
-     - Target nuclide mass divided by neutron mass.
-   * - ``excitation-level``
-     - integer
-     - Excitation-state index; zero denotes the ground state.
-   * - ``fissionable``
-     - boolean
-     - Whether the nuclide has fission data.
-   * - ``radiation-length``
-     - float, g/cm2, optional
-     - Radiation length expressed as areal mass.
-   * - ``projectiles/proton/``
-     - group, optional
-     - Proton cross sections, reactions, and stopping power.
-
-An ion projectile can likewise have a group under ``/projectiles``.
-The parent element is obtained from the element symbol in the nuclide identifier.
-
-Nuclide-temperature files
--------------------------
-
-``{nuclide}-{temperature}K.h5`` stores temperature-dependent nuclide data.
-
-.. list-table:: Root fields
-   :header-rows: 1
-   :widths: 30 25 45
-
-   * - Field
-     - Type / shape / unit
-     - Meaning
-   * - ``source-libraries/``
-     - group
-     - Contributing library records, including source temperature and thermal energy.
-   * - ``temperature``
-     - float, K
-     - Target temperature.
-   * - ``kT``
-     - float, eV
-     - Boltzmann constant times target temperature.
-   * - ``projectiles/neutron/``
-     - group
-     - Neutron data for this target and temperature.
-
-``temperature`` and ``kT`` describe the same thermodynamic state and must agree to the precision of the data.
-A spectrum's ``temperature`` parameter is a separate quantity in eV, defined in :doc:`representations`.
-
-Projectile groups
------------------
-
-The following paths are relative to ``/projectiles/{projectile}`` in the appropriate file.
-
-.. list-table:: Projectile fields
-   :header-rows: 1
-   :widths: 30 25 45
-
-   * - Field
-     - Type / shape / unit
-     - Meaning
-   * - ``xs-energy-grid``
-     - float [N], eV
-     - Shared, nondecreasing incident-energy grid for reaction cross sections, with at least two distinct energies.
-   * - ``reactions/``
-     - group
-     - Named reactions, each described in :doc:`reactions`.
-   * - ``stopping-power``
-     - Data, eV cm2/g, conditional
-     - Proton mass stopping power as a function of incident energy.
-
-``stopping-power`` is optional for analog proton transport and required when the data supplies condensed-history energy loss.
-When represented as a table, it uses its own grid rather than ``xs-energy-grid``.
-Every reaction ``CrossSection`` references the grid in its containing projectile group.
-Repeated energies store the left and right limits of a discontinuity in that order.
-Interpolation applies between distinct energies, not across the zero-width interval.
-Reaction names identify individual channels, while category attributes identify their transport behavior.

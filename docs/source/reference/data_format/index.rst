@@ -8,28 +8,24 @@ MC/DC Data Format
 This reference describes format version **0.1.0**, including file organization, physical units, reusable representations, and reaction fields.
 It is the specification for the format; the :doc:`annotated YAML illustrations <illustrations>` illustrate its structure.
 
-Data is divided by target and temperature:
+Data is organized by projectile and target, with an additional temperature token when required.
 
 .. list-table:: File organization
    :header-rows: 1
-   :widths: 30 40 30
+   :widths: 40 60
 
    * - Filename
      - Contents
-     - Example
-   * - ``{element}.h5``
-     - Element identity, atomic relaxation, and element-based projectile data
-     - ``Fe.h5``
-   * - ``{nuclide}.h5``
-     - Nuclide identity and temperature-independent projectile data
-     - ``Fe56.h5``
-   * - ``{nuclide}-{temperature}K.h5``
-     - Temperature and temperature-dependent projectile data
-     - ``Fe56-293.6K.h5``
+   * - ``{projectile}-{target}[-{temperature}K].h5``
+     - Target properties, projectile transport data, and contributing source libraries.
+   * - ``atoms.h5``
+     - Atomic evaluations indexed by element, including subshell identities and relaxation transitions.
 
-Each file identifies its format and version through root attributes and its contributing libraries through the ``source-libraries`` group.
-Each projectile has a named group under ``/projectiles`` within the appropriate target file.
-For example, neutron cross sections reside under ``/projectiles/neutron`` in a nuclide-temperature file.
+Projectile data is stored directly at the file root.
+For example, ``neutron-Si32-293.6K.h5`` contains ``/xs-energy-grid`` and ``/reactions`` alongside its target properties.
+Each file identifies its format and version through root attributes.
+Source-library records are stored at the root of projectile files and within each element group in ``atoms.h5``.
+See :doc:`file_layouts` for projectile names and field requirements.
 
 HDF5 terminology follows the `HDF Group's data model <https://support.hdfgroup.org/documentation/hdf5/latest/_h5_d_m__u_g.html>`_: groups organize objects, datasets store typed arrays, and attributes attach metadata to an object.
 The scientific meaning and relationships of those objects are defined here by MC/DC.

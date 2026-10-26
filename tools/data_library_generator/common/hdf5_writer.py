@@ -2,14 +2,13 @@
 
 Source-format converters supply already interpreted values in the output
 units. This module handles datasets, source-library provenance, interpolation
-metadata, format identification, companion-file merging, and staged publication
+metadata, format identification, and staged publication
 of output files. It does not interpret source records or convert physical units.
 
 ``FORMAT`` and ``VERSION`` identify the output specification independently of
 the MC/DC software version and source-library release. Compatibility checks
-require exact matches. ``library_exists`` coordinates the three
-neutron output filenames; the lower-level writers operate on caller-provided
-files and groups.
+require exact matches. Writers operate on caller-provided files and groups,
+including per-element source records within the shared atomic library.
 """
 
 from contextlib import contextmanager
@@ -49,12 +48,12 @@ SOURCE_UNITS = {"temperature": "K", "kT": "eV"}
 # ======================================================================================
 
 
-def stamp(file, sources):
+def stamp(file, sources, *, identify=True):
     """Write format identifiers and merge the supplied source-library records.
 
     Parameters
     ----------
-    file : h5py.File
+    file : h5py.File or h5py.Group
         Writable destination. When merging an existing nonempty file, the
         caller checks its format first; this function writes the identifiers
         but does not check the previous version.
@@ -63,6 +62,9 @@ def stamp(file, sources):
         identifies the string fields; missing strings become empty. Optional
         numeric ``temperature`` and ``kT`` values are already in K and eV.
         The caller includes those fields only for temperature-specific files.
+    identify : bool, optional
+        Stamp root format attributes. Set False for provenance on an element
+        record inside a file whose root is already identified.
 
     Raises
     ------
@@ -104,7 +106,9 @@ def stamp(file, sources):
                 group[name].asstr()[()] if group is not None and name in group else ""
             )
             if previous and value and previous != value:
-                raise ValueError(f"{file.filename}: conflicting {name} for {library}")
+                raise ValueError(
+                    f"{file.file.filename}: conflicting {name} for {library}"
+                )
             values[name] = previous or value
         # Compare temperature-specific quantities in their declared output units
         for name in SOURCE_UNITS:
@@ -116,13 +120,14 @@ def stamp(file, sources):
                     and not np.isclose(group[name][()], value)
                 ):
                     raise ValueError(
-                        f"{file.filename}: conflicting {name} for {library}"
+                        f"{file.file.filename}: conflicting {name} for {library}"
                     )
                 values[name] = value
         updates[library] = values
     # Publish format identifiers and stamp the supplied library contributions
-    file.attrs["format"] = FORMAT
-    file.attrs["format-version"] = VERSION
+    if identify:
+        file.attrs["format"] = FORMAT
+        file.attrs["format-version"] = VERSION
     conversion_time = (
         datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
@@ -702,12 +707,14 @@ def check_format(file):
         raise ValueError(f"{file.filename}: incompatible format or format version")
 
 
-def prepared_file_exists(path, fields, sources):
+def prepared_file_exists(path, fields, sources, *, group="/"):
     """Check required paths and source provenance without modifying an output.
 
     Missing files, paths, metadata, or valid UTC conversion times return False.
     Nonempty expected strings and supplied source temperatures must match.
-    Additional libraries and unrelated projectile data are allowed. An existing
+    Paths and source records are checked relative to group, which defaults
+    to the file root; atomic evaluations use their element group.
+    Additional libraries and unrelated records are allowed. An existing
     file with incompatible format identifiers raises ValueError. This checks
     reuse readiness, not every reaction's numerical or structural validity.
     """
@@ -716,6 +723,9 @@ def prepared_file_exists(path, fields, sources):
         return False
     with h5py.File(path, "r") as file:
         check_format(file)
+        if group not in file:
+            return False
+        file = file[group]
         complete = all(field in file for field in fields)
         for library, source in sources.items():
             group = file.get(f"source-libraries/{library}")
@@ -755,154 +765,33 @@ def prepared_file_exists(path, fields, sources):
     return complete
 
 
-def library_exists(directory, filename, nuclide, symbol, sources_by_file):
-    """Check whether the three neutron output files can be reused as prepared.
-
-    Parameters
-    ----------
-    directory : str or pathlib.Path
-        Output library directory, read without modification.
-    filename : str
-        Nuclide-temperature basename, such as ``H2-293.6K.h5``.
-    nuclide : str
-        Nuclide identifier selecting the companion ``{nuclide}.h5``.
-    symbol : str
-        Element symbol selecting the companion ``{symbol}.h5``.
-    sources_by_file : dict of str to dict
-        Expected source-library records keyed by each of the three basenames.
-        Each value has the ``sources`` structure accepted by ``stamp``.
-        Per-file records allow an element title to be empty while nuclide
-        titles and temperature-only provenance are retained where applicable.
-
-    Returns
-    -------
-    bool
-        True if every file has the required identity/temperature paths,
-        expected source groups, scalar string metadata, and a parseable UTC
-        conversion timestamp ending in ``Z``. Supplied source temperature
-        fields must also have matching scalar values and unit attributes.
-        Missing or incomplete output returns False so conversion can proceed.
-
-    Raises
-    ------
-    ValueError
-        An existing file has incompatible format identifiers, as checked by
-        ``check_format``; this is an error rather than a reusable-file miss.
-    OSError
-        An existing HDF5 file cannot be opened or read.
-    KeyError
-        An expected filename is absent from ``sources_by_file``.
-
-    Notes
-    -----
-    Nonempty expected strings must match; empty expectations permit known
-    metadata already recorded by another contribution. Additional source
-    libraries and projectile groups are allowed. Numeric source temperatures
-    use NumPy's default ``isclose`` tolerances. The timestamp is checked for
-    valid storage, not compared with the current time.
-
-    This is an incremental-conversion completeness check. It does not
-    traverse and validate every reaction, compare cross-section sums, or
-    confirm every identity value against an ACE table. No timestamps or file
-    contents are updated by the check.
-    """
-    # Define the minimum required contents of the three coordinated output files
-    required = (
-        (filename, ("temperature", "kT", "projectiles/neutron/reactions")),
-        (f"{symbol}.h5", ("atomic-number",)),
-        (
-            f"{nuclide}.h5",
-            ("mass-number", "atomic-weight-ratio", "excitation-level", "fissionable"),
-        ),
-    )
-    complete = True
-    for filename, fields in required:
-        reusable = prepared_file_exists(
-            Path(directory) / filename, fields, sources_by_file[filename]
-        )
-        complete = complete and reusable
-    return complete
-
-
 # ======================================================================================
-# Companion-file merging and staged file publication
+# Staged file publication
 # ======================================================================================
-
-
-def write_companion(path, fields, sources):
-    """Create or merge an element/nuclide companion's identity and provenance.
-
-    Parameters
-    ----------
-    path : str or pathlib.Path
-        Companion filename opened in append mode; its parent directory must
-        already exist.
-    fields : dict of str to object
-        Dimensionless numeric or boolean identity datasets to create if
-        absent, such as atomic number or mass number and fissionable flag.
-    sources : dict of str to dict
-        Source-library records applicable to this file, passed to ``stamp``.
-
-    Raises
-    ------
-    ValueError
-        Existing nonempty content has incompatible format identifiers, an
-        identity value conflicts, or source provenance conflicts.
-    OSError
-        Opening or modifying the file fails.
-
-    Notes
-    -----
-    Existing identity values must agree under ``allclose`` with ``rtol=1e-10``
-    and zero absolute tolerance; matching values are retained. Named identity
-    datasets omit unit attributes, including when such an attribute was
-    previously attached. Other projectile data and unrelated objects remain
-    intact. Source records are merged and their conversion times updated.
-
-    Identity comparisons occur before provenance or dataset writes. The
-    subsequent append operation is not atomic, and an I/O failure can leave
-    partial updates. A surrounding temperature-file ``atomic_file`` context
-    does not roll back changes to companion files.
-    """
-    with h5py.File(path, "a") as file:
-        # Validate existing file and target identities before applying updates
-        if len(file) or len(file.attrs):
-            check_format(file)
-        for name, value in fields.items():
-            if name in file and not np.allclose(
-                file[name][()], value, rtol=1e-10, atol=0
-            ):
-                raise ValueError(f"{path}: inconsistent {name}")
-        # Merge provenance and fill missing dimensionless identity datasets
-        stamp(file, sources)
-        for name, value in fields.items():
-            if name not in file:
-                quantity(file, name, value)
-            if "unit" in file[name].attrs:
-                del file[name].attrs["unit"]
 
 
 @contextmanager
-def atomic_file(path, sources, *, preserve=False):
+def atomic_file(path, sources=None, *, preserve=False):
     """Stage one HDF5 output and replace its destination on successful exit.
 
     Parameters
     ----------
     path : str or pathlib.Path
         Final output path. The parent directory must already exist.
-    sources : dict of str to dict
+    sources : dict of str to dict, optional
         Source-library records written by ``stamp`` before control is yielded.
+        Omit when provenance is stored within individual records instead.
     preserve : bool, optional
         Copy an existing compatible destination into the staged file before
-        updating it. This retains other projectile groups and source records.
-        The default creates a fresh output, as used for neutron temperature
-        files. A missing destination always starts a new file.
+        updating it. This retains other element records in atoms.h5.
+        The default creates a fresh projectile output. A missing destination
+        always starts a new file.
 
     Yields
     ------
     h5py.File
         Writable file at a temporary path in the destination directory,
-        already carrying format identifiers and source-library groups.
+        Already carries format identifiers and any supplied source records.
 
     Raises
     ------
@@ -921,7 +810,7 @@ def atomic_file(path, sources, *, preserve=False):
     destination remains intact. The staged path is removed in either case.
 
     Publication covers this file only: other files modified within the
-    context, including companion files, are outside this transaction.
+    context are outside this transaction.
     """
     # Stage beside the destination so replacement stays on the same filesystem
     path = Path(path)
@@ -937,7 +826,11 @@ def atomic_file(path, sources, *, preserve=False):
         with h5py.File(staged, "r+" if updating else "w") as file:
             if updating:
                 check_format(file)
-            stamp(file, sources)
+            if sources is None:
+                file.attrs["format"] = FORMAT
+                file.attrs["format-version"] = VERSION
+            else:
+                stamp(file, sources)
             yield file
         # Publish only after writing and closing the staged file successfully
         os.replace(staged, path)

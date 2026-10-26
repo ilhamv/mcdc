@@ -87,6 +87,28 @@ def parse_dimension_expression(expression: str) -> tuple[str, int]:
     return attribute, offset
 
 
+_ELEMENT_SYMBOLS = (
+    "H He Li Be B C N O F Ne Na Mg Al Si P S Cl Ar K Ca Sc Ti V Cr Mn Fe Co Ni "
+    "Cu Zn Ga Ge As Se Br Kr Rb Sr Y Zr Nb Mo Tc Ru Rh Pd Ag Cd In Sn Sb Te I Xe "
+    "Cs Ba La Ce Pr Nd Pm Sm Eu Gd Tb Dy Ho Er Tm Yb Lu Hf Ta W Re Os Ir Pt Au Hg "
+    "Tl Pb Bi Po At Rn Fr Ra Ac Th Pa U Np Pu Am Cm Bk Cf Es Fm Md No Lr Rf Db Sg "
+    "Bh Hs Mt Ds Rg Cn Nh Fl Mc Lv Ts Og"
+).split()
+
+
+def atomic_number_from_element_name(name):
+    """Return Z for a chemical symbol, or zero for a model-defined element."""
+    return _ELEMENT_SYMBOLS.index(name) + 1 if name in _ELEMENT_SYMBOLS else 0
+
+
+def nuclide_identity_from_name(name):
+    """Return mass number and excitation index from a canonical nuclide name."""
+    match = _NUCLIDE_NAME_RE.fullmatch(name)
+    if match is None:
+        raise ValueError(f"Invalid nuclide name: {name!r}")
+    return int(match.group(2)), int(match.group(3) or 0)
+
+
 def element_symbol_from_nuclide_name(nuclide_name: str) -> str:
     """Return the element symbol of a nuclide name.
 

@@ -4,16 +4,25 @@ The EPDL and EADL inputs contain elemental photon and atomic-relaxation data.
 ENDF energies are already in eV and cross sections in barns. This module parses
 source records, preserves interpolation and discontinuities, extracts library
 provenance, and writes interpreted quantities through ``hdf5_writer``.
-Projectile scripts select inputs and coordinate publication of element files.
+Shared EADL preparation updates element records in atoms.h5. Projectile scripts
+select inputs and coordinate publication of projectile files.
 """
 
 from datetime import datetime
 from pathlib import Path
 import re
 
+import h5py
 import numpy as np
 
-from .hdf5_writer import interpolation, quantity
+from .hdf5_writer import (
+    atomic_file,
+    check_format,
+    interpolation,
+    prepared_file_exists,
+    quantity,
+    stamp,
+)
 
 # ======================================================================================
 # EPICS identifiers and ENDF interpolation laws
@@ -520,6 +529,66 @@ def write_relaxation(group, shells):
 
 
 # ======================================================================================
+# Atomic library preparation
+# ======================================================================================
+
+
+def prepare_atomic_data(
+    path, output_dir, *, atomic_number=None, rewrite=False, verbose=False
+):
+    """Prepare one EADL element in atoms.h5 and return its parsed subshells.
+
+    The optional atomic_number checks a projectile's target before any output
+    is changed. Compatible records are reused without updating their provenance.
+    Rewrites replace only the requested element; other element records survive.
+    Invalid inputs or publication failures leave the previous atomic file intact.
+    The output directory must already exist, and paths are pathlib Paths.
+    """
+    sections = read_sections(path)
+    z = read_atomic_number(sections)
+    if atomic_number is not None and z != atomic_number:
+        raise ValueError(f"{path}: EADL target differs from projectile target")
+    if (28, 533) not in sections:
+        raise ValueError(f"{path}: missing atomic relaxation MF 28/MT 533")
+    shells = read_relaxation(sections[28, 533])
+    sources = read_source_libraries(path, sections, "EADL")
+    symbol = Z_TO_SYMBOL[z]
+    destination = output_dir / "atoms.h5"
+    root_sources = False
+    if destination.is_file():
+        with h5py.File(destination, "r") as file:
+            check_format(file)
+            root_sources = "source-libraries" in file
+            identity = file.get(f"{symbol}/atomic-number")
+            if identity is not None and int(identity[()]) != z:
+                raise ValueError(f"{destination}/{symbol}: inconsistent atomic-number")
+    required = ["atomic-number", "atomic-relaxation/subshells"]
+    reuse = not rewrite and prepared_file_exists(
+        destination, required, sources, group=symbol
+    )
+    if reuse and not root_sources:
+        if verbose:
+            print(f"Skip atoms.h5/{symbol}: atomic record already exists")
+        return shells
+    if verbose:
+        print(f"Create atoms.h5/{symbol} from {path.name}")
+    with atomic_file(destination, preserve=True) as file:
+        if "source-libraries" in file:
+            del file["source-libraries"]
+        if reuse:
+            return shells
+        if symbol in file:
+            if int(file[f"{symbol}/atomic-number"][()]) != z:
+                raise ValueError(f"{destination}/{symbol}: inconsistent atomic-number")
+            del file[symbol]
+        record = file.create_group(symbol)
+        quantity(record, "atomic-number", z)
+        stamp(record, sources, identify=False)
+        write_relaxation(record.create_group("atomic-relaxation"), shells)
+    return shells
+
+
+# ======================================================================================
 # Photon reactions
 # ======================================================================================
 
@@ -532,7 +601,7 @@ def write_photon(file, sections, shells=None, verbose=False):
     at element scope. No secondary-particle production is inferred from totals.
     """
     grid = photon_energy_grid(sections)
-    photon = file.require_group("projectiles").create_group("photon")
+    photon = file
     quantity(photon, "xs-energy-grid", grid, "eV")
     reactions = photon.create_group("reactions", track_order=True)
     for mt, (name, category) in PHOTON_REACTIONS.items():

@@ -12,12 +12,16 @@ from mcdc.object_.base import MCDCObject
 from mcdc.object_.data import DataBase, DataNone, DataTable
 from mcdc.object_.hdf5_reader import (
     check_format,
+    load_target_properties,
     read_xs_energy_grid,
     text,
     xs_is_linear,
 )
 from mcdc.object_.element import Element, get_or_create_element
-from mcdc.object_.util import element_symbol_from_nuclide_name
+from mcdc.object_.util import (
+    element_symbol_from_nuclide_name,
+    nuclide_identity_from_name,
+)
 from mcdc.object_.neutron_reaction import (
     NeutronReactionBase,
     NeutronReactionCapture,
@@ -30,7 +34,7 @@ from mcdc.object_.proton_reaction import (
     ProtonReactionInelasticScattering,
     ProtonReactionCapture,
 )
-from mcdc.print_ import print_1d_array, print_error
+from mcdc.print_ import print_1d_array
 
 # ======================================================================================
 # Nuclide
@@ -50,9 +54,8 @@ class Nuclide(MCDCObject):
     Notes
     -----
     Construction records the nuclide identity without accessing the data
-    library. Basic properties are loaded when the nuclide is compiled into a
-    simulation. Neutron cross sections, reactions, multiplicities, and
-    delayed-neutron data are loaded later by :meth:`set_neutron_data`.
+    library. Projectile loaders resolve basic properties during compilation.
+    Neutron reactions and their owned data are loaded by :meth:`set_neutron_data`.
     Element-wide properties are accessed through the shared :attr:`element`
     reference, which is packed as ``element_ID`` for transport.
     """
@@ -100,6 +103,12 @@ class Nuclide(MCDCObject):
 
         self.name = nuclide_name
         self.temperature = temperature
+        self.mass_number, self.excitation_level = nuclide_identity_from_name(
+            nuclide_name
+        )
+        self.atomic_weight_ratio = 0.0
+        self.fissionable = False
+        self._property_sources = {}
         self.element = Element(element_symbol_from_nuclide_name(nuclide_name))
 
         # Initialize all attributes
@@ -131,45 +140,11 @@ class Nuclide(MCDCObject):
         self.radiation_length = 0.0
 
     def _compile_into_simulation(self, simulation) -> bool:
-        """Load basic properties and register with the owning simulation."""
+        """Register this target and its shared references with the simulation."""
         if self.compile_ID == simulation.compile_ID:
             return False
 
-        dir_name = os.getenv("MCDC_LIB")
-        if dir_name is None:
-            print_error("Environment variable MCDC_LIB is not set")
-
-        file_name = f"{self.name}-{self.temperature}K.h5"
-        file_path = os.path.join(dir_name, file_name)
-        if not os.path.isfile(file_path):
-            print_error(
-                f"Nuclide {self.name} at temperature {self.temperature} K "
-                "is not available in the library"
-            )
-
-        with h5py.File(file_path, "r") as file:
-            if "format" in file.attrs:
-                check_format(file)
-                stored_temperature = float(file["temperature"][()])
-                if not np.isclose(stored_temperature, self.temperature):
-                    raise ValueError(
-                        f"{file_path}: temperature does not match its filename"
-                    )
-                with h5py.File(
-                    os.path.join(dir_name, f"{self.name}.h5"), "r"
-                ) as nuclide:
-                    check_format(nuclide)
-                    self.mass_number = int(nuclide["mass-number"][()])
-                    self.atomic_weight_ratio = float(nuclide["atomic-weight-ratio"][()])
-                    self.fissionable = bool(nuclide["fissionable"][()])
-                    self.excitation_level = int(nuclide["excitation-level"][()])
-            else:
-                # TODO: Remove this fallback once proton libraries use mcdc-data.
-                # Proton libraries carry their identity in the temperature file.
-                self.mass_number = int(file["mass_number"][()])
-                self.atomic_weight_ratio = float(file["atomic_weight_ratio"][()])
-                self.fissionable = bool(file["fissionable"][()])
-                self.excitation_level = int(file["excitation_level"][()])
+        self._property_sources = {}
         self.element = get_or_create_element(
             self.element.name, simulation, self.element
         )
@@ -184,7 +159,7 @@ class Nuclide(MCDCObject):
         Fission yields and delayed groups belong to each fission reaction.
         """
         path = os.path.join(
-            os.environ["MCDC_LIB"], f"{self.name}-{self.temperature}K.h5"
+            os.environ["MCDC_LIB"], f"neutron-{self.name}-{self.temperature}K.h5"
         )
         categories = {
             "elastic-scattering": (
@@ -202,7 +177,24 @@ class Nuclide(MCDCObject):
         }
         with h5py.File(path, "r") as file:
             check_format(file)
-            neutron = file["projectiles/neutron"]
+            stored_temperature = float(file["temperature"][()])
+            if not np.isclose(stored_temperature, self.temperature):
+                raise ValueError(f"{path}: temperature does not match its filename")
+            self.element._load_properties(file)
+            mass, excitation = nuclide_identity_from_name(self.name)
+            load_target_properties(
+                self,
+                file,
+                (
+                    "mass-number",
+                    "atomic-weight-ratio",
+                    "excitation-level",
+                    "fissionable",
+                ),
+                identity={"mass_number": mass, "excitation_level": excitation},
+                peers=simulation.nuclides,
+            )
+            neutron = file
             grid = read_xs_energy_grid(neutron)
             self.neutron_xs_energy_grid = grid
             self.neutron_xs_is_linear = True
@@ -246,6 +238,20 @@ class Nuclide(MCDCObject):
         dir_name = os.getenv("MCDC_LIB")
         file_name = f"{nuclide_name}-{temperature}K.h5"
         file = h5py.File(f"{dir_name}/{file_name}", "r")
+
+        # TODO: Remove this layout adapter once proton libraries use mcdc-data.
+        load_target_properties(
+            self,
+            file,
+            ("mass_number", "atomic_weight_ratio", "excitation_level", "fissionable"),
+            identity={
+                "mass_number": self.mass_number,
+                "excitation_level": self.excitation_level,
+            },
+            peers=simulation.nuclides,
+        )
+        if "atomic_number" in file:
+            self.element._load_properties(file, field="atomic_number")
 
         # Radiation length
         self.radiation_length = float(file["radiation_length"][()])

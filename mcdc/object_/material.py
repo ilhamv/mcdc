@@ -398,7 +398,10 @@ def _get_supported_temperature(temperature, nuclide_name):
     directory = os.getenv("MCDC_LIB")
     if not directory or not os.path.isdir(directory):
         return float(temperature)
-    prefix, suffix = f"{nuclide_name}-", "K.h5"
+    prefix, suffix = f"neutron-{nuclide_name}-", "K.h5"
+    if not any(name.startswith(prefix) for name in os.listdir(directory)):
+        # TODO: Remove this filename adapter once proton libraries use mcdc-data.
+        prefix = f"{nuclide_name}-"
     available = []
     for filename in os.listdir(directory):
         if filename.startswith(prefix) and filename.endswith(suffix):

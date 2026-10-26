@@ -5,7 +5,7 @@ Photon
 ======
 
 The generator in ``tools/data_library_generator/photon/`` converts EPDL photon evaluations and EADL atomic-relaxation evaluations into :doc:`MC/DC transport data <../../reference/data_format/index>`.
-It writes photon data under ``/projectiles/photon`` and shared atomic-relaxation data under ``/atomic-relaxation`` in each :doc:`element file <../../reference/data_format/file_layouts>`.
+It writes ``photon-{element}.h5`` and prepares EADL element records in the shared ``atoms.h5`` using the :doc:`specified file layouts <../../reference/data_format/file_layouts>`.
 
 Requirements and usage
 ----------------------
@@ -38,13 +38,15 @@ From the repository root, set the input and output directories and run the gener
      - Report filenames and reaction details during conversion.
 
 Existing compatible photon data is reused unless ``--rewrite`` is supplied.
-Other projectile data and source-library records in shared element files are retained.
+Each photon file contains its target properties, transport data, and EPDL provenance.
+Atomic evaluations and their EADL provenance are shared through ``atoms.h5``.
 Incompatible formats or conflicting atomic numbers are reported as errors.
-A failed conversion preserves the previous element file.
+A failed conversion preserves the previous photon file.
 
 EADL files are optional.
 When a matching EADL file is supplied, its target must agree with the EPDL target.
-Without EADL input, an existing atomic-relaxation group is retained; a new element file has no atomic-relaxation data.
+Without EADL input, ``atoms.h5`` is unchanged.
+Photon transport uses a matching atomic record when one is available.
 
 Prepared data
 -------------

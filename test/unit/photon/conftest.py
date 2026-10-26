@@ -77,7 +77,7 @@ def write_photon_library(
         file.attrs["format-version"] = "0.1.0"
         file["atomic-number"] = np.int64(atomic_number)
 
-        photon = file.create_group("projectiles/photon")
+        photon = file
         reactions = photon.create_group("reactions")
         grid = photon.create_dataset("xs-energy-grid", data=np.array(ENERGY_GRID))
         grid.attrs["unit"] = "eV"
@@ -237,15 +237,26 @@ def write_photon_library(
         ):
             terminal[name] = np.zeros(0)
 
+        # The shared atomic collection is independent of the projectile file.
+        with h5py.File(path.parent / "atoms.h5", "a") as atoms:
+            atoms.attrs["format"], atoms.attrs["format-version"] = "mcdc-data", "0.1.0"
+            symbol = path.stem.removeprefix("photon-")
+            if symbol in atoms:
+                del atoms[symbol]
+            record = atoms.create_group(symbol)
+            record["atomic-number"] = atomic_number
+            file.copy(file["atomic-relaxation"], record, name="atomic-relaxation")
+        del file["atomic-relaxation"]
+
 
 @pytest.fixture
 def photon_model(tmp_path, monkeypatch, prepare_simulation):
     """A one-element photon material at unit atom density."""
 
     def build(density=1.0, edit=None, **library):
-        write_photon_library(tmp_path / "X.h5", **library)
+        write_photon_library(tmp_path / "photon-X.h5", **library)
         if edit is not None:
-            with h5py.File(tmp_path / "X.h5", "r+") as file:
+            with h5py.File(tmp_path / "photon-X.h5", "r+") as file:
                 edit(file)
         monkeypatch.setenv("MCDC_LIB", str(tmp_path))
 

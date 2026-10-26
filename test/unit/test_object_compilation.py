@@ -225,7 +225,7 @@ def test_native_nuclide_data_loading_is_reported(monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert "\n Loading neutron data [1/1]" in output
-    assert "Loading neutron data [1/1]: H1-293.6K.h5" in output
+    assert "Loading neutron data [1/1]: neutron-H1-293.6K.h5" in output
     assert "Loading proton data [1/1]: H1.h5" in output
     assert simulation.runtime_data_loading == 2.5
 
@@ -272,7 +272,7 @@ def test_native_photon_element_data_loading_is_reported(monkeypatch, capsys):
 
     simulation.compile()
 
-    assert "Loading photon data [1/1]: H.h5" in capsys.readouterr().out
+    assert "Loading photon data [1/1]: photon-H.h5" in capsys.readouterr().out
 
 
 def test_local_multigroup_grids_pack_hybrid(prepare_simulation):

@@ -2,7 +2,7 @@
 Reactions
 =========
 
-Each group under ``/projectiles/{projectile}/reactions/{reaction}`` represents one reaction channel.
+Each group under ``/reactions/{reaction}`` in a projectile file represents one reaction channel.
 Reaction names describe the channel, such as ``elastic``, ``radiative-capture``, or ``inelastic-level-1``.
 The transport category is stored separately in the ``category`` attribute.
 
@@ -52,7 +52,7 @@ An unavailable source label is omitted.
 Neutron reactions
 -----------------
 
-These reactions reside in the nuclide-temperature file's ``/projectiles/neutron/reactions`` group.
+These reactions reside in ``/reactions`` within ``neutron-{nuclide}-{temperature}K.h5``.
 Multiplicity counts outgoing neutrons.
 Additional species are described by :ref:`cross-product` records.
 
@@ -148,7 +148,7 @@ Total-fission and chance-fission cross sections must not be included together as
 Proton reactions
 ----------------
 
-These reactions reside in the nuclide file's ``/projectiles/proton/reactions`` group.
+These reactions reside in ``/reactions`` within ``H1-{nuclide}.h5``.
 All include the basic fields, with ``cross-products`` available for species other than protons.
 
 .. list-table:: Proton transport categories
@@ -196,7 +196,7 @@ For energy-only spectra, the angular distribution is sampled independently at th
 Electron reactions
 ------------------
 
-These reactions reside in the element file's ``/projectiles/electron/reactions`` group.
+These reactions reside in ``/reactions`` within ``electron-{element}.h5``.
 All include the basic fields, with ``cross-products`` available for additional production.
 
 .. list-table:: Electron category-specific fields
@@ -227,7 +227,7 @@ Additional emission can be described at reaction level or conditional on a subsh
 Photon reactions
 ----------------
 
-These reactions reside in the element file's ``/projectiles/photon/reactions`` group.
+These reactions reside in ``/reactions`` within ``photon-{element}.h5``.
 All include the basic fields, with ``cross-products`` available for additional production.
 
 .. list-table:: Photon category-specific fields

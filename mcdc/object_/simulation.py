@@ -514,12 +514,9 @@ class Simulation(MCDCBase):
         if settings.neutron_transport.active:
             N_nuclide = len(self.nuclides)
             for index, nuclide in enumerate(self.nuclides, start=1):
-                file_name = f"{nuclide.name}-{nuclide.temperature}K.h5"
+                file_name = f"neutron-{nuclide.name}-{nuclide.temperature}K.h5"
                 print_msg(f" Loading neutron data [{index}/{N_nuclide}]: {file_name}")
                 nuclide.set_neutron_data(self)
-            for material in self.materials:
-                update_fissionable_from_nuclides(material)
-
         if settings.proton_transport.active:
             N_nuclide = len(self.nuclides)
             for index, nuclide in enumerate(self.nuclides, start=1):
@@ -532,7 +529,7 @@ class Simulation(MCDCBase):
         if settings.photon_transport.active:
             N_element = len(self.elements)
             for index, element in enumerate(self.elements, start=1):
-                file_name = f"{element.name}.h5"
+                file_name = f"photon-{element.name}.h5"
                 print_msg(f" Loading photon data [{index}/{N_element}]: {file_name}")
                 element.set_photon_data(self)
 
@@ -542,6 +539,10 @@ class Simulation(MCDCBase):
                 file_name = f"{element.name}.h5"
                 print_msg(f" Loading electron data [{index}/{N_element}]: {file_name}")
                 element.set_electron_data(self)
+
+        if settings.neutron_transport.active:
+            for material in self.materials:
+                update_fissionable_from_nuclides(material)
 
         self.runtime_data_loading = MPI.Wtime() - time_data_loading_start
 

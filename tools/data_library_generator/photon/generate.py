@@ -3,7 +3,7 @@
 ``MCDC_EPICS_LIB`` contains the per-element ENDF files in one directory;
 ``MCDC_LIB`` selects the prepared library. Shared converters interpret ENDF
 records, while the common writer manages provenance and staged publication.
-This module selects elements and coordinates updates to their shared files.
+This module selects elements and coordinates photon and shared atomic preparation.
 """
 
 import argparse
@@ -25,15 +25,15 @@ from data_library_generator.common.epics_converter import (
     PHOTON_REACTIONS,
     SYMBOL_TO_Z,
     Z_TO_SYMBOL,
+    prepare_atomic_data,
     read_atomic_number,
-    read_relaxation,
     read_sections,
     read_source_libraries,
     write_photon,
-    write_relaxation,
 )
 from data_library_generator.common.hdf5_writer import (
     atomic_file,
+    check_format,
     prepared_file_exists,
     quantity,
 )
@@ -44,19 +44,12 @@ from data_library_generator.common.hdf5_writer import (
 
 
 def convert_file(epdl_path, output_dir, eadl_path=None, rewrite=False, verbose=False):
-    """Convert one EPDL evaluation and optional EADL data into an element file.
+    """Prepare a photon projectile file and any supplied EADL atomic record.
 
-    Inputs must describe the same elemental target. Metadata is read from each
-    source independently and stored under its library-release identifier.
-    Compatible complete outputs are reused unless ``rewrite`` is requested.
-    Only photon data and supplied atomic-relaxation data are replaced; unrelated
-    projectile groups, source records, and element identity remain intact.
-    Missing EADL input leaves any existing relaxation data unchanged.
-
-    The common writer stages the entire update. Invalid source data, conflicting
-    atomic numbers or provenance, incompatible output formats, and I/O errors
-    propagate to the caller without replacing the previous element file.
-    ``output_dir`` must already exist. Inputs and outputs are pathlib paths.
+    Photon data is self-contained in photon-{element}.h5. EADL data is prepared
+    independently through common.epics_converter in atoms.h5. Existing compatible
+    outputs are reused unless rewrite is requested. Each file is staged before
+    publication; one output's publication does not roll back the other output.
     """
     sections = read_sections(epdl_path)
     z = read_atomic_number(sections)
@@ -67,17 +60,13 @@ def convert_file(epdl_path, output_dir, eadl_path=None, rewrite=False, verbose=F
     sources = read_source_libraries(epdl_path, sections, "EPDL")
     shells = None
     if eadl_path is not None:
-        atomic = read_sections(eadl_path)
-        if read_atomic_number(atomic) != z:
-            raise ValueError(f"{eadl_path}: EADL target differs from EPDL target")
-        if (28, 533) not in atomic:
-            raise ValueError(f"{eadl_path}: missing atomic relaxation MF 28/MT 533")
-        shells = read_relaxation(atomic[28, 533])
-        sources.update(read_source_libraries(eadl_path, atomic, "EADL"))
-    path = output_dir / f"{symbol}.h5"
-    required = ["atomic-number", "projectiles/photon/xs-energy-grid"]
+        shells = prepare_atomic_data(
+            eadl_path, output_dir, atomic_number=z, rewrite=rewrite, verbose=verbose
+        )
+    path = output_dir / f"photon-{symbol}.h5"
+    required = ["atomic-number", "xs-energy-grid"]
     for mt, (name, _) in PHOTON_REACTIONS.items():
-        base = f"projectiles/photon/reactions/{name}"
+        base = f"reactions/{name}"
         required.extend(
             f"{base}/{field}"
             for field in (
@@ -95,11 +84,10 @@ def convert_file(epdl_path, output_dir, eadl_path=None, rewrite=False, verbose=F
             required.append(f"{base}/subshells")
         elif mt in (515, 517):
             required.append(f"{base}/field")
-    if shells is not None:
-        required.append("atomic-relaxation/subshells")
     if path.is_file():
         # Validate target identity even when the prepared-file reuse check passes.
         with h5py.File(path, "r") as file:
+            check_format(file)
             if "atomic-number" in file and file["atomic-number"][()] != z:
                 raise ValueError(f"{path}: inconsistent atomic-number")
     if not rewrite and prepared_file_exists(path, required, sources):
@@ -108,16 +96,9 @@ def convert_file(epdl_path, output_dir, eadl_path=None, rewrite=False, verbose=F
         return
     if verbose:
         print(f"Create {path.name} from {epdl_path.name}")
-    with atomic_file(path, sources, preserve=True) as file:
-        if "atomic-number" not in file:
-            quantity(file, "atomic-number", z)
-        if "projectiles/photon" in file:
-            del file["projectiles/photon"]
+    with atomic_file(path, sources) as file:
+        quantity(file, "atomic-number", z)
         write_photon(file, sections, shells, verbose)
-        if shells is not None:
-            if "atomic-relaxation" in file:
-                del file["atomic-relaxation"]
-            write_relaxation(file.create_group("atomic-relaxation"), shells)
 
 
 # ======================================================================================

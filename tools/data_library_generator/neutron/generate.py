@@ -2,8 +2,7 @@
 
 The command-line interface selects input tables from ``MCDC_ACE_LIB`` and writes
 prepared data to ``MCDC_LIB``. Each table contributes neutron reactions to a
-nuclide-temperature file and identity/provenance records to the shared element
-and nuclide files.
+self-contained neutron projectile file, including target properties and provenance.
 
 This module handles input selection, output-file coordination, and progress
 reporting. Source interpretation and unit conversion belong to
@@ -17,6 +16,7 @@ from pathlib import Path
 import sys
 
 import ACEtk
+import h5py
 from tqdm import tqdm
 
 # ======================================================================================
@@ -33,8 +33,9 @@ from data_library_generator.common.ace_converter import (
 )
 from data_library_generator.common.hdf5_writer import (
     atomic_file,
-    library_exists,
-    write_companion,
+    check_format,
+    prepared_file_exists,
+    quantity,
 )
 
 # ======================================================================================
@@ -43,95 +44,41 @@ from data_library_generator.common.hdf5_writer import (
 
 
 def convert_file(ace_path, output_dir, rewrite=False, verbose=False):
-    """Prepare neutron data from one ACE file and update its companion files.
+    """Write one self-contained neutron projectile file from an ACE table.
 
-    Parameters
-    ----------
-    ace_path : pathlib.Path
-        Input ACE file parsed as an ACEtk continuous-energy table.
-    output_dir : pathlib.Path
-        Existing output directory for the element, nuclide, and
-        nuclide-temperature files. The caller creates this directory.
-    rewrite : bool, optional
-        Rebuild the temperature file even if all three outputs pass the
-        prepared-file reuse check. Shared companion files are merged.
-    verbose : bool, optional
-        Report whether the temperature file is skipped or created, and
-        report the retained reaction channels during conversion.
-
-    Returns
-    -------
-    None
-        Returns after reusing prepared files or completing conversion.
-
-    Raises
-    ------
-    ValueError
-        Source metadata or temperature cannot be interpreted; an existing
-        companion file has incompatible format or conflicting identity or
-        provenance; or reaction/distribution conversion rejects source data.
-        Without ``rewrite``, the reuse check also rejects incompatible
-        format identifiers in an existing temperature file.
-    OSError
-        Input/output file access or output publication fails.
-
-    Notes
-    -----
-    Target identity and provenance are extracted before checking for reusable
-    outputs. Source metadata is assembled separately for each output file so
-    element titles and temperature-specific fields match the file's scope.
-    A reuse hit leaves output files and conversion timestamps unchanged.
-
-    The temperature file is staged while neutron data and both companion
-    files are written. It replaces its destination only after all those
-    writes succeed. Companion updates are not part of the same transaction:
-    a later failure can leave a companion updated while the previous
-    temperature file remains intact. ACEtk parsing exceptions and exceptions
-    from the shared converters and writers propagate to the caller.
+    The file contains element and nuclide properties, target temperature,
+    neutron reactions, and source provenance. A complete compatible output is
+    reused without changing its timestamp unless rewrite is requested.
+    Publication is staged, so conversion errors leave an existing output intact.
     """
-    # Read target identity and assemble provenance for each output file
     ace = ACEtk.ContinuousEnergyTable.from_file(str(ace_path))
     target = read_target(ace)
-    sources_by_file = {
-        target.filename: read_source_libraries(ace, target, with_temperature=True),
-        f"{target.symbol}.h5": read_source_libraries(ace, target, for_element=True),
-        f"{target.nuclide}.h5": read_source_libraries(ace, target),
+    sources = read_source_libraries(ace, target, with_temperature=True)
+    path = output_dir / target.filename
+    fields = {
+        "atomic-number": target.atomic_number,
+        "mass-number": target.mass_number,
+        "atomic-weight-ratio": ace.atomic_weight_ratio,
+        "excitation-level": target.excitation_level,
+        "fissionable": ace.fission_multiplicity_block is not None,
     }
-    # Reuse prepared outputs unless an explicit rewrite was requested
-    if not rewrite and library_exists(
-        output_dir,
-        target.filename,
-        target.nuclide,
-        target.symbol,
-        sources_by_file,
-    ):
+    if path.is_file():
+        with h5py.File(path, "r") as file:
+            check_format(file)
+            for name in ("atomic-number", "mass-number", "excitation-level"):
+                if name in file and file[name][()] != fields[name]:
+                    raise ValueError(f"{path}: inconsistent {name}")
+    required = [*fields, "temperature", "kT", "xs-energy-grid", "reactions"]
+    if not rewrite and prepared_file_exists(path, required, sources):
         if verbose:
-            print(f"Skip {target.filename}: output files already exist")
+            print(f"Skip {path.name}: output file already exists")
         return
-
-    # Stage neutron data and publish the temperature file after companion updates
     if verbose:
-        print(f"Create {target.filename} from {ace_path.name}")
-    with atomic_file(
-        output_dir / target.filename, sources_by_file[target.filename]
-    ) as file:
+        print(f"Create {path.name} from {ace_path.name}")
+    with atomic_file(path, sources) as file:
+        for name, value in fields.items():
+            quantity(file, name, value)
         write_temperature(file, ace, target, verbose=verbose)
-        # Merge element and nuclide identities with their file-specific provenance
-        write_companion(
-            output_dir / f"{target.symbol}.h5",
-            {"atomic-number": target.atomic_number},
-            sources_by_file[f"{target.symbol}.h5"],
-        )
-        write_companion(
-            output_dir / f"{target.nuclide}.h5",
-            {
-                "mass-number": target.mass_number,
-                "atomic-weight-ratio": ace.atomic_weight_ratio,
-                "excitation-level": target.excitation_level,
-                "fissionable": ace.fission_multiplicity_block is not None,
-            },
-            sources_by_file[f"{target.nuclide}.h5"],
-        )
 
 
 # ======================================================================================

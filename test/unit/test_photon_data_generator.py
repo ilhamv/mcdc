@@ -16,6 +16,7 @@ sys.path.insert(0, str(TOOLS))
 from data_library_generator.common import epics_converter as converter
 from data_library_generator.common import hdf5_writer as writer
 from data_library_generator.photon.generate import convert_file
+from data_library_generator.common.epics_converter import prepare_atomic_data
 
 
 def record(values, mf, mt):
@@ -145,21 +146,25 @@ def test_shared_grid_keeps_missing_knots_and_edge_multiplicity(sources):
 
 def test_conversion_preserves_other_projectiles_and_source_records(sources):
     epdl, eadl, output = sources
-    path = output / "Mg.h5"
-    with writer.atomic_file(path, {"Lib81": {"title": "neutron identity"}}) as file:
+    path = output / "photon-Mg.h5"
+    unrelated = output / "neutron-Mg24-293.6K.h5"
+    with writer.atomic_file(unrelated, {"Lib81": {}}) as file:
         file["atomic-number"] = 12
-        file["projectiles/electron/sentinel"] = [2.0, 3.0]
-        timestamp = file["source-libraries/Lib81/conversion-time"].asstr()[()]
+        file["sentinel"] = [2.0, 3.0]
+    previous = fingerprint(unrelated)
     convert_file(epdl, output, eadl)
-    with h5py.File(path) as file:
+    assert fingerprint(unrelated) == previous
+    with h5py.File(path) as file, h5py.File(output / "atoms.h5") as atoms:
         writer.check_format(file)
-        assert set(file["source-libraries"]) == {"Lib81", "EPDL2025", "EADL2025"}
-        assert file["source-libraries/Lib81/conversion-time"].asstr()[()] == timestamp
-        np.testing.assert_array_equal(file["projectiles/electron/sentinel"], [2, 3])
+        writer.check_format(atoms)
+        assert set(file["source-libraries"]) == {"EPDL2025"}
+        assert "source-libraries" not in atoms
+        assert set(atoms["Mg/source-libraries"]) == {"EADL2025"}
+        assert "atomic-relaxation" not in file
         assert "atomic-weight-ratio" not in file
         assert "temperature" not in file
         assert "kT" not in file
-        photon = file["projectiles/photon"]
+        photon = file
         np.testing.assert_array_equal(photon["xs-energy-grid"], [1, 2, 2, 4])
         assert photon["xs-energy-grid"].attrs["unit"] == "eV"
         assert len(photon["reactions"]) == 5
@@ -189,7 +194,7 @@ def test_conversion_preserves_other_projectiles_and_source_records(sources):
         assert shells["L2/designator"][()] == 3
         assert shells["K/xs/grid"].attrs["unit"] == "eV"
         assert shells["K/xs/value"].attrs["unit"] == "barn"
-        relaxation = file["atomic-relaxation/subshells"]
+        relaxation = atoms["Mg/atomic-relaxation/subshells"]
         np.testing.assert_array_equal(
             relaxation["K/transitions/secondary-designator"], [0, 3]
         )
@@ -197,8 +202,8 @@ def test_conversion_preserves_other_projectiles_and_source_records(sources):
         assert relaxation["L2/transitions/energy"].attrs["unit"] == "eV"
         for name in ("probability", "origin-designator", "secondary-designator"):
             assert "unit" not in relaxation[f"K/transitions/{name}"].attrs
-        for library in ("EPDL2025", "EADL2025"):
-            source = file[f"source-libraries/{library}"]
+        for parent, library in ((file, "EPDL2025"), (atoms["Mg"], "EADL2025")):
+            source = parent[f"source-libraries/{library}"]
             assert source["version"].asstr()[()] == "2025"
             assert source["release-date"].asstr()[()] == "2025-01"
             assert source["format-version"].asstr()[()] == "6"
@@ -207,26 +212,22 @@ def test_conversion_preserves_other_projectiles_and_source_records(sources):
 
 def test_reuse_is_read_only_and_optional_eadl_preserves_relaxation(sources):
     epdl, eadl, output = sources
-    path = output / "Mg.h5"
+    path, atoms = output / "photon-Mg.h5", output / "atoms.h5"
     convert_file(epdl, output, eadl)
-    before = fingerprint(path)
+    before = fingerprint(path), fingerprint(atoms)
     convert_file(epdl, output, eadl)
-    assert fingerprint(path) == before
-    with h5py.File(path) as file:
-        timestamp = file["source-libraries/EADL2025/conversion-time"].asstr()[()]
+    assert (fingerprint(path), fingerprint(atoms)) == before
     convert_file(epdl, output, rewrite=True)
-    with h5py.File(path) as file:
-        assert (
-            file["source-libraries/EADL2025/conversion-time"].asstr()[()] == timestamp
-        )
+    assert fingerprint(atoms) == before[1]
+    with h5py.File(atoms) as file:
         np.testing.assert_allclose(
-            file["atomic-relaxation/subshells/K/transitions/probability"], [0.4, 0.6]
+            file["Mg/atomic-relaxation/subshells/K/transitions/probability"], [0.4, 0.6]
         )
 
 
 def test_invalid_rewrite_preserves_previous_element_file(sources):
     epdl, eadl, output = sources
-    path = output / "Mg.h5"
+    path = output / "photon-Mg.h5"
     convert_file(epdl, output, eadl)
     before = fingerprint(path)
     epdl.write_text(
@@ -239,7 +240,7 @@ def test_invalid_rewrite_preserves_previous_element_file(sources):
     with pytest.raises(ValueError, match="form factors"):
         convert_file(epdl, output, eadl, rewrite=True)
     assert fingerprint(path) == before
-    assert sorted(p.name for p in output.iterdir()) == ["Mg.h5"]
+    assert sorted(p.name for p in output.iterdir()) == ["atoms.h5", "photon-Mg.h5"]
 
 
 @pytest.mark.parametrize("identity,format_name", [(13, "mcdc-data"), (12, "other")])
@@ -247,7 +248,7 @@ def test_incompatible_identity_or_format_is_not_overwritten(
     sources, identity, format_name
 ):
     epdl, eadl, output = sources
-    path = output / "Mg.h5"
+    path = output / "photon-Mg.h5"
     with writer.atomic_file(path, {"Lib81": {}}) as file:
         file["atomic-number"] = identity
         file.attrs["format"] = format_name
@@ -260,43 +261,33 @@ def test_incompatible_identity_or_format_is_not_overwritten(
 def test_no_eadl_writes_no_relaxation_group(sources):
     epdl, _, output = sources
     convert_file(epdl, output)
-    with h5py.File(output / "Mg.h5") as file:
+    with h5py.File(output / "photon-Mg.h5") as file:
         assert "atomic-relaxation" not in file
         assert set(file["source-libraries"]) == {"EPDL2025"}
 
 
-def test_photon_and_neutron_preparation_order_is_independent(sources):
-    """A neutron element contribution and photon conversion commute."""
+def test_atomic_preparation_is_independent_of_projectile_preparation(sources):
+    """Shared atomic preparation can run before or through a projectile generator."""
     epdl, eadl, output = sources
-    photon_first = output / "photon-first"
-    neutron_first = output / "neutron-first"
-    photon_first.mkdir()
-    neutron_first.mkdir()
-    source = {"Lib81": {"title": "neutron contribution"}}
+    first, second = output / "first", output / "second"
+    first.mkdir()
+    second.mkdir()
+    prepare_atomic_data(eadl, first)
+    convert_file(epdl, first, eadl)
+    convert_file(epdl, second, eadl)
+    for filename in ("atoms.h5", "photon-Mg.h5"):
+        with h5py.File(first / filename) as a, h5py.File(second / filename) as b:
+            assert dict(a.attrs) == dict(b.attrs)
 
-    convert_file(epdl, photon_first, eadl)
-    writer.write_companion(photon_first / "Mg.h5", {"atomic-number": 12}, source)
-    writer.write_companion(neutron_first / "Mg.h5", {"atomic-number": 12}, source)
-    convert_file(epdl, neutron_first, eadl)
+            def compare(name, obj):
+                assert name in b
+                assert dict(obj.attrs) == dict(b[name].attrs)
+                if isinstance(obj, h5py.Dataset) and not name.endswith(
+                    "conversion-time"
+                ):
+                    np.testing.assert_array_equal(obj[()], b[name][()])
 
-    with (
-        h5py.File(photon_first / "Mg.h5") as first,
-        h5py.File(neutron_first / "Mg.h5") as second,
-    ):
-        assert dict(first.attrs) == dict(second.attrs)
-        assert set(first["source-libraries"]) == set(second["source-libraries"])
-        names = []
-        first.visit(names.append)
-        for name in names:
-            if name == "source-libraries" or name.startswith("source-libraries/"):
-                continue
-            assert name in second
-            assert dict(first[name].attrs) == dict(second[name].attrs)
-            if isinstance(first[name], h5py.Dataset):
-                np.testing.assert_array_equal(first[name][()], second[name][()])
-        other_names = []
-        second.visit(other_names.append)
-        assert set(names) == set(other_names)
+            a.visititems(compare)
 
 
 def test_flat_directory_cli_and_element_selection(sources):
@@ -312,40 +303,87 @@ def test_flat_directory_cli_and_element_selection(sources):
         [*command, "--elements", "Mg"], env=environment, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
-    assert sorted(path.name for path in output.iterdir()) == ["Mg.h5"]
-    before = fingerprint(output / "Mg.h5")
+    assert sorted(path.name for path in output.iterdir()) == [
+        "atoms.h5",
+        "photon-Mg.h5",
+    ]
+    before = fingerprint(output / "photon-Mg.h5")
     result = subprocess.run(command, env=environment, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    assert fingerprint(output / "Mg.h5") == before
+    assert fingerprint(output / "photon-Mg.h5") == before
 
 
-def test_shared_reuse_check_retains_neutron_file_requirements(tmp_path):
-    sources = {"Lib81": {"temperature": 293.6, "kT": 0.0253}}
-    by_file = {}
-    for filename, fields in (
-        (
-            "H2-293.6K.h5",
-            {"temperature": 293.6, "kT": 0.0253, "projectiles/neutron/reactions": None},
-        ),
-        (
-            "H2.h5",
-            {
-                "mass-number": 2,
-                "atomic-weight-ratio": 1.9968,
-                "excitation-level": 0,
-                "fissionable": False,
-            },
-        ),
-        ("H.h5", {"atomic-number": 1}),
-    ):
-        by_file[filename] = sources
-        with writer.atomic_file(tmp_path / filename, sources) as file:
-            for name, value in fields.items():
-                if value is None:
-                    file.create_group(name)
-                else:
-                    file[name] = value
-    assert writer.library_exists(tmp_path, "H2-293.6K.h5", "H2", "H", by_file)
-    with h5py.File(tmp_path / "H2.h5", "a") as file:
-        del file["mass-number"]
-    assert not writer.library_exists(tmp_path, "H2-293.6K.h5", "H2", "H", by_file)
+def test_atomic_records_require_element_local_provenance(sources):
+    _, eadl, output = sources
+    prepare_atomic_data(eadl, output)
+    sources = converter.read_source_libraries(
+        eadl, converter.read_sections(eadl), "EADL"
+    )
+    assert writer.prepared_file_exists(
+        output / "atoms.h5", ["atomic-number"], sources, group="Mg"
+    )
+    with h5py.File(output / "atoms.h5", "a") as file:
+        del file["Mg/source-libraries/EADL2025/title"]
+    assert not writer.prepared_file_exists(
+        output / "atoms.h5", ["atomic-number"], sources, group="Mg"
+    )
+
+
+def test_atomic_library_preserves_other_elements_and_scoped_provenance(sources):
+    _, magnesium, output = sources
+    aluminum = magnesium.with_name("EADL.ZA013000.endf")
+    aluminum.write_text(
+        magnesium.read_text()
+        .replace("1.2000E+04", "1.3000E+04")
+        .replace("12-Mg", "13-Al")
+    )
+    prepare_atomic_data(magnesium, output)
+    prepare_atomic_data(aluminum, output)
+    with h5py.File(output / "atoms.h5") as file:
+        assert {"Mg", "Al"} == set(file)
+        assert "12-Mg" in file["Mg/source-libraries/EADL2025/title"].asstr()[()]
+        assert "13-Al" in file["Al/source-libraries/EADL2025/title"].asstr()[()]
+        previous = file["Al/source-libraries/EADL2025/conversion-time"].asstr()[()]
+    prepare_atomic_data(magnesium, output, rewrite=True)
+    with h5py.File(output / "atoms.h5") as file:
+        assert (
+            file["Al/source-libraries/EADL2025/conversion-time"].asstr()[()] == previous
+        )
+    before = fingerprint(output / "atoms.h5")
+    prepare_atomic_data(magnesium, output)
+    assert fingerprint(output / "atoms.h5") == before
+
+
+def test_atomic_target_mismatch_does_not_change_output(sources):
+    _, eadl, output = sources
+    prepare_atomic_data(eadl, output)
+    before = fingerprint(output / "atoms.h5")
+    with pytest.raises(ValueError, match="differs from projectile"):
+        prepare_atomic_data(eadl, output, atomic_number=13, rewrite=True)
+    assert fingerprint(output / "atoms.h5") == before
+    with h5py.File(output / "atoms.h5", "a") as file:
+        file["Mg/atomic-number"][()] = 13
+    before = fingerprint(output / "atoms.h5")
+    with pytest.raises(ValueError, match="inconsistent atomic-number"):
+        prepare_atomic_data(eadl, output)
+    assert fingerprint(output / "atoms.h5") == before
+
+
+def test_atomic_preparation_removes_root_provenance(sources):
+    _, eadl, output = sources
+    prepare_atomic_data(eadl, output)
+    with h5py.File(output / "atoms.h5", "a") as file:
+        writer.stamp(file, {"EADL2025": {}})
+        previous = file["Mg/source-libraries/EADL2025/title"].asstr()[()]
+        conversion_time = file["Mg/source-libraries/EADL2025/conversion-time"].asstr()[
+            ()
+        ]
+    prepare_atomic_data(eadl, output)
+    with h5py.File(output / "atoms.h5") as file:
+        assert "source-libraries" not in file
+        assert set(file["Mg/source-libraries"]) == {"EADL2025"}
+        assert file["Mg/source-libraries/EADL2025/title"].asstr()[()] == previous
+        assert (
+            file["Mg/source-libraries/EADL2025/conversion-time"].asstr()[()]
+            == conversion_time
+        )

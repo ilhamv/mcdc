@@ -59,19 +59,14 @@ def add_fission(parent, name, yield_):
 def library(tmp_path, monkeypatch):
     """Provide identity and projectile files without requiring downloaded ACE data."""
     monkeypatch.setenv("MCDC_LIB", str(tmp_path))
-    for name in ("H", "H2", "H2-293.6K"):
-        with h5py.File(tmp_path / f"{name}.h5", "w") as file:
-            file.attrs["format"], file.attrs["format-version"] = "mcdc-data", "0.1.0"
-            if name == "H":
-                file["atomic-number"] = 1
-            elif name == "H2":
-                file["mass-number"], file["atomic-weight-ratio"] = 2, 1.9968
-                file["fissionable"], file["excitation-level"] = True, 0
-            else:
-                file["temperature"], file["kT"] = 293.6, 0.0253
-                neutron = file.create_group("projectiles/neutron")
-                neutron["xs-energy-grid"] = [1.0, 10.0, 100.0]
-                neutron.create_group("reactions")
+    with h5py.File(tmp_path / "neutron-H2-293.6K.h5", "w") as file:
+        file.attrs["format"], file.attrs["format-version"] = "mcdc-data", "0.1.0"
+        file["atomic-number"] = 1
+        file["mass-number"], file["atomic-weight-ratio"] = 2, 1.9968
+        file["fissionable"], file["excitation-level"] = True, 0
+        file["temperature"], file["kT"] = 293.6, 0.0253
+        file["xs-energy-grid"] = [1.0, 10.0, 100.0]
+        file.create_group("reactions")
     return tmp_path
 
 
@@ -80,16 +75,15 @@ def hydrogen_library(library):
     """Provide two hydrogen isotopes and two temperatures for H2."""
     import shutil
 
-    shutil.copyfile(library / "H2.h5", library / "H3.h5")
-    with h5py.File(library / "H3.h5", "a") as file:
+    shutil.copyfile(library / "neutron-H2-293.6K.h5", library / "neutron-H3-293.6K.h5")
+    with h5py.File(library / "neutron-H3-293.6K.h5", "a") as file:
         file["mass-number"][()] = 3
         file["atomic-weight-ratio"][()] = 2.990
         file["fissionable"][()] = False
-    for name, temperature in [("H3-293.6K", 293.6), ("H2-600.0K", 600.0)]:
-        shutil.copyfile(library / "H2-293.6K.h5", library / f"{name}.h5")
-        with h5py.File(library / f"{name}.h5", "a") as file:
-            file["temperature"][()] = temperature
-            file["kT"][()] = temperature * 8.61733326e-5
+    shutil.copyfile(library / "neutron-H2-293.6K.h5", library / "neutron-H2-600.0K.h5")
+    with h5py.File(library / "neutron-H2-600.0K.h5", "a") as file:
+        file["temperature"][()] = 600.0
+        file["kT"][()] = 600.0 * 8.61733326e-5
     return library
 
 
@@ -106,7 +100,7 @@ def test_shared_element_identity_and_material_densities(hydrogen_library, monkey
     open_file = h5py.File
 
     def count_element_reads(path, *args, **kwargs):
-        if str(path) == str(hydrogen_library / "H.h5"):
+        if str(path).startswith(str(hydrogen_library / "neutron-")):
             reads.append(path)
         return open_file(path, *args, **kwargs)
 
@@ -119,8 +113,8 @@ def test_shared_element_identity_and_material_densities(hydrogen_library, monkey
     model.set_model([mcdc.Cell(fill=cold), mcdc.Cell(fill=hot)])
     model.set_sources([mcdc.Source(energy=5.0)])
 
-    # Recompilation must preserve sharing and read element identity once per snapshot.
-    for expected_reads in (1, 2):
+    # Recompilation must preserve sharing and read each neutron file once per snapshot.
+    for expected_reads in (3, 6):
         model.compile()
         assert len(model.elements) == 1
         assert len(model.nuclides) == 3
@@ -185,14 +179,14 @@ def prepare_library(prepare_simulation):
 def test_material_temperature_comes_from_available_files(library):
     import shutil
 
-    shutil.copyfile(library / "H2-293.6K.h5", library / "H2-456.7K.h5")
+    shutil.copyfile(library / "neutron-H2-293.6K.h5", library / "neutron-H2-456.7K.h5")
     material = mcdc.Material(nuclide_composition={"H2": 0.02}, temperature=450.0)
     assert material.nuclides[0].temperature == 456.7
 
 
 def test_split_identity_and_nonlinear_xs(library, prepare_simulation):
-    with h5py.File(library / "H2-293.6K.h5", "a") as file:
-        reactions = file["projectiles/neutron/reactions"]
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        reactions = file["reactions"]
         basic_reaction(
             reactions, "absorption", "capture", (1.0, 10.0, 100.0), laws=("log",)
         )
@@ -225,8 +219,8 @@ def test_shared_grid_jumps_and_endpoints(library, prepare_simulation, law):
     """Neutron tables use the same right-hand jump convention as photon tables."""
     grid = np.array([1.0, 10.0, 10.0, 100.0, 100.0])
     values = np.array([1.0, 3.0, 7.0, 11.0, 13.0])
-    with h5py.File(library / "H2-293.6K.h5", "a") as file:
-        neutron = file["projectiles/neutron"]
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        neutron = file
         del neutron["xs-energy-grid"]
         neutron["xs-energy-grid"] = grid
         basic_reaction(
@@ -256,8 +250,8 @@ def test_shared_grid_jumps_and_endpoints(library, prepare_simulation, law):
 
 
 def test_fission_production_is_reaction_local(library, prepare_simulation):
-    with h5py.File(library / "H2-293.6K.h5", "a") as file:
-        reactions = file["projectiles/neutron/reactions"]
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        reactions = file["reactions"]
         add_fission(reactions, "first", 2.0)
         add_fission(reactions, "second", 4.0)
     container, data = prepare_library(prepare_simulation)
@@ -284,10 +278,8 @@ def test_delayed_neutron_groups_spectra_and_directions(
     """Exercise actual fission emission, including branch probabilities and birth time."""
     from mcdc import numba_types
 
-    with h5py.File(library / "H2-293.6K.h5", "a") as file:
-        group = add_fission(
-            file["projectiles/neutron/reactions"], "fission", prompt_yield
-        )
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        group = add_fission(file["reactions"], "fission", prompt_yield)
         group["delayed-multiplicity/coefficients"][0] = 1.0 - prompt_yield
         delayed = group["delayed-neutrons"]
         del delayed["fractions"], delayed["decay-rates"]
@@ -334,10 +326,8 @@ def test_multiple_spectra_are_alternatives_for_each_neutron(
     """Even when multiplicity equals the spectrum count, probabilities select spectra."""
     from mcdc import numba_types
 
-    with h5py.File(library / "H2-293.6K.h5", "a") as file:
-        group = basic_reaction(
-            file["projectiles/neutron/reactions"], "n2n", "inelastic-scattering"
-        )
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        group = basic_reaction(file["reactions"], "n2n", "inelastic-scattering")
         group["multiplicity"] = 2
         mixture = group.create_group("energy-distribution")
         mixture.attrs["type"] = "mixture"
@@ -372,8 +362,8 @@ def test_multiple_spectra_are_alternatives_for_each_neutron(
 def test_capture_q_value_is_already_ev(library, prepare_simulation):
     from mcdc import numba_types
 
-    with h5py.File(library / "H2-293.6K.h5", "a") as file:
-        basic_reaction(file["projectiles/neutron/reactions"], "capture", "capture")
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        basic_reaction(file["reactions"], "capture", "capture")
     container, data = prepare_library(prepare_simulation)
     simulation = container[0]
     particle = np.zeros(1, dtype=numba_types.particle)
@@ -397,8 +387,8 @@ def test_nbody_reaction_energy_scale_and_com_transformation(
     """Reaction context sets LAW 66's energy scale before the COM-to-LAB transform."""
     from mcdc import numba_types
 
-    with h5py.File(library / "H2-293.6K.h5", "a") as file:
-        reactions = file["projectiles/neutron/reactions"]
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        reactions = file["reactions"]
         if category == "fission":
             group = add_fission(reactions, "nbody", 1.0)
             del group["prompt-angular-cosine-distribution"]
@@ -462,10 +452,8 @@ def test_nbody_reaction_energy_scale_and_com_transformation(
 def test_elastic_angular_representations(library, prepare_simulation, isotropic):
     from mcdc import numba_types
 
-    with h5py.File(library / "H2-293.6K.h5", "a") as file:
-        group = basic_reaction(
-            file["projectiles/neutron/reactions"], "elastic", "elastic-scattering"
-        )
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        group = basic_reaction(file["reactions"], "elastic", "elastic-scattering")
         group["reference-frame"][()] = "COM"
         group["Q-value"][()] = 0.0
         angle = group.create_group("angular-cosine-distribution")
@@ -600,8 +588,8 @@ def test_ace_multiple_spectra_select_by_energy_in_both_reaction_categories(
         delayed_fission_multiplicity_block=None,
         delayed_neutron_precursor_block=None,
     )
-    with h5py.File(library / "H2-293.6K.h5", "a") as file:
-        reactions = file["projectiles/neutron/reactions"]
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        reactions = file["reactions"]
         write_reaction(
             reactions.create_group("reaction"),
             ace,
@@ -632,3 +620,42 @@ def test_ace_multiple_spectra_select_by_energy_in_both_reaction_categories(
         )
         assert particle[0]["alive"]
         assert particle[0]["E"] == pytest.approx(expected)
+
+
+def test_repeated_nuclide_properties_warn_and_use_last_file(hydrogen_library):
+    """Different temperatures share the final basic properties and stable objects."""
+    with h5py.File(hydrogen_library / "neutron-H2-600.0K.h5", "a") as file:
+        file["atomic-weight-ratio"][()] = 2.1
+    cold = mcdc.Material(nuclide_composition={"H2": 0.02}, temperature=293.6)
+    hot = mcdc.Material(nuclide_composition={"H2": 0.03}, temperature=600.0)
+    model = mcdc.Simulation()
+    model.set_model([mcdc.Cell(fill=cold), mcdc.Cell(fill=hot)])
+    model.set_sources([mcdc.Source(energy=5.0)])
+    for _ in range(2):
+        with pytest.warns(
+            RuntimeWarning, match="conflicting atomic-weight-ratio"
+        ) as warnings:
+            model.compile()
+        assert len(warnings) == 1
+        message = str(warnings[0].message)
+        assert "neutron-H2-293.6K.h5" in message and "neutron-H2-600.0K.h5" in message
+        assert [nuclide.atomic_weight_ratio for nuclide in model.nuclides] == [2.1, 2.1]
+        assert cold.nuclides[0] is next(
+            n for n in model.nuclides if n.temperature == 293.6
+        )
+        assert hot.nuclides[0] is next(
+            n for n in model.nuclides if n.temperature == 600.0
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value", [("mass-number", 3), ("atomic-number", 2), ("excitation-level", 1)]
+)
+def test_target_identity_conflicts_are_errors(library, field, value):
+    with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
+        file[field][()] = value
+    model = mcdc.Simulation()
+    model.set_model([mcdc.Cell(fill=mcdc.Material(nuclide_composition={"H2": 0.02}))])
+    model.set_sources([mcdc.Source(energy=5.0)])
+    with pytest.raises(ValueError, match="contradicts target"):
+        model.compile()

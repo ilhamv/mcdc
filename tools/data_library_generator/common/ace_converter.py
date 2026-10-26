@@ -113,15 +113,15 @@ class Target:
 
     @property
     def filename(self):
-        """Return the temperature-file basename, for example ``H2-293.6K.h5``.
+        """Return the temperature-file basename, for example ``neutron-H2-293.6K.h5``.
 
         Returns
         -------
         str
-            Nuclide identifier, a hyphen, the nominal temperature converted
-            to a string, and the suffix ``K.h5``. No directory is included.
+            The neutron prefix, nuclide identifier, nominal temperature, and
+            the suffix ``K.h5``. No directory is included.
         """
-        return f"{self.nuclide}-{self.temperature}K.h5"
+        return f"neutron-{self.nuclide}-{self.temperature}K.h5"
 
 
 def read_target(ace):
@@ -167,7 +167,7 @@ def read_target(ace):
     )
 
 
-def read_source_libraries(ace, target, for_element=False, with_temperature=False):
+def read_source_libraries(ace, target, with_temperature=False):
     """Build source-library metadata for one output file without writing it.
 
     Parameters
@@ -177,14 +177,10 @@ def read_source_libraries(ace, target, for_element=False, with_temperature=False
         format version, processing date, and thermal energy.
     target : Target
         Interpreted target identity and nominal temperature.
-    for_element : bool, optional
-        Clear a title beginning with the nuclide identifier because that
-        title does not describe the shared element file. Other applicable
-        header values are retained unchanged.
     with_temperature : bool, optional
         Include the nominal ``temperature`` in K and original ACE ``kT``
         converted from MeV to eV. Projectile generators enable this only
-        for nuclide-temperature files.
+        for temperature-dependent projectile files.
 
     Returns
     -------
@@ -223,9 +219,7 @@ def read_source_libraries(ace, target, for_element=False, with_temperature=False
         )
     # Collect provenance applicable to the target file
     source = {
-        "title": (
-            "" if for_element and title.startswith(f"{target.nuclide} ") else title
-        ),
+        "title": title,
         "version": "",
         "release-date": "",
         "reference": title.split("Ref.", 1)[1].strip() if "Ref." in title else "",
@@ -471,7 +465,7 @@ def write_temperature(file, ace, target, verbose=False):
     Notes
     -----
     The source principal energy grid is converted from MeV to eV and stored
-    once as ``projectiles/neutron/xs-energy-grid``. Reaction groups are
+    once as ``xs-energy-grid``. Reaction groups are
     created in selection order and populated by ``write_reaction``.
     Aggregate or auxiliary data excluded by ``retained_reactions`` is not
     written. Source thermal-energy provenance is supplied separately by
@@ -480,13 +474,12 @@ def write_temperature(file, ace, target, verbose=False):
 
     Writes are direct and may leave a partially populated open file on
     failure. The caller uses ``hdf5_writer.atomic_file`` to publish the
-    temperature file only after conversion succeeds. Element and nuclide
-    companion files are not written by this function.
+    projectile file only after conversion succeeds.
     """
     # Write the target thermodynamic state and shared neutron energy grid
     quantity(file, "temperature", target.temperature, "K")
     quantity(file, "kT", target.temperature * BOLTZMANN_K, "eV")
-    neutron = file.create_group("projectiles/neutron")
+    neutron = file
     energy = np.asarray(ace.principal_cross_section_block.energies) * EV_PER_MEV
     quantity(neutron, "xs-energy-grid", energy, "eV")
     # Populate one group per retained reaction in transport category order

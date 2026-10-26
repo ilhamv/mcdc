@@ -18,34 +18,54 @@ Notation
 Values such as ``float [N], eV`` describe a dataset's type, shape, and unit rather than literal stored values.
 Inline comments beginning with ``#`` describe individual fields.
 
-Element file
+Neutron file
 ------------
 
-``{element}.h5`` contains element identity, atomic relaxation, and electron and photon data.
+``neutron-{nuclide}-{temperature}K.h5`` contains target properties and temperature-dependent neutron data.
 
-:download:`Download layout-element.yaml <illustrations/layout-element.yaml>`.
+:download:`Download layout-neutron.yaml <illustrations/layout-neutron.yaml>`.
 
-.. literalinclude:: illustrations/layout-element.yaml
+.. literalinclude:: illustrations/layout-neutron.yaml
    :language: yaml
 
-Nuclide file
-------------
+Photon file
+-----------
 
-``{nuclide}.h5`` contains nuclide identity and temperature-independent projectile data, illustrated with protons.
+``photon-{element}.h5`` contains element properties and photon data.
 
-:download:`Download layout-nuclide.yaml <illustrations/layout-nuclide.yaml>`.
+:download:`Download layout-photon.yaml <illustrations/layout-photon.yaml>`.
 
-.. literalinclude:: illustrations/layout-nuclide.yaml
+.. literalinclude:: illustrations/layout-photon.yaml
    :language: yaml
 
-Nuclide-temperature file
-------------------------
+Electron file
+-------------
 
-``{nuclide}-{temperature}K.h5`` contains temperature-dependent data, illustrated with neutrons.
+``electron-{element}.h5`` contains element properties and electron data.
 
-:download:`Download layout-nuclide-temperature.yaml <illustrations/layout-nuclide-temperature.yaml>`.
+:download:`Download layout-electron.yaml <illustrations/layout-electron.yaml>`.
 
-.. literalinclude:: illustrations/layout-nuclide-temperature.yaml
+.. literalinclude:: illustrations/layout-electron.yaml
+   :language: yaml
+
+Proton file
+-----------
+
+``H1-{nuclide}.h5`` contains target properties and proton data; other nuclear projectiles use the same naming pattern.
+
+:download:`Download layout-H1.yaml <illustrations/layout-H1.yaml>`.
+
+.. literalinclude:: illustrations/layout-H1.yaml
+   :language: yaml
+
+Atomic library
+--------------
+
+``atoms.h5`` contains element-indexed atomic structure, relaxation data, and evaluation provenance.
+
+:download:`Download layout-atoms.yaml <illustrations/layout-atoms.yaml>`.
+
+.. literalinclude:: illustrations/layout-atoms.yaml
    :language: yaml
 
 Reusable data

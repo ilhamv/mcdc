@@ -24,7 +24,7 @@ def test_shared_grid_interpolation_laws(photon_model, law):
     """Nonlinear reaction values must be evaluated before summing categories."""
 
     def edit(file):
-        xs = file["projectiles/photon/reactions/coherent-scattering/xs"]
+        xs = file["reactions/coherent-scattering/xs"]
         xs["value"][...] = [1.0, 16.0] + [16.0] * (len(ENERGY_GRID) - 2)
         xs["interpolation/laws"][...] = [law]
 
@@ -53,7 +53,7 @@ def test_shared_grid_interpolation_laws(photon_model, law):
 
 def test_cross_section_interpolation_regions(photon_model):
     def edit(file):
-        xs = file["projectiles/photon/reactions/coherent-scattering/xs"]
+        xs = file["reactions/coherent-scattering/xs"]
         xs["value"][...] = [1.0, 16.0] + [100.0] * (len(ENERGY_GRID) - 2)
         del xs["interpolation"]
         xs["interpolation/laws"] = np.array(
@@ -75,16 +75,16 @@ def test_absorption_edge_uses_distinct_left_and_right_limits(
 ):
     def edit(file):
         if linear_fast_path:
-            file["projectiles/photon/reactions/photoelectric/xs/value"][0] = 0.0
-            file["projectiles/photon/reactions/pair-production-nuclear-field/xs/value"][
-                0
-            ] = 0.0
-        file["projectiles/photon/reactions/coherent-scattering/xs/value"][...] = [
+            file["reactions/photoelectric/xs/value"][0] = 0.0
+            file["reactions/pair-production-nuclear-field/xs/value"][0] = 0.0
+        file["reactions/coherent-scattering/xs/value"][...] = [
             1.0,
             2.0,
             3.0,
             7.0,
-        ] + [11.0] * (len(ENERGY_GRID) - 4)
+        ] + [
+            11.0
+        ] * (len(ENERGY_GRID) - 4)
 
     simulation, data = photon_model(edit=edit)
     element = simulation["elements"][0]
@@ -105,7 +105,7 @@ def test_table_subshell_edge_and_threshold(photon_model):
     """A repeated first energy must give zero below and the upper value at the edge."""
 
     def edit(file):
-        xs = file["projectiles/photon/reactions/photoelectric/subshells/K/xs"]
+        xs = file["reactions/photoelectric/subshells/K/xs"]
         del xs["grid"], xs["value"]
         xs["grid"] = [K_BINDING_ENERGY, K_BINDING_ENERGY, 1.0e8]
         xs["value"] = [0.0, 3.0, 3.0]
@@ -137,7 +137,7 @@ def test_category_dispatch_and_both_pair_fields(photon_model):
     """Names and optional source identifiers do not drive reaction dispatch."""
 
     def edit(file):
-        reactions = file["projectiles/photon/reactions"]
+        reactions = file["reactions"]
         file.copy(reactions["pair-production-nuclear-field"], reactions, name="triplet")
         reactions["triplet/field"][()] = "electron"
         reactions["triplet"].attrs["ENDF-MT"] = 515
@@ -164,7 +164,7 @@ def test_category_dispatch_and_both_pair_fields(photon_model):
 )
 def test_invalid_photon_data_is_rejected(photon_model, invalid):
     def edit(file):
-        photon = file["projectiles/photon"]
+        photon = file
         coherent = photon["reactions/coherent-scattering"]
         if invalid == "format":
             file.attrs["format-version"] = "99.0.0"

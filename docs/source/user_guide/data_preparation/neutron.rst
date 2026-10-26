@@ -5,7 +5,7 @@ Neutron
 =======
 
 The generator in ``tools/data_library_generator/neutron/`` converts continuous-energy neutron ACE files into :doc:`MC/DC transport data <../../reference/data_format/index>`.
-It writes an element file, a nuclide file, and a nuclide-temperature file using the :doc:`specified file layouts <../../reference/data_format/file_layouts>`.
+It writes one ``neutron-{nuclide}-{temperature}K.h5`` file per evaluation, including target properties and provenance, using the :doc:`specified file layouts <../../reference/data_format/file_layouts>`.
 
 Requirements and usage
 ----------------------
@@ -30,14 +30,13 @@ From the repository root, set the input and output directories and run the gener
    * - ``--ace-files 1002.10c 88223.10c 92240.10c``
      - Convert selected filenames from ``MCDC_ACE_LIB``; omit the option to process all files in that directory.
    * - ``--rewrite``
-     - Regenerate existing temperature files.
+     - Regenerate existing neutron files.
    * - ``--verbose``
      - Report filenames and reaction details during conversion.
 
 Existing compatible data is reused unless ``--rewrite`` is supplied.
-Other projectile data in shared element and nuclide files is retained.
 Incompatible formats or conflicting identity fields are reported as errors.
-A failed rewrite preserves the previous temperature file.
+A failed rewrite preserves the previous neutron file.
 
 Temperature
 -----------
