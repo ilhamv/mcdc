@@ -62,7 +62,7 @@ Their fields and units are defined in :doc:`representations`.
 Reusable distributions
 ----------------------
 
-The following illustrations show continuous, discrete, and mixed tables, a multi-table distribution, and a joint energy-angle distribution.
+The following illustrations show probability tables, a multi-table distribution, joint energy-angle distributions, and a mixture of spectra.
 Their fields and offset conventions are defined in :doc:`representations`.
 For angular distributions, sampled coordinates and densities are dimensionless and omit unit attributes.
 

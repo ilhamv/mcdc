@@ -208,6 +208,33 @@ Repeated grid coordinates describe the distributions on either side of a discont
 Across each linear grid interval, discrete outcomes correspond by index and have equal counts.
 See :ref:`ace-law-4` for line correspondence and :ref:`ace-incident-energy-sampling` for incident-table selection and support scaling.
 
+.. _distribution-mixture:
+
+Mixture distribution
+^^^^^^^^^^^^^^^^^^^^
+
+``type = mixture`` selects one component Distribution using probability Data evaluated at the incident energy in eV.
+
+.. list-table:: Mixture fields
+   :header-rows: 1
+
+   * - Field
+     - Type
+     - Meaning
+   * - ``components/{i}/probability``
+     - Data
+     - Dimensionless probability of selecting component i.
+   * - ``components/{i}/distribution``
+     - Distribution
+     - Distribution sampled after selecting component i.
+
+Component indices are contiguous and start at zero.
+Probabilities may use independent grids and interpolation regions; tables clamp to their own endpoint values outside their grids.
+At the sampled incident energy, probabilities are finite, nonnegative, and sum to one within :math:`10^{-6}`.
+Constant probabilities use Data polynomials.
+All components supply the same output quantities in the containing field's reference frame.
+A component may itself be a mixture.
+
 Analytic energy spectra
 ^^^^^^^^^^^^^^^^^^^^^^^
 

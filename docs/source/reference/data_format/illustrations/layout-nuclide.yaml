@@ -60,9 +60,7 @@ projectiles/:
         # Category-specific
         multiplicity: integer  # Outgoing protons only
         angular-cosine-distribution: Distribution, cosine  # Omit for a joint energy-angle spectrum
-        spectrum-probability-grid: float [B + 1], eV
-        spectrum-probability: float [B, S]
-        energy-spectrum-{i}: Distribution, eV
+        energy-distribution: Distribution, eV  # Mixtures select among multiple spectra
 
 
       capture/:

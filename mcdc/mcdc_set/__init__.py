@@ -14,6 +14,8 @@ import mcdc.mcdc_set.table_data as table_data
 
 import mcdc.mcdc_set.kalbach_mann_distribution as kalbach_mann_distribution
 
+import mcdc.mcdc_set.mixture_distribution as mixture_distribution
+
 import mcdc.mcdc_set.multi_table_distribution as multi_table_distribution
 
 import mcdc.mcdc_set.table_distribution as table_distribution
@@ -41,8 +43,6 @@ import mcdc.mcdc_set.structured_mesh as structured_mesh
 import mcdc.mcdc_set.neutron_reaction as neutron_reaction
 
 import mcdc.mcdc_set.neutron_fission_reaction as neutron_fission_reaction
-
-import mcdc.mcdc_set.neutron_inelastic_scattering_reaction as neutron_inelastic_scattering_reaction
 
 import mcdc.mcdc_set.proton_inelastic_scattering_reaction as proton_inelastic_scattering_reaction
 

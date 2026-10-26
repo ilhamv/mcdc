@@ -127,3 +127,31 @@ n-body-distribution/:
   interpolation/:
     laws: string [R]
     boundaries: integer [R]
+
+# ======================================================================================
+# Mixture of existing spectra with independent probability Data
+# ======================================================================================
+
+mixture-distribution/:
+  '@type': mixture
+  components/:
+    '0/':
+      probability/:
+        '@type': polynomial
+        coefficients: [0.3]
+      distribution/:
+        '@type': evaporation
+        restriction-energy: 0.0  # unit = eV
+        temperature/:
+          '@type': polynomial
+          coefficients: [1.0e6]  # unit = eV
+    '1/':
+      probability/:
+        '@type': polynomial
+        coefficients: [0.7]
+      distribution/:
+        '@type': maxwellian
+        restriction-energy: 0.0  # unit = eV
+        temperature/:
+          '@type': polynomial
+          coefficients: [1.5e6]  # unit = eV

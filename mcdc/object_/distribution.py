@@ -15,12 +15,20 @@ from mcdc.constant import (
     DISTRIBUTION_KALBACH_MANN,
     DISTRIBUTION_TABLE_ENERGY_ANGLE,
     DISTRIBUTION_N_BODY,
+    DISTRIBUTION_MIXTURE,
     INTERPOLATION_HISTOGRAM,
     INTERPOLATION_LINEAR,
     REFERENCE_FRAME_COM,
+    PROBABILITY_TOLERANCE,
 )
 from mcdc.object_.base import MCDCPolymorphic
-from mcdc.object_.data import DataBase, DataNone, DataTable, decode_interpolation
+from mcdc.object_.data import (
+    DataBase,
+    DataNone,
+    DataPolynomial,
+    DataTable,
+    decode_interpolation,
+)
 from mcdc.object_.util import (
     cdf_from_pdf,
     pdf_from_cdf,
@@ -849,6 +857,112 @@ class DistributionNBody(DistributionBase):
 
 
 # ======================================================================================
+# Mixture
+# ======================================================================================
+
+
+class DistributionMixture(DistributionBase):
+    """Select one component using incident-energy-dependent probability Data.
+
+    Each probability is a Data polynomial or table evaluated at incident energy
+    in eV. Tables retain independent grids, interpolation regions, and constant
+    endpoint extrapolation. Evaluated probabilities must be finite, nonnegative,
+    and sum to one within PROBABILITY_TOLERANCE. Every selected component uses
+    the containing field's sampled quantities and reference frame.
+
+    Components may themselves be mixtures. Separate angular distributions and
+    joint energy-angle distributions must remain consistent throughout a reaction.
+    """
+
+    label = "mixture_distribution"
+    sub_type = DISTRIBUTION_MIXTURE
+
+    probabilities: list[DataBase]
+    components: list[DistributionBase]
+
+    def __init__(self, probabilities, components):
+        super().__init__()
+        self.probabilities = list(probabilities)
+        self.components = list(components)
+        if not self.components or len(self.probabilities) != len(self.components):
+            raise ValueError("A mixture requires one probability per component")
+        if any(
+            not isinstance(item, DistributionBase) or isinstance(item, DistributionNone)
+            for item in self.components
+        ):
+            raise ValueError("Mixture components must be sampleable Distributions")
+        for probability in self.probabilities:
+            _validate_mixture_probability(probability)
+        if all(
+            isinstance(item, DataPolynomial) and len(item.coefficients) == 1
+            for item in self.probabilities
+        ):
+            total = sum(item.coefficients[0] for item in self.probabilities)
+            if not 1.0 - PROBABILITY_TOLERANCE <= total <= 1.0 + PROBABILITY_TOLERANCE:
+                raise ValueError("Mixture probabilities must sum to one")
+
+    def __repr__(self):
+        text = super().__repr__()
+        for i, (probability, component) in enumerate(
+            zip(self.probabilities, self.components)
+        ):
+            text += f"  - Component {i}: {component.label} [ID: {component.ID}]\n"
+            text += f"    Probability: {probability.label} [ID: {probability.ID}]\n"
+        return text
+
+
+def _validate_mixture_probability(probability):
+    """Check probability Data and interpolation domains before runtime packing.
+
+    Polynomial values and the sum of independently interpolated functions are
+    checked by the sampler at the actual incident energy. Constant polynomials
+    and tabulated ordinates can also be bounded here.
+    """
+    if isinstance(probability, DataPolynomial):
+        coefficients = probability.coefficients
+        if not len(coefficients) or not np.all(np.isfinite(coefficients)):
+            raise ValueError(
+                "Mixture polynomial coefficients must be finite and nonempty"
+            )
+        if (
+            len(coefficients) == 1
+            and not 0.0 <= coefficients[0] <= 1.0 + PROBABILITY_TOLERANCE
+        ):
+            raise ValueError("Mixture probabilities must lie in [0, 1]")
+    elif isinstance(probability, DataTable):
+        x, y = probability.x, probability.y
+        if (
+            len(x) < 2
+            or not np.all(np.isfinite(x))
+            or np.any(np.diff(x) < 0)
+            or x[-1] <= x[0]
+            or not np.all(np.isfinite(y))
+            or np.any(y < 0)
+            or np.any(y > 1.0 + PROBABILITY_TOLERANCE)
+        ):
+            raise ValueError(
+                "Mixture probability tables require finite ordered coordinates and probabilities in [0, 1]"
+            )
+        laws, boundaries = _distribution_regions(
+            len(x), probability.interpolations, probability.interpolation_boundaries
+        )
+        start = 0
+        for law, end in zip(laws, boundaries):
+            active = x[start + 1 : end] > x[start : end - 1]
+            name = decode_interpolation(law)
+            if name in ("semilog-x", "log") and np.any(x[start : end - 1][active] <= 0):
+                raise ValueError("Logarithmic probability coordinates must be positive")
+            if name in ("semilog-y", "log") and (
+                np.any(y[start : end - 1][active] <= 0)
+                or np.any(y[start + 1 : end][active] <= 0)
+            ):
+                raise ValueError("Logarithmic probability ordinates must be positive")
+            start = end - 1
+    else:
+        raise ValueError("Mixture probabilities must be Data polynomials or tables")
+
+
+# ======================================================================================
 # Independent and joint angle-energy validation
 # ======================================================================================
 
@@ -863,6 +977,9 @@ def validate_angle_energy(angular, spectra, path, reference_frame=None):
     """
     joint = (DistributionKalbachMann, DistributionTableEnergyAngle, DistributionNBody)
     for spectrum in spectra:
+        if isinstance(spectrum, DistributionMixture):
+            validate_angle_energy(angular, spectrum.components, path, reference_frame)
+            continue
         if (
             isinstance(spectrum, DistributionNBody)
             and reference_frame is not None

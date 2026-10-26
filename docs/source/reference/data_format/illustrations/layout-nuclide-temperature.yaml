@@ -69,9 +69,7 @@ projectiles/:
         # Category-specific
         multiplicity: integer
         angular-cosine-distribution: Distribution, cosine  # Omit for a joint energy-angle spectrum
-        spectrum-probability-grid: float [B + 1], eV  # Incident-energy bin edges
-        spectrum-probability: float [B, S]  # Probabilities for S spectra in B bins
-        energy-spectrum-{i}: Distribution, eV  # May jointly sample energy and angle
+        energy-distribution: Distribution, eV  # Mixtures select among multiple spectra
 
 
       neutron-emission-2/:
@@ -88,9 +86,7 @@ projectiles/:
         # Category-specific
         multiplicity: 2
         angular-cosine-distribution: Distribution, cosine  # Omit for a joint energy-angle spectrum
-        spectrum-probability-grid: float [B + 1], eV  # Incident-energy bin edges
-        spectrum-probability: float [B, S]  # Probabilities for S spectra in B bins
-        energy-spectrum-{i}: Distribution, eV  # May jointly sample energy and angle
+        energy-distribution: Distribution, eV  # Mixtures select among multiple spectra
 
 
       fission-total/:

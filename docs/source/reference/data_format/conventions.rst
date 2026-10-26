@@ -78,7 +78,6 @@ An excited-state identifier appends ``m`` and its nonzero state index, such as `
 The temperature token is a decimal value in kelvin and must agree with the file's ``temperature`` dataset.
 
 Indexed records use contiguous zero-based decimal string names: ``0``, ``1``, and so on.
-An index embedded in a name follows the same rule, for example ``energy-spectrum-0``.
 Record identity follows the numeric index, not HDF5 iteration order or lexicographic sorting.
 Indices shared by related arrays and groups identify the same record.
 

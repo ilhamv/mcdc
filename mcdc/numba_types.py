@@ -229,6 +229,15 @@ maxwellian_distribution = into_dtype([
     ('base_ID', int64),
 ])
 
+mixture_distribution = into_dtype([
+    ('N_probability', int64),
+    ('probability_IDs_offset', int64),
+    ('N_component', int64),
+    ('component_IDs_offset', int64),
+    ('ID', int64),
+    ('base_ID', int64),
+])
+
 multi_table_distribution = into_dtype([
     ('grid_offset', int64),
     ('grid_length', int64),
@@ -670,14 +679,7 @@ neutron_fission_reaction = into_dtype([
 neutron_inelastic_scattering_reaction = into_dtype([
     ('multiplicity', int64),
     ('mu_ID', int64),
-    ('N_spectrum_probability_bin', int64),
-    ('N_spectrum', int64),
-    ('spectrum_probability_grid_offset', int64),
-    ('spectrum_probability_grid_length', int64),
-    ('spectrum_probability_offset', int64),
-    ('spectrum_probability_length', int64),
-    ('N_energy_spectrum', int64),
-    ('energy_spectrum_IDs_offset', int64),
+    ('spectrum_ID', int64),
     ('ID', int64),
     ('base_ID', int64),
 ])
@@ -1013,6 +1015,8 @@ def make_simulation_type(N: dict):
         ('N_level_scattering_distribution', int64),
         ('maxwellian_distributions', maxwellian_distribution, (N['maxwellian_distribution'])),
         ('N_maxwellian_distribution', int64),
+        ('mixture_distributions', mixture_distribution, (N['mixture_distribution'])),
+        ('N_mixture_distribution', int64),
         ('multi_table_distributions', multi_table_distribution, (N['multi_table_distribution'])),
         ('N_multi_table_distribution', int64),
         ('nbody_distributions', nbody_distribution, (N['nbody_distribution'])),

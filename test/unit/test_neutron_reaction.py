@@ -339,11 +339,14 @@ def test_multiple_spectra_are_alternatives_for_each_neutron(
             file["projectiles/neutron/reactions"], "n2n", "inelastic-scattering"
         )
         group["multiplicity"] = 2
-        group["spectrum-probability-grid"] = [1.0, 100.0]
-        group["spectrum-probability"] = [[1.0, 0.0]]
+        mixture = group.create_group("energy-distribution")
+        mixture.attrs["type"] = "mixture"
+        components = mixture.create_group("components")
         group.create_group("angular-cosine-distribution").attrs["type"] = "isotropic"
         for index, fraction in enumerate([0.2, 0.8]):
-            spectrum = group.create_group(f"energy-spectrum-{index}")
+            component = components.create_group(str(index))
+            constant(component.create_group("probability"), 1.0 if index == 0 else 0.0)
+            spectrum = component.create_group("distribution")
             spectrum.attrs["type"] = "level-scattering"
             spectrum["C1"], spectrum["C2"] = 0.0, fraction
     container, data = prepare_library(prepare_simulation)
@@ -404,9 +407,7 @@ def test_nbody_reaction_energy_scale_and_com_transformation(
         else:
             group = basic_reaction(reactions, "nbody", category)
             group["multiplicity"] = 1
-            group["spectrum-probability-grid"] = [1.0, 100.0]
-            group["spectrum-probability"] = [[1.0]]
-            spectrum = group.create_group("energy-spectrum-0")
+            spectrum = group.create_group("energy-distribution")
         group["reference-frame"][()] = "COM"
         group["Q-value"][()] = -2.0
         spectrum.attrs["type"] = "n-body"
@@ -548,3 +549,86 @@ def test_numeric_indices_and_format_validation(tmp_path):
         file.attrs["format-version"] = "9.0.0"
         with pytest.raises(ValueError, match="9.0.0"):
             check_format(file)
+
+
+@pytest.mark.parametrize("category", ["fission", "inelastic-scattering"])
+def test_ace_multiple_spectra_select_by_energy_in_both_reaction_categories(
+    library, prepare_simulation, category
+):
+    """The same converted mixture drives scattering and actual prompt emission."""
+    from pathlib import Path
+    import sys
+    from types import SimpleNamespace
+
+    ACEtk = pytest.importorskip("ACEtk")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+    from data_library_generator.common.ace_converter import write_reaction
+    from mcdc import numba_types
+
+    source = ACEtk.continuous.MultiDistributionData(
+        [
+            ACEtk.continuous.DistributionProbability([1e-6, 1e-5], [1.0, 0.0]),
+            ACEtk.continuous.DistributionProbability(
+                [1e-6, 5.5e-6, 1e-5], [0.0, 0.5, 1.0]
+            ),
+        ],
+        [
+            ACEtk.continuous.LevelScatteringDistribution(1e-6, 1e-5, 0.0, fraction)
+            for fraction in [0.2, 0.8]
+        ],
+    )
+    ace = SimpleNamespace(
+        cross_section_block=SimpleNamespace(
+            cross_sections=lambda index: [1.0, 1.0, 1.0],
+            energy_index=lambda index: 1,
+        ),
+        reaction_qvalue_block=SimpleNamespace(q_value=lambda index: 0.0),
+        frame_and_multiplicity_block=SimpleNamespace(
+            reference_frame=lambda index: ACEtk.ReferenceFrame.Laboratory,
+            multiplicity=lambda index: 1,
+        ),
+        angular_distribution_block=SimpleNamespace(
+            angular_distribution_data=lambda index: ACEtk.continuous.FullyIsotropicDistribution()
+        ),
+        energy_distribution_block=SimpleNamespace(
+            energy_distribution_data=lambda index: source
+        ),
+        fission_multiplicity_block=SimpleNamespace(
+            has_prompt_and_total_fission_multiplicity=True,
+            multiplicity=SimpleNamespace(type=1, coefficients=[1.0]),
+        ),
+        delayed_fission_multiplicity_block=None,
+        delayed_neutron_precursor_block=None,
+    )
+    with h5py.File(library / "H2-293.6K.h5", "a") as file:
+        reactions = file["projectiles/neutron/reactions"]
+        write_reaction(
+            reactions.create_group("reaction"),
+            ace,
+            18 if category == "fission" else 16,
+            1,
+            category,
+            3,
+        )
+    container, data = prepare_library(prepare_simulation)
+    simulation = container[0]
+    sampler = (
+        native.sample_fission
+        if category == "fission"
+        else native.sample_inelastic_scattering
+    )
+    for energy, expected in [(1.0, 0.2), (10.0, 8.0)]:
+        particle = np.zeros(1, dtype=numba_types.particle)
+        particle[0]["E"], particle[0]["w"] = energy, 1.0
+        particle[0]["ux"], particle[0]["rng_seed"] = 1.0, 1234567
+        interaction = np.zeros(1, dtype=numba_types.interaction_data)
+        sampler(
+            simulation["neutron_reactions"][0],
+            particle,
+            interaction,
+            simulation["nuclides"][0],
+            simulation,
+            data,
+        )
+        assert particle[0]["alive"]
+        assert particle[0]["E"] == pytest.approx(expected)

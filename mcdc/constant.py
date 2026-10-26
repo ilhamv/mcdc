@@ -10,6 +10,7 @@ PI_SQRT = math.sqrt(PI)
 
 TINY = 1e-10
 INF = 1e10
+PROBABILITY_TOLERANCE = 1.0e-6
 
 
 # ======================================================================================
@@ -105,6 +106,7 @@ DISTRIBUTION_MAXWELLIAN = 6
 DISTRIBUTION_KALBACH_MANN = 7
 DISTRIBUTION_TABLE_ENERGY_ANGLE = 8
 DISTRIBUTION_N_BODY = 9
+DISTRIBUTION_MIXTURE = 10
 
 # Reference frames
 REFERENCE_FRAME_LAB = 0

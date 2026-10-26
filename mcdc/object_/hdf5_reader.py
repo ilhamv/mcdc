@@ -12,6 +12,7 @@ from mcdc.constant import INTERPOLATION_LINEAR, REFERENCE_FRAME_COM, REFERENCE_F
 from mcdc.object_.data import DataPolynomial, DataTable, encode_interpolation
 from mcdc.object_.distribution import (
     DistributionIsotropic,
+    DistributionMixture,
     DistributionTable,
     DistributionMultiTable,
     DistributionLevelScattering,
@@ -177,8 +178,16 @@ def read_distribution(group):
     Nested tables retain their own density interpolation. Incident-energy
     interpolation is carried separately, so angular sampling can interpolate
     probabilities while outgoing energies additionally use unit-base scaling.
+    Mixtures compose recursively loaded component Distributions and probability
+    Data without imposing a shared probability grid.
     """
     kind = text(group.attrs["type"])
+    if kind == "mixture":
+        components = numbered_groups(group["components"])
+        return DistributionMixture(
+            [read_data(component["probability"]) for component in components],
+            [read_distribution(component["distribution"]) for component in components],
+        )
     if kind == "isotropic":
         return DistributionIsotropic()
     if kind == "table":

@@ -11,6 +11,8 @@ import mcdc.transport.rng as rng
 from mcdc.constant import (
     DISTRIBUTION_ISOTROPIC,
     DISTRIBUTION_NONE,
+    DISTRIBUTION_MIXTURE,
+    PROBABILITY_TOLERANCE,
     DISTRIBUTION_EVAPORATION,
     DISTRIBUTION_KALBACH_MANN,
     DISTRIBUTION_LEVEL_SCATTERING,
@@ -37,6 +39,52 @@ from mcdc.transport.linalg import make_direction_basis
 
 
 @njit
+def resolve_mixture(E, distribution, rng_state, simulation, data):
+    """Select mixture leaves using probability Data at the incident energy.
+
+    Each table clamps to its own endpoints. Probabilities retain their source
+    interpolation and must sum to one within the source-precision tolerance;
+    only that residual is removed when locating the categorical draw.
+    """
+    while distribution["sub_type"] == DISTRIBUTION_MIXTURE:
+        mixture = simulation["mixture_distributions"][distribution["sub_ID"]]
+        total = 0.0
+        last_positive = 0
+        for i in range(mixture["N_probability"]):
+            ID = mcdc_get.mixture_distribution.probability_IDs(i, mixture, data)
+            probability = evaluate_data_clamped(
+                E, simulation["data"][ID], simulation, data
+            )
+            if not math.isfinite(probability) or probability < 0.0:
+                raise ValueError("Mixture probabilities must be finite and nonnegative")
+            total += probability
+            if probability > 0.0:
+                last_positive = i
+        if (
+            not math.isfinite(total)
+            or not 1.0 - PROBABILITY_TOLERANCE <= total <= 1.0 + PROBABILITY_TOLERANCE
+        ):
+            raise ValueError(
+                "Mixture probabilities must sum to one at the incident energy"
+            )
+        threshold = rng.lcg(rng_state) * total
+        cumulative = 0.0
+        selected = last_positive
+        for i in range(mixture["N_probability"]):
+            ID = mcdc_get.mixture_distribution.probability_IDs(i, mixture, data)
+            probability = evaluate_data_clamped(
+                E, simulation["data"][ID], simulation, data
+            )
+            cumulative += probability
+            if probability > 0.0 and threshold < cumulative:
+                selected = i
+                break
+        ID = mcdc_get.mixture_distribution.component_IDs(selected, mixture, data)
+        distribution = simulation["distributions"][ID]
+    return distribution
+
+
+@njit
 def sample_normal(rng_state):
     """Sample a standard normal using the particle's reproducible RNG stream."""
     # Box-Muller transform; 1 - xi keeps the logarithm's argument positive.
@@ -57,6 +105,7 @@ def sample_distribution_with_scale(E, distribution, rng_state, simulation, data)
 
 @njit
 def _sample_distribution(E, distribution, rng_state, simulation, data, scale):
+    distribution = resolve_mixture(E, distribution, rng_state, simulation, data)
     distribution_type = distribution["sub_type"]
     ID = distribution["sub_ID"]
 
@@ -130,6 +179,7 @@ def sample_correlated_distribution_with_scale(
 def _sample_correlated_distribution(
     E, distribution, rng_state, simulation, data, scale, atomic_weight_ratio, q_value
 ):
+    distribution = resolve_mixture(E, distribution, rng_state, simulation, data)
     distribution_type = distribution["sub_type"]
     ID = distribution["sub_ID"]
 

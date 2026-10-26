@@ -28,45 +28,45 @@ The ``mcdc-data`` column gives the Distribution's ``type`` attribute.
      - Object class
      - Transport sampler
      - Sampling and constraints
-   * - 3
+   * - :ref:`3 <ace-law-3>`
      - Level scattering
-     - ``level-scattering``
+     - :ref:`level-scattering <ace-analytic-sampling>`
      - ``DistributionLevelScattering``
      - ``sample_level_scattering``
      - Separate angular Distribution
-   * - 4
+   * - :ref:`4 <ace-law-4>`
      - Tabulated outgoing energy
-     - ``multi-table``
+     - :ref:`multi-table <ace-multi-table-sampling>`
      - ``DistributionMultiTable``
      - ``_sample_multi_table``
      - Continuous, discrete, or mixed; corresponding discrete lines; histogram or linear incident-energy interpolation; separate angular Distribution
-   * - 7
+   * - :ref:`7 <ace-law-7>`
      - Simple Maxwellian fission spectrum
-     - ``maxwellian``
+     - :ref:`maxwellian <ace-analytic-sampling>`
      - ``DistributionMaxwellian``
      - ``sample_maxwellian``
      - Separate angular Distribution
-   * - 9
+   * - :ref:`9 <ace-law-9>`
      - Evaporation spectrum
-     - ``evaporation``
+     - :ref:`evaporation <ace-analytic-sampling>`
      - ``DistributionEvaporation``
      - ``sample_evaporation``
      - Separate angular Distribution
-   * - 44
+   * - :ref:`44 <ace-law-44>`
      - Kalbach–Mann energy-angle model
-     - ``kalbach-mann``
+     - :ref:`kalbach-mann <ace-joint-sampling>`
      - ``DistributionKalbachMann``
      - ``sample_kalbach_mann``
      - Continuous energy PDFs; histogram or linear incident-energy interpolation; joint angle sampling
-   * - 61
+   * - :ref:`61 <ace-law-61>`
      - Tabulated energy with conditional angle
-     - ``energy-angle-table``
+     - :ref:`energy-angle-table <ace-joint-sampling>`
      - ``DistributionTableEnergyAngle``
      - ``sample_table_energy_angle``
      - Continuous energy and cosine PDFs; histogram or linear incident-energy interpolation; joint angle sampling
-   * - 66
+   * - :ref:`66 <ace-law-66>`
      - N-body phase space
-     - ``n-body``
+     - :ref:`n-body <ace-joint-sampling>`
      - ``DistributionNBody``
      - ``_sample_correlated_distribution`` (N-body branch)
      - COM frame; dimensionless energy-fraction PDF; isotropic COM emission
@@ -74,19 +74,94 @@ The ``mcdc-data`` column gives the Distribution's ``type`` attribute.
 Laws 1, 2, 5, 11, 22, 24, 33, and 67 are not accepted by the converter.
 LAW 4's discrete-line support does not imply conversion support for LAW 2.
 
+Angular representations
+-----------------------
+
+Separate angular data come from ACE's LAND/AND blocks rather than the numbered energy laws above.
+
+.. list-table:: Angular representation mapping
+   :header-rows: 1
+   :widths: 25 20 25 30
+
+   * - ACE representation
+     - ``mcdc-data``
+     - Object class
+     - Transport handling
+   * - Fully isotropic angular distribution
+     - :ref:`isotropic <ace-isotropic-sampling>`
+     - ``DistributionIsotropic``
+     - ``sample_isotropic_cosine``
+   * - Single tabulated PDF or equiprobable-bin entry
+     - :ref:`table <ace-table-sampling>`
+     - ``DistributionTable``
+     - ``sample_table``
+   * - Incident-energy-dependent angular sequences
+     - :ref:`multi-table <ace-multi-table-sampling>`
+     - ``DistributionMultiTable``
+     - ``_sample_multi_table`` without outgoing-energy support scaling
+   * - Angles supplied by a joint energy-angle law
+     - Angular field omitted
+     - ``DistributionNone`` for the separate angular field
+     - Angle sampled together with energy by law 44, 61, or 66
+
+Tabulated cosine PDFs retain their interpolation rules.
+Equiprobable-bin entries become histogram PDFs with probability 1/32 in each bin.
+Isotropic entries within a sequence become uniform cosine PDFs on [-1, 1].
+The three entry types may appear together in one angular MultiTable.
+A single incident-energy entry supplies the same angular distribution at every energy.
+An omitted angular field denotes joint angle sampling, not isotropy.
+
+Sampling reusable distributions
+-------------------------------
+
+The procedures below compose the reusable Distributions used by the ACE laws.
+Incident energy E and outgoing energy E' are in eV, and the reaction declares the sampling reference frame.
+The scattering cosine :math:`\mu` is relative to the incident direction.
+
+.. _ace-isotropic-sampling:
+
+Isotropic angles
+^^^^^^^^^^^^^^^^
+
+``isotropic`` samples :math:`\mu=2\xi-1` for a uniform random number :math:`\xi` in [0, 1].
+A full direction also uses a uniform azimuth in [0, :math:`2\pi`).
+
+.. _ace-table-sampling:
+
+Table: discrete outcomes and continuous density
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``table`` combines exact discrete outcomes with a continuous PDF, using their combined probability.
+The continuous CDF is obtained by integrating the density under each segment's interpolation rule.
+Sampling uses one uniform random number:
+
+1. Compare the draw with the cumulative discrete probabilities.
+2. If it selects a discrete outcome, return that outcome's stored value.
+3. Otherwise subtract the total discrete probability and invert the continuous CDF at the remaining cumulative mass.
+
+The same draw selects the discrete or continuous component and locates the outcome within it.
+A purely discrete or purely continuous table uses only its corresponding branch.
+Histogram and linear density segments have analytic inverses; logarithmic segments use bounded inversion.
+Standalone and packed tables use this same density-segment inversion.
+See :ref:`LAW 4 <ace-law-4>` for ACE's discrete-line and continuous-background representation.
+
+.. _ace-multi-table-sampling:
 .. _ace-incident-energy-sampling:
 
-Incident-energy table sampling
-------------------------------
+Multi-table: incident-energy interpolation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Laws 4, 44, and 61 use conditional tables indexed by incident energy.
+``multi-table`` uses conditional probability tables indexed by incident energy.
+Laws 44 and 61 share its incident-table selection and outgoing-energy support scaling, with their own conditional angle sampling.
 Each interpolation region supports histogram or linear dependence.
 Histogram dependence uses the lower table without support scaling.
 For linear dependence at E between neighboring incident energies E0 and E1, define :math:`t=(E-E_0)/(E_1-E_0)`.
-For continuous-only tables, select the lower or upper table with probabilities 1 - t and t, then sample its outgoing-energy PDF using that table's density interpolation.
-LAW 4 separates discrete-line selection from continuous sampling as described below.
+For continuous-only tables, select the lower or upper table with probabilities 1 - t and t, then :ref:`invert its continuous CDF <ace-table-sampling>`.
+For discrete or mixed tables, interpolate corresponding line probabilities and coordinates first, then select a line or the continuous background.
+If the continuous background is selected, choose an endpoint table using weights that include its continuous probability.
+The :ref:`LAW 4 procedure <ace-law-4>` gives the line interpolation and conditional weights.
 
-The sampled energy is mapped into the interpolated support using unit-base scaling.
+The sampled continuous energy is mapped into the interpolated support using unit-base scaling.
 If the selected table has support [a, b] and supplies a sample y, the outgoing energy is
 
 .. math::
@@ -105,18 +180,63 @@ Repeated incident energies describe a discontinuity; sampling at that energy use
 The converter preserves ACE's incident-energy ``NBT``/``INT`` regions, with linear interpolation when ``NR = 0``.
 Incident interpolation is distinct from the within-PDF ``INTT`` flag, for which ACE permits histogram or linear segments.
 Other incident interpolation codes are not converted.
+The source definitions appear in the `ACE energy-distribution reference <https://github.com/NuclearData/ACEFormat/blob/master/src/ContinuousEnergyNeutron.tex>`_.
+
+.. _ace-mixture-sampling:
+
+Mixture: selecting a component distribution
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``mixture`` selects among complete component Distributions at the incident energy:
+
+1. Evaluate each component's probability Data :math:`p_i(E)` using its own interpolation rules.
+2. Draw a uniform random number and select a component from the cumulative probabilities.
+3. Invoke that component's sampler at the same incident energy E.
+
+The selected sampler then performs its own PDF/PMF selection, incident-table interpolation, or analytic sampling.
+Probability tables retain independent grids and clamp to their own endpoint values outside those grids.
+The probabilities must be finite, nonnegative, and sum to one within the :ref:`format's probability tolerance <distribution-mixture>`.
+The sampler accounts for the allowed rounding residual when selecting a component.
+For example, probabilities [0.3, 0.7] select an evaporation spectrum 30% of the time and a Maxwellian spectrum 70% of the time.
+A selected component may be a table, multi-table, analytic spectrum, joint distribution, or another mixture.
+Nested mixtures repeat the component-selection procedure.
+All components supply the same sampled quantities in the containing field's reference frame.
+
+Inelastic reactions and prompt fission use this representation for multiple spectra.
+ACE applicability functions supply the component probability Data; absent interpolation regions imply linear interpolation, and constant functions become Data polynomials.
+Inelastic conversion also represents a sole spectrum as a one-component mixture.
+The object model uses ``DistributionMixture``, and transport's ``resolve_mixture`` selects the component before invoking its sampler.
+
+.. _ace-analytic-sampling:
+
+Analytic energy distributions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``level-scattering`` evaluates a deterministic outgoing energy without an energy random draw, as defined by :ref:`LAW 3 <ace-law-3>`.
+``maxwellian`` and ``evaporation`` evaluate their spectral-temperature Data at E, then sample their analytic spectra subject to the energy restriction.
+Their densities and rejection-sampling behavior are described under :ref:`LAW 7 <ace-law-7>` and :ref:`LAW 9 <ace-law-9>`.
+These energy distributions use a separate angular Distribution.
+
+.. _ace-joint-sampling:
+
+Joint energy-angle distributions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``kalbach-mann`` and ``energy-angle-table`` first select an incident table and sample outgoing energy using :ref:`ace-incident-energy-sampling`.
+They then sample a conditional cosine from that same incident table, using the analytic model in :ref:`LAW 44 <ace-law-44>` or the cosine PDFs in :ref:`LAW 61 <ace-law-61>`.
+``n-body`` samples a dimensionless energy fraction from its PDF, applies the incident-energy-dependent COM energy scale, and independently samples an isotropic COM cosine as described in :ref:`LAW 66 <ace-law-66>`.
+The reaction applies any required transformation to the laboratory frame after sampling both energy and angle.
 
 Sampling by law
 ---------------
 
-The descriptions below use incident energy E, outgoing energy E', and scattering cosine :math:`\mu`.
-Energies are in eV, and the reaction declares the sampling reference frame.
+The descriptions below give the law-specific models and build on the shared sampling procedures above.
 Laws 3, 4, 7, and 9 use a separate angular Distribution; laws 44, 61, and 66 supply both energy and angle.
 
 .. _ace-law-3:
 
 LAW 3: Level scattering
-^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^
 
 The outgoing energy is deterministic at a given incident energy:
 
@@ -131,7 +251,7 @@ The reaction samples its separate angular Distribution and transforms the result
 .. _ace-law-4:
 
 LAW 4: Tabulated outgoing energy
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Each incident energy supplies a continuous PDF, a discrete PMF, or both.
 The converter separates ACE's leading discrete entries from the continuous background and packs both components into ``multi-table``.
@@ -159,7 +279,7 @@ Select the lower or upper continuous table with conditional probabilities :math:
 These weights preserve the interpolated continuous contribution when the discrete probabilities change with incident energy.
 Invert the selected continuous CDF and apply :ref:`unit-base scaling <ace-incident-energy-sampling>` using the continuous support only.
 If a continuous component is absent at one endpoint, retain the other endpoint's support.
-Histogram and linear density segments have analytic inverses; logarithmic segments use bounded inversion.
+The selected continuous CDF uses the shared :ref:`table inversion procedure <ace-table-sampling>`.
 The separate angular Distribution is sampled independently of outgoing energy at the given incident energy.
 
 The separate treatment of line probabilities, line energies, and the continuous background follows the `MCNP LAW 4 description (pages 2-42–2-43) <https://mcnpx.lanl.gov/pdf_files/TechReport_2003_LANL_LA-UR-03-1987Revised212008_SweezyBoothEtAl.pdf#page=76>`_.
@@ -167,7 +287,7 @@ The separate treatment of line probabilities, line energies, and the continuous 
 .. _ace-law-7:
 
 LAW 7: Simple Maxwellian fission spectrum
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The outgoing-energy density has the form
 
@@ -185,7 +305,7 @@ The spectrum is normalized over its permitted interval, and its angle is supplie
 .. _ace-law-9:
 
 LAW 9: Evaporation spectrum
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The outgoing-energy density has the form
 
@@ -203,7 +323,7 @@ The angle is sampled from a separate angular Distribution.
 .. _ace-law-44:
 
 LAW 44: Kalbach–Mann
-^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^
 
 This joint distribution combines an outgoing-energy PDF with an analytic conditional cosine density:
 
@@ -228,7 +348,7 @@ The energy and angle come from the same selected incident table; no separate ang
 .. _ace-law-61:
 
 LAW 61: Tabulated energy-angle distribution
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This joint distribution replaces the analytic Kalbach–Mann cosine law with tabulated conditional cosine PDFs.
 There is one cosine table for each outgoing-energy point in each incident table.
@@ -245,7 +365,7 @@ MC/DC applies the same CDF-distance rule to the logarithmic density interpolatio
 .. _ace-law-66:
 
 LAW 66: N-body phase space
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 For N final-state bodies, the normalized energy fraction x has density
 
@@ -270,56 +390,15 @@ Here A is the target-to-projectile mass ratio and Q is the reaction Q-value in e
 The energy scale is zero when no positive energy is available.
 The maximum-energy relation is defined by `ACE LAW 66 <https://github.com/NuclearData/ACEFormat/blob/master/src/ContinuousEnergyNeutron.tex#L867>`_.
 
-Emission is isotropic in COM and independent of outgoing COM energy, so transport samples :math:`\mu=2\xi-1` with an independent uniform random number.
+Emission is isotropic in COM and independent of outgoing COM energy, so transport uses the :ref:`isotropic cosine sampler <ace-isotropic-sampling>` with an independent random number.
 The reaction requires ``reference-frame = COM`` and has no separate angular-cosine Distribution.
 Emission in the laboratory frame is generally anisotropic after the kinematic transformation.
 The dimensionless density supports all five Interpolation laws and multiple regions in ``mcdc-data``; ACE supplies histogram or linear interpolation.
 
-Angular representations
------------------------
+Runtime dispatch
+----------------
 
-Separate angular data come from ACE's LAND/AND blocks rather than the numbered energy laws above.
-
-.. list-table:: Angular representation mapping
-   :header-rows: 1
-   :widths: 25 20 25 30
-
-   * - ACE representation
-     - ``mcdc-data``
-     - Object class
-     - Transport handling
-   * - Fully isotropic angular distribution
-     - ``isotropic``
-     - ``DistributionIsotropic``
-     - ``sample_isotropic_cosine``
-   * - Single tabulated PDF or equiprobable-bin entry
-     - ``table``
-     - ``DistributionTable``
-     - ``sample_table``
-   * - Incident-energy-dependent angular sequences
-     - ``multi-table``
-     - ``DistributionMultiTable``
-     - ``_sample_multi_table`` without outgoing-energy support scaling
-   * - Angles supplied by a joint energy-angle law
-     - Angular field omitted
-     - ``DistributionNone`` for the separate angular field
-     - Angle sampled together with energy by law 44, 61, or 66
-
-Tabulated cosine PDFs retain their interpolation rules.
-Equiprobable-bin entries become histogram PDFs with probability 1/32 in each bin.
-Isotropic entries within a sequence become uniform cosine PDFs on [-1, 1].
-The three entry types may appear together in one angular MultiTable.
-A single incident-energy entry supplies the same angular distribution at every energy.
-An omitted angular field denotes joint angle sampling, not isotropy.
-
-Composition and runtime
------------------------
-
-For inelastic reactions with multiple spectra, each component uses one of the energy representations above.
-The reaction's ``spectrum-probability-grid`` and ``spectrum-probability`` fields select the component; no separate mixture Distribution is required.
-Selection probabilities must be constant or histogram tables on a common incident-energy grid.
-Prompt fission accepts one energy-spectrum component, and delayed-neutron spectra use law 4.
-
+Delayed-neutron spectra use :ref:`LAW 4 <ace-law-4>`.
 ``mcdc.object_.hdf5_reader`` constructs the corresponding Distribution and Data objects from the stored groups.
 Compilation places their numeric fields in typed runtime records and flat arrays; transport samples those records without accessing HDF5.
 Scalar energy and angular distributions use ``sample_distribution_with_scale`` and ``sample_distribution``, respectively.

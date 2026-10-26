@@ -95,21 +95,12 @@ Inelastic scattering
    * - ``angular-cosine-distribution``
      - Distribution, conditional
      - Required when the spectra supply energy only; omitted when outgoing angle is supplied jointly with energy.
-   * - ``spectrum-probability-grid``
-     - float [B + 1], eV
-     - Strictly increasing incident-energy bin edges.
-   * - ``spectrum-probability``
-     - float [B, S]
-     - Probability of selecting each of S spectra in each of B bins.
-   * - ``energy-spectrum-{i}``
+   * - ``energy-distribution``
      - Distribution
-     - Outgoing-energy or joint energy-angle distribution for spectrum i.
+     - Outgoing-energy or joint energy-angle distribution; multiple spectra use a :ref:`mixture <distribution-mixture>`.
 
 Multiplicity is positive for this category.
-Spectrum probabilities are nonnegative and each row sums to one.
-The spectrum index runs from zero through S - 1 and matches the second axis of the probability matrix.
-Selection probabilities are constant within each incident-energy bin.
-A single spectrum uses S = 1 with probability one.
+Each outgoing neutron independently samples the energy Distribution.
 Independent angular and energy distributions sample their respective quantities independently at the specified incident energy.
 
 Fission
@@ -127,7 +118,7 @@ Fission
      - Required for an energy-only prompt spectrum; omitted for a joint energy-angle spectrum.
    * - ``prompt-energy-distribution``
      - Distribution
-     - Prompt outgoing-energy or joint energy-angle distribution.
+     - Prompt outgoing-energy or joint energy-angle distribution; multiple spectra use a :ref:`mixture <distribution-mixture>`.
    * - ``prompt-multiplicity``
      - Data
      - Mean prompt neutrons per fission as a function of incident energy in eV.
@@ -195,19 +186,11 @@ Proton inelastic scattering
    * - ``angular-cosine-distribution``
      - Distribution, conditional
      - Required for energy-only spectra; omitted when outgoing angle is supplied jointly with energy.
-   * - ``spectrum-probability-grid``
-     - float [B + 1], eV
-     - Strictly increasing incident-energy bin edges.
-   * - ``spectrum-probability``
-     - float [B, S]
-     - Probability of selecting each of S spectra in each of B bins.
-   * - ``energy-spectrum-{i}``
+   * - ``energy-distribution``
      - Distribution
-     - Outgoing proton energy or joint energy-angle distribution for spectrum i.
+     - Outgoing proton energy or joint energy-angle distribution; multiple spectra use a :ref:`mixture <distribution-mixture>`.
 
 Multiplicity is positive.
-Spectrum probabilities are constant within each incident-energy bin, nonnegative, and sum to one across each row.
-Spectrum indices run from zero through S - 1 and match the probability matrix's second axis.
 For energy-only spectra, the angular distribution is sampled independently at the incident energy.
 
 Electron reactions

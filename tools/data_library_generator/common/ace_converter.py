@@ -19,6 +19,7 @@ import ACEtk
 import numpy as np
 
 from .hdf5_writer import (
+    PROBABILITY_TOLERANCE,
     incident_interpolation,
     interpolation,
     multi_table,
@@ -521,8 +522,8 @@ def write_reaction(group, ace, mt, index, category, energy_count):
     ------
     ValueError
         A source frame is unsupported, cross sections do not extend from
-        their offset to the end of the shared grid, multiple prompt fission
-        spectra are present, or a delegated conversion rejects source data.
+        their offset to the end of the shared grid, or a delegated conversion
+        rejects source data.
 
     Notes
     -----
@@ -533,8 +534,8 @@ def write_reaction(group, ace, mt, index, category, energy_count):
     zero, Q-value zero, and the COM frame.
 
     Capture stops after the common fields. Inelastic reactions add neutron
-    multiplicity, spectrum-selection data, and numbered spectra. Fission
-    adds a single prompt spectrum and reaction-local multiplicities and
+    multiplicity and a mixture Distribution with component probability Data.
+    Fission adds a prompt Distribution and reaction-local multiplicities and
     delayed-neutron data. Separate angular data is written only when ACE
     does not identify it as supplied through the energy-angle distribution.
     This function does not extract cross-species products or validate sums
@@ -588,99 +589,115 @@ def write_reaction(group, ace, mt, index, category, energy_count):
             group, "multiplicity", ace.frame_and_multiplicity_block.multiplicity(index)
         )
         source = ace.energy_distribution_block.energy_distribution_data(index)
-        components = write_spectrum_selection(group, source)
-        for i, component in enumerate(components):
-            write_energy_distribution(
-                group.create_group(f"energy-spectrum-{i}"), component
-            )
+        write_mixture_distribution(group.create_group("energy-distribution"), source)
     elif category == "fission":
         source = ace.energy_distribution_block.energy_distribution_data(index)
-        if isinstance(source, ACEtk.continuous.MultiDistributionData):
-            if source.number_distributions != 1:
-                raise ValueError("Multiple prompt fission spectra are not supported")
-            source = source.distribution(1)
         write_energy_distribution(
             group.create_group("prompt-energy-distribution"), source
         )
         write_fission(group, ace)
 
 
-def write_spectrum_selection(group, source):
-    """Write incident-energy bins and probabilities for selecting spectra.
+def write_mixture_distribution(group, source):
+    """Compose source spectra with their incident-energy probability Data.
 
     Parameters
     ----------
     group : h5py.Group
-        Reaction group receiving ``spectrum-probability-grid`` in eV and
-        dimensionless ``spectrum-probability``.
+        Destination Distribution group. Components are stored under contiguous
+        zero-based ``components/{i}`` groups, each containing ``probability``
+        Data and a ``distribution`` Distribution.
     source : object
-        A single ACEtk energy distribution or ``MultiDistributionData``
-        containing distributions and their selection probability tables.
-
-    Returns
-    -------
-    list
-        Source distribution objects in the same order as probability-matrix
-        columns. The caller writes these as ``energy-spectrum-{i}`` groups.
-
-    Raises
-    ------
-    ValueError
-        Selection probabilities vary without explicit histogram regions,
-        use unsupported interpolation, or have different incident grids.
+        One ACEtk spectrum or MultiDistributionData containing the spectra and
+        their applicability functions. A single spectrum receives probability
+        one as a constant polynomial.
 
     Notes
     -----
-    B bins and S spectra produce an edge grid of length B + 1 and a matrix
-    of shape (B, S). A single distribution gets probability one. Constant
-    selections use one bin with fixed edges 0 and 30 MeV, converted to eV;
-    this envelope is not inferred from the source grid. Source records
-    without interpolation regions must have constant values in each table.
+    Probability tables keep their own incident-energy grids and interpolation
+    regions. Constant probabilities become Data polynomials; varying functions
+    become Data tables with eV inputs and dimensionless values. The source's
+    missing interpolation regions imply linear interpolation. Probabilities are
+    not resampled onto a common grid or renormalized during conversion.
 
-    Energy-dependent selections must all be explicit histograms on exactly
-    the same incident grid. The last probability at the upper endpoint is
-    omitted because it does not define another bin. Source probabilities
-    are copied without renormalization or additional positivity/sum checks.
-    The returned distributions themselves are not written here.
+    Constant mixtures are checked for unit total probability. Transport checks
+    the total at the sampled incident energy for varying functions. Source
+    values must be finite and nonnegative; invalid coordinates, logarithmic
+    domains, interpolation rules, or delegated spectrum conversions raise
+    ValueError. Writes may be partial; the caller owns atomic file publication.
     """
-    # A constant selection is represented by one bin covering 0--30 MeV.
-    grid = np.array([0.0, 30.0 * EV_PER_MEV])
-    if not isinstance(source, ACEtk.continuous.MultiDistributionData):
-        components, probabilities = [source], np.ones((1, 1))
-    else:
-        # Collect spectra and their incident-energy-dependent selection weights
+    if isinstance(source, ACEtk.continuous.MultiDistributionData):
         count = source.number_distributions
-        components = [source.distribution(i + 1) for i in range(count)]
+        spectra = [source.distribution(i + 1) for i in range(count)]
         selections = [source.probability(i + 1) for i in range(count)]
+        if not spectra:
+            raise ValueError("A spectrum mixture must contain at least one component")
         values = [np.asarray(selection.probabilities) for selection in selections]
-        # Represent constant weights by one bin and histogram weights by their bins
-        if all(selection.number_interpolation_regions == 0 for selection in selections):
-            if not all(np.all(value == value[0]) for value in values):
-                raise ValueError(
-                    "Spectrum probabilities require explicit histogram regions when they vary with energy"
-                )
-            probabilities = np.array([[value[0] for value in values]])
-        elif all(
-            selection.number_interpolation_regions > 0
-            and all(code == 1 for code in selection.interpolants)
-            for selection in selections
+        if all(len(value) and np.all(value == value[0]) for value in values):
+            total = sum(value[0] for value in values)
+            if not 1.0 - PROBABILITY_TOLERANCE <= total <= 1.0 + PROBABILITY_TOLERANCE:
+                raise ValueError("Spectrum probabilities must sum to one")
+    else:
+        spectra, selections = [source], [None]
+    group.attrs["type"] = "mixture"
+    components = group.create_group("components")
+    for i, (spectrum, selection) in enumerate(zip(spectra, selections)):
+        component = components.create_group(str(i))
+        _write_distribution_probability(
+            component.create_group("probability"), selection
+        )
+        write_energy_distribution(component.create_group("distribution"), spectrum)
+
+
+def _write_distribution_probability(group, source):
+    """Write one applicability function as polynomial or interpolation-aware Data.
+
+    None denotes a sole spectrum with probability one. Input arrays are checked
+    without changing values; logarithmic regions require positive coordinates
+    or ordinates on every positive-width interval using the respective rule.
+    """
+    if source is None:
+        values, energy = np.array([1.0]), np.array([0.0])
+    else:
+        values = np.asarray(source.probabilities, dtype=float)
+        energy = np.asarray(source.energies, dtype=float) * EV_PER_MEV
+    if (
+        values.ndim != 1
+        or energy.shape != values.shape
+        or not len(values)
+        or not np.all(np.isfinite(values))
+        or np.any(values < 0)
+        or np.any(values > 1.0 + PROBABILITY_TOLERANCE)
+        or not np.all(np.isfinite(energy))
+        or np.any(np.diff(energy) < 0)
+    ):
+        raise ValueError(
+            "Spectrum probabilities require finite ordered energies and values in [0, 1]"
+        )
+    if np.all(values == values[0]):
+        group.attrs["type"] = "polynomial"
+        quantity(group, "coefficients", [values[0]])
+        return
+    if energy[-1] <= energy[0]:
+        raise ValueError(
+            "A varying probability table requires a positive-width energy grid"
+        )
+    laws, boundaries = _interpolation_regions(source.interpolation_data, len(energy))
+    start = 0
+    for law, end in zip(laws, boundaries):
+        active = energy[start + 1 : end] > energy[start : end - 1]
+        if law in ("semilog-x", "log") and np.any(energy[start : end - 1][active] <= 0):
+            raise ValueError("Logarithmic probability coordinates must be positive")
+        if law in ("semilog-y", "log") and (
+            np.any(values[start : end - 1][active] <= 0)
+            or np.any(values[start + 1 : end][active] <= 0)
         ):
-            grid = np.asarray(selections[0].energies) * EV_PER_MEV
-            if not all(
-                np.array_equal(grid, np.asarray(selection.energies) * EV_PER_MEV)
-                for selection in selections
-            ):
-                raise ValueError("Spectrum probabilities must use a common energy grid")
-            # Each bin uses its lower-edge probability; the final edge has no bin
-            probabilities = np.column_stack([value[:-1] for value in values])
-        else:
-            raise ValueError(
-                "Spectrum probabilities must be constant or histogram tables on a common grid"
-            )
-    # Store the bin edges and the matching bin-by-spectrum probability matrix
-    quantity(group, "spectrum-probability-grid", grid, "eV")
-    quantity(group, "spectrum-probability", probabilities)
-    return components
+            raise ValueError("Logarithmic probability ordinates must be positive")
+        start = end - 1
+    group.attrs["type"] = "table"
+    quantity(group, "grid", energy, "eV")
+    quantity(group, "value", values)
+    interpolation(group, len(energy), laws, boundaries)
 
 
 # ======================================================================================
@@ -937,12 +954,12 @@ def write_energy_distribution(group, source):
     Parameters
     ----------
     group : h5py.Group
-        Empty destination group for a single distribution, not a mixture's
-        selection probabilities.
+        Empty destination for a Distribution, including a mixture and its
+        component probability Data.
     source : object
         ACEtk level-scattering, evaporation, simple Maxwellian fission,
         N-body phase-space, outgoing-energy table, Kalbach--Mann, or
-        energy-angle table distribution object.
+        energy-angle table, or MultiDistributionData object.
 
     Raises
     ------
@@ -982,11 +999,14 @@ def write_energy_distribution(group, source):
     group. They are independent of each table's PDF interpolation.
 
     Source interpolation within each PDF or parameter table is retained.
-    Selection among multiple spectra is handled by ``write_spectrum_selection``.
+    Multiple spectra compose their probability Data and distributions through
+    ``write_mixture_distribution``.
     Existing objects are not replaced, and an error can leave partial output
     in the destination group; the caller owns file publication and cleanup.
     """
-    if isinstance(source, ACEtk.continuous.LevelScatteringDistribution):
+    if isinstance(source, ACEtk.continuous.MultiDistributionData):
+        write_mixture_distribution(group, source)
+    elif isinstance(source, ACEtk.continuous.LevelScatteringDistribution):
         # Preserve the deterministic relationship between incident and outgoing energy
         group.attrs["type"] = "level-scattering"
         quantity(group, "C1", source.C1 * EV_PER_MEV, "eV")

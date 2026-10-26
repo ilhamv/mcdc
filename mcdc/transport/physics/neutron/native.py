@@ -631,9 +631,8 @@ def sample_inelastic_scattering(
     q_value = reaction["q_value"]
     interaction_data["energy_deposition"] += (E + q_value) * particle["w"]
 
-    # Number of secondaries and spectra
+    # Number of secondaries
     N = inelastic_scattering["multiplicity"]
-    N_spectrum = inelastic_scattering["N_spectrum"]
 
     # Set up secondary partice container
     particle_container_new = util.local_array(1, type_.particle_data)
@@ -658,29 +657,7 @@ def sample_inelastic_scattering(
         # Sample energy (also angle if correlated)
         # ==============================================================================
 
-        # Spectra are alternatives, sampled independently for each emitted neutron.
-        probability_grid = mcdc_get.neutron_inelastic_scattering_reaction.spectrum_probability_grid_all(
-            inelastic_scattering, data
-        )
-        probability_idx = min(
-            max(find_bin(E, probability_grid), 0), len(probability_grid) - 2
-        )
-        xi = rng.lcg(particle_container_new)
-        total = 0.0
-        selected = N_spectrum - 1
-        for j in range(N_spectrum):
-            total += (
-                mcdc_get.neutron_inelastic_scattering_reaction.spectrum_probability(
-                    probability_idx, j, inelastic_scattering, data
-                )
-            )
-            if xi < total:
-                selected = j
-                break
-        ID = mcdc_get.neutron_inelastic_scattering_reaction.energy_spectrum_IDs(
-            selected, inelastic_scattering, data
-        )
-        spectrum = simulation["distributions"][ID]
+        spectrum = simulation["distributions"][inelastic_scattering["spectrum_ID"]]
 
         # Sample energy
         if mu_distribution["sub_type"] != DISTRIBUTION_NONE:

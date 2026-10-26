@@ -174,12 +174,9 @@ def test_reactions_require_consistent_angle_energy_sources(kind, joint, missing_
         )
         if kind == "fission":
             return NeutronReactionFission(*basic, angular, spectrum)
-        cls = (
-            NeutronReactionInelasticScattering
-            if kind == "neutron"
-            else ProtonReactionInelasticScattering
-        )
-        return cls(
+        if kind == "neutron":
+            return NeutronReactionInelasticScattering(*basic, 1, angular, spectrum)
+        return ProtonReactionInelasticScattering(
             *basic, 1, angular, np.array([1.0, 10.0]), np.ones((1, 1)), [spectrum]
         )
 

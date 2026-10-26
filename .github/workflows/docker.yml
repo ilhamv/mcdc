@@ -167,7 +167,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ilhamv/mcdc-regression_test_data
-          ref: 2e04adb4d6e2bdb184e0306f9993ebb023d1b192
+          ref: c5de6868f753ac0b2cdf44fa98c0cbf3cdd60d21
           path: test/regression/mcdc-regression_test_data
           fetch-depth: 1
 

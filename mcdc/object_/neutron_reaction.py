@@ -1,4 +1,3 @@
-from typing import Annotated
 from numpy import float64
 from numpy import int64
 from numpy.typing import NDArray
@@ -161,13 +160,7 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
 
     multiplicity: int
     mu: DistributionBase
-    N_spectrum_probability_bin: int
-    N_spectrum: int
-    spectrum_probability_grid: NDArray[float64]
-    spectrum_probability: Annotated[
-        NDArray[float64], ("N_spectrum_probability_bin", "N_spectrum")
-    ]
-    energy_spectra: list[DistributionBase]
+    spectrum: DistributionBase
 
     def __init__(
         self,
@@ -178,20 +171,14 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
         q_value,
         multiplicity,
         mu,
-        spectrum_probability_grid,
-        spectrum_probability,
-        energy_spectra,
+        spectrum,
     ):
         super().__init__(MT, xs, xs_offset, reference_frame, q_value)
 
         self.multiplicity = multiplicity
         self.mu = mu
-        validate_angle_energy(mu, energy_spectra, self.label, reference_frame)
-        self.N_spectrum_probability_bin = len(spectrum_probability_grid) - 1
-        self.N_spectrum = len(energy_spectra)
-        self.spectrum_probability_grid = spectrum_probability_grid
-        self.spectrum_probability = spectrum_probability
-        self.energy_spectra = energy_spectra
+        validate_angle_energy(mu, [spectrum], self.label, reference_frame)
+        self.spectrum = spectrum
 
     @classmethod
     def from_h5_group(cls, h5_group, simulation):
@@ -201,22 +188,8 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
 
         mu = set_angular_distribution(h5_group.get("angular-cosine-distribution"))
 
-        # Energy spectra
-        spectrum_probability_grid = h5_group["spectrum-probability-grid"][()]
-        spectrum_probability = h5_group["spectrum-probability"][()]
-        energy_spectra = [
-            read_distribution(child)
-            for child in numbered_groups(h5_group, "energy-spectrum-")
-        ]
-        validate_angle_energy(mu, energy_spectra, h5_group.name, reference_frame)
-        if (
-            not energy_spectra
-            or np.any(spectrum_probability < 0)
-            or not np.allclose(np.sum(spectrum_probability, axis=1), 1.0)
-        ):
-            raise ValueError(
-                f"{h5_group.name}: spectrum probabilities must sum to one in every bin"
-            )
+        # Energy distribution, including component-selection probabilities
+        spectrum = read_distribution(h5_group["energy-distribution"])
 
         return set_xs_interpolation(
             cls(
@@ -227,9 +200,7 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
                 q_value,
                 multiplicity,
                 mu,
-                spectrum_probability_grid,
-                spectrum_probability,
-                energy_spectra,
+                spectrum,
             ),
             h5_group,
         )
@@ -240,10 +211,7 @@ class NeutronReactionInelasticScattering(NeutronReactionBase):
             text += f"  - Scattering cosine: Energy-correlated\n"
         else:
             text += f"  - Scattering cosine: {self.mu.label} [ID: {self.mu.ID}]\n"
-        text += f"  - Energy spectra\n"
-        text += f"      - Probability energy grid {print_1d_array(self.spectrum_probability_grid)}\n"
-        for i in range(len(self.energy_spectra)):
-            text += f"      - Spectrum {i}: {self.energy_spectra[i].label} [{print_1d_array(self.spectrum_probability[:,i])}] [ID: {self.energy_spectra[i].ID}]\n"
+        text += f"  - Energy spectrum: {self.spectrum.label} [ID: {self.spectrum.ID}]\n"
         return text
 
 
