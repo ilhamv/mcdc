@@ -29,9 +29,8 @@ A shared major version alone does not guarantee that a reader supports every rep
 Source libraries
 ----------------
 
-Projectile files contain a ``/source-libraries`` group with one subgroup per contributing library at ``/source-libraries/{library}``.
+Every file contains a root ``/source-libraries`` group with one subgroup per contributing library at ``/source-libraries/{library}``.
 Subgroup names identify distinct library releases using identifiers from the source files or accompanying library metadata.
-In ``atoms.h5``, source-library records are stored only at ``/{element}/source-libraries/{library}``, alongside the atomic evaluation they describe.
 
 Each library subgroup contains the following scalar string datasets.
 Missing or inapplicable information is an empty string.
@@ -43,7 +42,7 @@ Missing or inapplicable information is an empty string.
    * - Dataset
      - Meaning
    * - ``title``
-     - Original source title for the target evaluation.
+     - Original source title, when applicable to the file's target.
    * - ``version``
      - Library release version.
    * - ``release-date``
@@ -59,7 +58,7 @@ Missing or inapplicable information is an empty string.
    * - ``processing-date``
      - Date recorded for source data processing.
    * - ``conversion-time``
-     - UTC timestamp of this library's latest contribution to the projectile file or atomic element record, in ISO 8601 form ``YYYY-MM-DDTHH:MM:SSZ``.
+     - UTC timestamp of this library's latest contribution to the file, in ISO 8601 form ``YYYY-MM-DDTHH:MM:SSZ``.
 
 ``conversion-time`` is recorded when data is written and remains unchanged when conversion is skipped.
 Temperature-dependent projectile files additionally include scalar ``temperature`` (K) and ``kT`` (eV) datasets in each applicable source-library subgroup.

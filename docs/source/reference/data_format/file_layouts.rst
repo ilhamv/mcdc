@@ -109,8 +109,7 @@ Atomic library
 --------------
 
 ``atoms.h5`` collects atomic structure and relaxation data, with one group per element at ``/{element}``.
-Each element record contains ``atomic-number``, ``source-libraries/``, and ``atomic-relaxation/``.
-Source-library records are stored only within each element group and preserve its evaluation-specific provenance.
+Each element record contains ``atomic-number`` and ``atomic-relaxation/``.
 Projectile generators can prepare the required records through the shared atomic-data preparation function.
 Compilation reads only the element records required by the simulation.
 

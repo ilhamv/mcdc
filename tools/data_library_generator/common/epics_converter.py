@@ -21,7 +21,6 @@ from .hdf5_writer import (
     interpolation,
     prepared_file_exists,
     quantity,
-    stamp,
 )
 
 # ======================================================================================
@@ -541,6 +540,8 @@ def prepare_atomic_data(
     The optional atomic_number checks a projectile's target before any output
     is changed. Compatible records are reused without updating their provenance.
     Rewrites replace only the requested element; other element records survive.
+    Root provenance describes library releases; target-specific metadata is
+    omitted because the file can contain evaluations for multiple elements.
     Invalid inputs or publication failures leave the previous atomic file intact.
     The output directory must already exist, and paths are pathlib Paths.
     """
@@ -552,38 +553,33 @@ def prepare_atomic_data(
         raise ValueError(f"{path}: missing atomic relaxation MF 28/MT 533")
     shells = read_relaxation(sections[28, 533])
     sources = read_source_libraries(path, sections, "EADL")
+    shared_fields = ("version", "release-date", "reference", "format", "format-version")
+    sources = {
+        library: {field: source.get(field, "") for field in shared_fields}
+        for library, source in sources.items()
+    }
     symbol = Z_TO_SYMBOL[z]
     destination = output_dir / "atoms.h5"
-    root_sources = False
     if destination.is_file():
         with h5py.File(destination, "r") as file:
             check_format(file)
-            root_sources = "source-libraries" in file
             identity = file.get(f"{symbol}/atomic-number")
             if identity is not None and int(identity[()]) != z:
                 raise ValueError(f"{destination}/{symbol}: inconsistent atomic-number")
-    required = ["atomic-number", "atomic-relaxation/subshells"]
-    reuse = not rewrite and prepared_file_exists(
-        destination, required, sources, group=symbol
-    )
-    if reuse and not root_sources:
+    required = [f"{symbol}/atomic-number", f"{symbol}/atomic-relaxation/subshells"]
+    if not rewrite and prepared_file_exists(destination, required, sources):
         if verbose:
             print(f"Skip atoms.h5/{symbol}: atomic record already exists")
         return shells
     if verbose:
         print(f"Create atoms.h5/{symbol} from {path.name}")
-    with atomic_file(destination, preserve=True) as file:
-        if "source-libraries" in file:
-            del file["source-libraries"]
-        if reuse:
-            return shells
+    with atomic_file(destination, sources, preserve=True) as file:
         if symbol in file:
             if int(file[f"{symbol}/atomic-number"][()]) != z:
                 raise ValueError(f"{destination}/{symbol}: inconsistent atomic-number")
             del file[symbol]
         record = file.create_group(symbol)
         quantity(record, "atomic-number", z)
-        stamp(record, sources, identify=False)
         write_relaxation(record.create_group("atomic-relaxation"), shells)
     return shells
 

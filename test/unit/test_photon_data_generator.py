@@ -158,8 +158,8 @@ def test_conversion_preserves_other_projectiles_and_source_records(sources):
         writer.check_format(file)
         writer.check_format(atoms)
         assert set(file["source-libraries"]) == {"EPDL2025"}
-        assert "source-libraries" not in atoms
-        assert set(atoms["Mg/source-libraries"]) == {"EADL2025"}
+        assert set(atoms["source-libraries"]) == {"EADL2025"}
+        assert "source-libraries" not in atoms["Mg"]
         assert "atomic-relaxation" not in file
         assert "atomic-weight-ratio" not in file
         assert "temperature" not in file
@@ -202,7 +202,7 @@ def test_conversion_preserves_other_projectiles_and_source_records(sources):
         assert relaxation["L2/transitions/energy"].attrs["unit"] == "eV"
         for name in ("probability", "origin-designator", "secondary-designator"):
             assert "unit" not in relaxation[f"K/transitions/{name}"].attrs
-        for parent, library in ((file, "EPDL2025"), (atoms["Mg"], "EADL2025")):
+        for parent, library in ((file, "EPDL2025"), (atoms, "EADL2025")):
             source = parent[f"source-libraries/{library}"]
             assert source["version"].asstr()[()] == "2025"
             assert source["release-date"].asstr()[()] == "2025-01"
@@ -313,23 +313,21 @@ def test_flat_directory_cli_and_element_selection(sources):
     assert fingerprint(output / "photon-Mg.h5") == before
 
 
-def test_atomic_records_require_element_local_provenance(sources):
+def test_atomic_records_require_root_provenance(sources):
     _, eadl, output = sources
     prepare_atomic_data(eadl, output)
-    sources = converter.read_source_libraries(
-        eadl, converter.read_sections(eadl), "EADL"
-    )
+    sources = {"EADL2025": {"version": "2025"}}
     assert writer.prepared_file_exists(
-        output / "atoms.h5", ["atomic-number"], sources, group="Mg"
+        output / "atoms.h5", ["Mg/atomic-number"], sources
     )
     with h5py.File(output / "atoms.h5", "a") as file:
-        del file["Mg/source-libraries/EADL2025/title"]
+        del file["source-libraries/EADL2025/title"]
     assert not writer.prepared_file_exists(
-        output / "atoms.h5", ["atomic-number"], sources, group="Mg"
+        output / "atoms.h5", ["Mg/atomic-number"], sources
     )
 
 
-def test_atomic_library_preserves_other_elements_and_scoped_provenance(sources):
+def test_atomic_library_preserves_other_elements_and_root_provenance(sources):
     _, magnesium, output = sources
     aluminum = magnesium.with_name("EADL.ZA013000.endf")
     aluminum.write_text(
@@ -340,14 +338,18 @@ def test_atomic_library_preserves_other_elements_and_scoped_provenance(sources):
     prepare_atomic_data(magnesium, output)
     prepare_atomic_data(aluminum, output)
     with h5py.File(output / "atoms.h5") as file:
-        assert {"Mg", "Al"} == set(file)
-        assert "12-Mg" in file["Mg/source-libraries/EADL2025/title"].asstr()[()]
-        assert "13-Al" in file["Al/source-libraries/EADL2025/title"].asstr()[()]
-        previous = file["Al/source-libraries/EADL2025/conversion-time"].asstr()[()]
+        assert {"Mg", "Al", "source-libraries"} == set(file)
+        source = file["source-libraries/EADL2025"]
+        for name in ("title", "comments", "processing-date"):
+            assert source[name].asstr()[()] == ""
+        assert source["version"].asstr()[()] == "2025"
+        previous = file["Al/atomic-relaxation/subshells/K/transitions/energy"][()]
+        for element in ("Mg", "Al"):
+            assert set(file[element]) == {"atomic-number", "atomic-relaxation"}
     prepare_atomic_data(magnesium, output, rewrite=True)
     with h5py.File(output / "atoms.h5") as file:
-        assert (
-            file["Al/source-libraries/EADL2025/conversion-time"].asstr()[()] == previous
+        np.testing.assert_array_equal(
+            file["Al/atomic-relaxation/subshells/K/transitions/energy"], previous
         )
     before = fingerprint(output / "atoms.h5")
     prepare_atomic_data(magnesium, output)
@@ -369,21 +371,12 @@ def test_atomic_target_mismatch_does_not_change_output(sources):
     assert fingerprint(output / "atoms.h5") == before
 
 
-def test_atomic_preparation_removes_root_provenance(sources):
+def test_atomic_preparation_repairs_missing_root_provenance(sources):
     _, eadl, output = sources
     prepare_atomic_data(eadl, output)
     with h5py.File(output / "atoms.h5", "a") as file:
-        writer.stamp(file, {"EADL2025": {}})
-        previous = file["Mg/source-libraries/EADL2025/title"].asstr()[()]
-        conversion_time = file["Mg/source-libraries/EADL2025/conversion-time"].asstr()[
-            ()
-        ]
+        del file["source-libraries"]
     prepare_atomic_data(eadl, output)
     with h5py.File(output / "atoms.h5") as file:
-        assert "source-libraries" not in file
-        assert set(file["Mg/source-libraries"]) == {"EADL2025"}
-        assert file["Mg/source-libraries/EADL2025/title"].asstr()[()] == previous
-        assert (
-            file["Mg/source-libraries/EADL2025/conversion-time"].asstr()[()]
-            == conversion_time
-        )
+        assert set(file["source-libraries"]) == {"EADL2025"}
+        assert "source-libraries" not in file["Mg"]

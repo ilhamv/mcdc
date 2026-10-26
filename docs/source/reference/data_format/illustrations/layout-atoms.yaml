@@ -3,20 +3,20 @@
 '@format': mcdc-data
 '@format-version': 0.1.0
 
+source-libraries/:
+  '{library}/':
+    title: string
+    version: string
+    release-date: string
+    reference: string
+    comments: string
+    format: string
+    format-version: string
+    processing-date: string
+    conversion-time: string
+
 '{element}/':
   atomic-number: integer
-
-  source-libraries/:
-    '{library}/':
-      title: string
-      version: string
-      release-date: string
-      reference: string
-      comments: string
-      format: string
-      format-version: string
-      processing-date: string
-      conversion-time: string
 
   atomic-relaxation/:
     subshells/:

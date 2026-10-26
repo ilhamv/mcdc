@@ -8,7 +8,7 @@ of output files. It does not interpret source records or convert physical units.
 ``FORMAT`` and ``VERSION`` identify the output specification independently of
 the MC/DC software version and source-library release. Compatibility checks
 require exact matches. Writers operate on caller-provided files and groups,
-including per-element source records within the shared atomic library.
+including root source records within the shared atomic library.
 """
 
 from contextlib import contextmanager
@@ -48,12 +48,12 @@ SOURCE_UNITS = {"temperature": "K", "kT": "eV"}
 # ======================================================================================
 
 
-def stamp(file, sources, *, identify=True):
+def stamp(file, sources):
     """Write format identifiers and merge the supplied source-library records.
 
     Parameters
     ----------
-    file : h5py.File or h5py.Group
+    file : h5py.File
         Writable destination. When merging an existing nonempty file, the
         caller checks its format first; this function writes the identifiers
         but does not check the previous version.
@@ -62,9 +62,6 @@ def stamp(file, sources, *, identify=True):
         identifies the string fields; missing strings become empty. Optional
         numeric ``temperature`` and ``kT`` values are already in K and eV.
         The caller includes those fields only for temperature-specific files.
-    identify : bool, optional
-        Stamp root format attributes. Set False for provenance on an element
-        record inside a file whose root is already identified.
 
     Raises
     ------
@@ -125,9 +122,8 @@ def stamp(file, sources, *, identify=True):
                 values[name] = value
         updates[library] = values
     # Publish format identifiers and stamp the supplied library contributions
-    if identify:
-        file.attrs["format"] = FORMAT
-        file.attrs["format-version"] = VERSION
+    file.attrs["format"] = FORMAT
+    file.attrs["format-version"] = VERSION
     conversion_time = (
         datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
@@ -707,13 +703,12 @@ def check_format(file):
         raise ValueError(f"{file.filename}: incompatible format or format version")
 
 
-def prepared_file_exists(path, fields, sources, *, group="/"):
+def prepared_file_exists(path, fields, sources):
     """Check required paths and source provenance without modifying an output.
 
     Missing files, paths, metadata, or valid UTC conversion times return False.
     Nonempty expected strings and supplied source temperatures must match.
-    Paths and source records are checked relative to group, which defaults
-    to the file root; atomic evaluations use their element group.
+    Required paths and source records are checked relative to the file root.
     Additional libraries and unrelated records are allowed. An existing
     file with incompatible format identifiers raises ValueError. This checks
     reuse readiness, not every reaction's numerical or structural validity.
@@ -723,9 +718,6 @@ def prepared_file_exists(path, fields, sources, *, group="/"):
         return False
     with h5py.File(path, "r") as file:
         check_format(file)
-        if group not in file:
-            return False
-        file = file[group]
         complete = all(field in file for field in fields)
         for library, source in sources.items():
             group = file.get(f"source-libraries/{library}")
@@ -771,16 +763,15 @@ def prepared_file_exists(path, fields, sources, *, group="/"):
 
 
 @contextmanager
-def atomic_file(path, sources=None, *, preserve=False):
+def atomic_file(path, sources, *, preserve=False):
     """Stage one HDF5 output and replace its destination on successful exit.
 
     Parameters
     ----------
     path : str or pathlib.Path
         Final output path. The parent directory must already exist.
-    sources : dict of str to dict, optional
+    sources : dict of str to dict
         Source-library records written by ``stamp`` before control is yielded.
-        Omit when provenance is stored within individual records instead.
     preserve : bool, optional
         Copy an existing compatible destination into the staged file before
         updating it. This retains other element records in atoms.h5.
@@ -826,11 +817,7 @@ def atomic_file(path, sources=None, *, preserve=False):
         with h5py.File(staged, "r+" if updating else "w") as file:
             if updating:
                 check_format(file)
-            if sources is None:
-                file.attrs["format"] = FORMAT
-                file.attrs["format-version"] = VERSION
-            else:
-                stamp(file, sources)
+            stamp(file, sources)
             yield file
         # Publish only after writing and closing the staged file successfully
         os.replace(staged, path)

@@ -24,7 +24,7 @@ Data is organized by projectile and target, with an additional temperature token
 Projectile data is stored directly at the file root.
 For example, ``neutron-Si32-293.6K.h5`` contains ``/xs-energy-grid`` and ``/reactions`` alongside its target properties.
 Each file identifies its format and version through root attributes.
-Source-library records are stored at the root of projectile files and within each element group in ``atoms.h5``.
+Source-library records are stored at the file root.
 See :doc:`file_layouts` for projectile names and field requirements.
 
 HDF5 terminology follows the `HDF Group's data model <https://support.hdfgroup.org/documentation/hdf5/latest/_h5_d_m__u_g.html>`_: groups organize objects, datasets store typed arrays, and attributes attach metadata to an object.
