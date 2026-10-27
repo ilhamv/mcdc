@@ -1,4 +1,3 @@
-from typing import Annotated
 import numpy as np
 from numpy import float64
 from numpy.typing import NDArray
@@ -7,6 +6,7 @@ from numpy.typing import NDArray
 
 from mcdc.constant import (
     INF,
+    INTERPOLATION_HISTOGRAM,
     INTERPOLATION_LINEAR,
     INTERPOLATION_LOG,
     PROTON_REACTION_ELASTIC_SCATTERING,
@@ -20,12 +20,13 @@ from mcdc.constant import (
     PARTICLE_ANY,
 )
 from mcdc.object_.secondary_product import SecondaryProduct
-from mcdc.object_.data import DataPolynomial, DataTable
+from mcdc.object_.data import DataBase, DataPolynomial, DataTable
 from mcdc.object_.base import MCDCPolymorphic
 from mcdc.object_.distribution import (
     DistributionBase,
     DistributionNone,
     DistributionIsotropic,
+    DistributionMixture,
     DistributionMultiTable,
     DistributionLevelScattering,
     DistributionEvaporation,
@@ -124,19 +125,20 @@ class ProtonReactionElasticScattering(ProtonReactionBase):
 
 
 class ProtonReactionInelasticScattering(ProtonReactionBase):
+    """Mean proton yield with a shared outgoing energy or energy-angle spectrum.
+
+    Each emitted proton samples spectrum independently. A DistributionMixture
+    represents alternative spectra and their incident-energy probabilities.
+    Multiplicity Data determines the emitted count separately from that choice.
+    """
+
     # Annotations for Numba mode
     label: str = "proton_inelastic_scattering_reaction"
     sub_type = PROTON_REACTION_INELASTIC_SCATTERING
     #
-    multiplicity: int
+    multiplicity_data: DataBase
     mu: DistributionBase
-    N_spectrum_probability_bin: int
-    N_spectrum: int
-    spectrum_probability_grid: NDArray[float64]
-    spectrum_probability: Annotated[
-        NDArray[float64], ("N_spectrum_probability_bin", "N_spectrum")
-    ]
-    energy_spectra: list[DistributionBase]
+    spectrum: DistributionBase
 
     def __init__(
         self,
@@ -145,47 +147,44 @@ class ProtonReactionInelasticScattering(ProtonReactionBase):
         xs_offset,
         reference_frame,
         q_value,
-        multiplicity,
+        multiplicity_data,
         mu,
-        spectrum_probability_grid,
-        spectrum_probability,
-        energy_spectra,
+        spectrum,
     ):
         super().__init__(MT, xs, xs_offset, reference_frame, q_value)
 
-        self.multiplicity = multiplicity
+        self.multiplicity_data = multiplicity_data
         self.mu = mu
-        validate_angle_energy(mu, energy_spectra, self.label, reference_frame)
-        self.N_spectrum_probability_bin = len(spectrum_probability_grid) - 1
-        self.N_spectrum = len(energy_spectra)
-        self.spectrum_probability_grid = spectrum_probability_grid
-        self.spectrum_probability = spectrum_probability
-        self.energy_spectra = energy_spectra
+        validate_angle_energy(mu, [spectrum], self.label, reference_frame)
+        self.spectrum = spectrum
 
     @classmethod
     def from_h5_group(cls, h5_group, simulation):
         MT, xs, xs_offset, reference_frame, q_value = set_basic_properties(h5_group)
-        multiplicity = int(h5_group["multiplicity"][()])
+
+        if "proton_yield" in h5_group:
+            yield_group = h5_group["proton_yield"]
+            multiplicity_data = DataTable(
+                yield_group["energy"][()] * 1e6,
+                yield_group["value"][()],
+                INTERPOLATION_LINEAR,
+            )
+        else:
+            multiplicity = int(h5_group["multiplicity"][()])
+            multiplicity_data = DataPolynomial(np.array([float(multiplicity)]))
 
         mu = set_angular_distribution(h5_group["angular_cosine_distribution"])
 
-        spectrum_probability_grid = h5_group["spectrum_probability_grid"][()] * 1e6
-        spectrum_probability = h5_group["spectrum_probability"][()]
-        energy_spectra = [
-            set_energy_distribution(h5_group[name])
-            for name in sorted(x for x in h5_group if x.startswith("energy_spectrum-"))
-        ]
+        spectrum = read_spectrum_mixture(h5_group)
         reaction = cls(
             MT,
             xs,
             xs_offset,
             reference_frame,
             q_value,
-            multiplicity,
+            multiplicity_data,
             mu,
-            spectrum_probability_grid,
-            spectrum_probability,
-            energy_spectra,
+            spectrum,
         )
 
         # Load other species without changing the outgoing-proton multiplicity.
@@ -206,10 +205,7 @@ class ProtonReactionInelasticScattering(ProtonReactionBase):
             text += f"  - Scattering cosine: Energy-correlated\n"
         else:
             text += f"  - Scattering cosine: {self.mu.label} [ID: {self.mu.ID}]\n"
-        text += f"  - Energy spectra\n"
-        text += f"      - Probability energy grid {print_1d_array(self.spectrum_probability_grid)}\n"
-        for i in range(len(self.energy_spectra)):
-            text += f"      - Spectrum {i+1}: {self.energy_spectra[i].label} [{print_1d_array(self.spectrum_probability[:,i])}] [ID: {self.energy_spectra[i].ID}]\n"
+        text += f"  - Energy spectrum: {self.spectrum.label} [ID: {self.spectrum.ID}]\n"
         return text
 
 
@@ -230,6 +226,44 @@ class ProtonReactionCapture(ProtonReactionBase):
 # ======================================================================================
 # Helper functions
 # ======================================================================================
+
+
+def read_spectrum_mixture(group):
+    """Compose the proton file's alternative spectra and probability bins.
+
+    Spectrum suffixes identify their probability columns numerically. Each
+    column becomes constant polynomial Data or histogram Data on the stored
+    bin edges, converted from MeV to eV. Mixture sampling clamps probabilities
+    to their endpoint values outside that grid and selects a component for
+    each emitted proton, independently of the reaction's multiplicity.
+    """
+    names = sorted(
+        (name for name in group if name.startswith("energy_spectrum-")),
+        key=lambda name: int(name.rsplit("-", 1)[1]),
+    )
+    grid = group["spectrum_probability_grid"][()] * 1e6
+    values = group["spectrum_probability"][()]
+    if (
+        grid.ndim != 1
+        or len(grid) < 2
+        or not np.all(np.isfinite(grid))
+        or np.any(np.diff(grid) <= 0)
+        or values.shape != (len(grid) - 1, len(names))
+    ):
+        raise ValueError(
+            "Proton spectrum probabilities must match their bins and spectra"
+        )
+    probabilities = []
+    for column in values.T:
+        if np.all(column == column[0]):
+            probabilities.append(DataPolynomial([float(column[0])]))
+        else:
+            probabilities.append(
+                DataTable(grid, np.append(column, column[-1]), INTERPOLATION_HISTOGRAM)
+            )
+    return DistributionMixture(
+        probabilities, [set_energy_distribution(group[name]) for name in names]
+    )
 
 
 def set_basic_properties(h5_group):
@@ -358,6 +392,10 @@ def set_energy_distribution(h5_group):
     densities from inverse MeV to inverse eV. Dimensionless angular quantities
     retain their source values.
 
+    LAW 4 tables split discrete lines into probability masses and the continuum
+    into densities in DistributionMultiTable. Outgoing histogram or linear
+    interpolation is retained independently for each incident-energy table.
+
     Kalbach-Mann stores outgoing-energy PDFs with the precompound factor r
     and angular slope a in one DistributionKalbachMann object. Transport first
     samples outgoing energy, evaluates r and a for that energy, and then
@@ -367,17 +405,7 @@ def set_energy_distribution(h5_group):
     spectrum_type = h5_group.attrs["type"]
 
     if spectrum_type == "tabulated":
-        grid = h5_group[f"energy"][()] * 1e6  # MeV to eV
-        offset = h5_group[f"offset"][()]
-        value = h5_group[f"value"][()] * 1e6  # MeV to eV
-        pdf = h5_group[f"pdf"][()] / 1e6  # /MeV to /eV
-        tables = []
-        for i, start in enumerate(offset):
-            stop = offset[i + 1] if i + 1 < len(offset) else len(value)
-            tables.append((value[start:stop], pdf[start:stop]))
-        energy_spectrum = DistributionMultiTable(
-            grid, value=[t[0] for t in tables], pdf=[t[1] for t in tables]
-        )
+        energy_spectrum = read_tabulated_energy(h5_group)
 
     elif spectrum_type == "level-scattering":
         C1 = h5_group["C1"][()] * 1e6  # MeV to eV
@@ -454,3 +482,73 @@ def set_energy_distribution(h5_group):
         print_error(f"Unsupported energy spectrum of type {spectrum_type}")
 
     return energy_spectrum
+
+
+def read_tabulated_energy(group):
+    """Translate packed proton LAW 4 arrays into a shared MultiTable.
+
+    The first n_discrete entries of each source table are point masses, whose
+    probabilities are dimensionless. Remaining entries are continuous values
+    and densities in MeV and inverse MeV. Source offsets have one entry per
+    incident energy; the reusable representation adds its final sentinel.
+    Older continuous-only files omit the discrete counts and interpolation
+    flags, which default to zero lines and linear outgoing interpolation.
+    """
+    grid = group["energy"][()] * 1e6
+    offsets = group["offset"][()]
+    values = group["value"][()] * 1e6
+    probabilities = group["pdf"][()]
+    count = len(grid)
+    discrete = (
+        group["n_discrete"][()]
+        if "n_discrete" in group
+        else np.zeros(count, dtype=np.int64)
+    )
+    laws = (
+        group["interpolation"][()]
+        if "interpolation" in group
+        else np.full(count, 2, dtype=np.int64)
+    )
+    if (
+        count == 0
+        or offsets.shape != (count,)
+        or not np.issubdtype(offsets.dtype, np.integer)
+        or offsets[0] != 0
+        or np.any(np.diff(offsets) <= 0)
+        or offsets[-1] >= len(values)
+        or values.ndim != 1
+        or probabilities.shape != values.shape
+        or discrete.shape != (count,)
+        or not np.issubdtype(discrete.dtype, np.integer)
+        or np.any(discrete < 0)
+        or laws.shape != (count,)
+        or not np.all(np.isin(laws, (1, 2)))
+    ):
+        raise ValueError("Invalid proton LAW 4 table layout")
+    stops = np.append(offsets[1:], len(values))
+    continuous_values, densities, discrete_values, masses = [], [], [], []
+    pdf_laws, boundaries, rule_offsets = [], [], [0]
+    for start, stop, lines, law in zip(offsets, stops, discrete, laws):
+        if lines > stop - start:
+            raise ValueError("Proton LAW 4 discrete count exceeds its table size")
+        split = start + lines
+        discrete_values.append(values[start:split])
+        masses.append(probabilities[start:split])
+        continuous_values.append(values[split:stop])
+        densities.append(probabilities[split:stop] / 1e6)
+        if split < stop:
+            pdf_laws.append(
+                INTERPOLATION_HISTOGRAM if law == 1 else INTERPOLATION_LINEAR
+            )
+            boundaries.append(stop - split)
+        rule_offsets.append(len(pdf_laws))
+    return DistributionMultiTable(
+        grid,
+        value=continuous_values,
+        pdf=densities,
+        discrete_value=discrete_values if np.any(discrete) else None,
+        pmf=masses if np.any(discrete) else None,
+        pdf_interpolations=np.asarray(pdf_laws, dtype=np.int64),
+        pdf_interpolation_boundaries=np.asarray(boundaries, dtype=np.int64),
+        pdf_interpolation_offsets=np.asarray(rule_offsets, dtype=np.int64),
+    )

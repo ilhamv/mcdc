@@ -696,16 +696,9 @@ proton_elastic_scattering_reaction = into_dtype([
 ])
 
 proton_inelastic_scattering_reaction = into_dtype([
-    ('multiplicity', int64),
+    ('multiplicity_data_ID', int64),
     ('mu_ID', int64),
-    ('N_spectrum_probability_bin', int64),
-    ('N_spectrum', int64),
-    ('spectrum_probability_grid_offset', int64),
-    ('spectrum_probability_grid_length', int64),
-    ('spectrum_probability_offset', int64),
-    ('spectrum_probability_length', int64),
-    ('N_energy_spectrum', int64),
-    ('energy_spectrum_IDs_offset', int64),
+    ('spectrum_ID', int64),
     ('ID', int64),
     ('base_ID', int64),
 ])

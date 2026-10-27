@@ -177,7 +177,10 @@ def test_reactions_require_consistent_angle_energy_sources(kind, joint, missing_
         if kind == "neutron":
             return NeutronReactionInelasticScattering(*basic, 1, angular, spectrum)
         return ProtonReactionInelasticScattering(
-            *basic, 1, angular, np.array([1.0, 10.0]), np.ones((1, 1)), [spectrum]
+            *basic,
+            DataPolynomial([1.0]),
+            angular,
+            spectrum,
         )
 
     if joint == missing_angle:

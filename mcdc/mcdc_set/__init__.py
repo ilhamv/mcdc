@@ -44,8 +44,6 @@ import mcdc.mcdc_set.neutron_reaction as neutron_reaction
 
 import mcdc.mcdc_set.neutron_fission_reaction as neutron_fission_reaction
 
-import mcdc.mcdc_set.proton_inelastic_scattering_reaction as proton_inelastic_scattering_reaction
-
 import mcdc.mcdc_set.proton_reaction as proton_reaction
 
 import mcdc.mcdc_set.settings as settings
