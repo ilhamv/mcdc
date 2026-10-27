@@ -13,6 +13,7 @@ from mcdc.object_.data import DataBase, DataNone, DataTable
 from mcdc.object_.hdf5_reader import (
     check_format,
     load_target_properties,
+    read_data,
     read_xs_energy_grid,
     text,
     xs_is_linear,
@@ -231,6 +232,12 @@ class Nuclide(MCDCObject):
                 reaction._compile_into_simulation(simulation)
 
     def set_proton_data(self, simulation):
+        data_dir = os.environ["MCDC_LIB"]
+        h1_path = os.path.join(data_dir, f"H1-{self.name}.h5")
+        if os.path.isfile(h1_path):
+            self._set_proton_data_mcdc(simulation, h1_path)
+            return
+
         nuclide_name = self.name
         temperature = self.temperature
 
@@ -363,6 +370,97 @@ class Nuclide(MCDCObject):
         # Register reactions and their data loaded during finalization.
         for reaction_container in rx_containers:
             for reaction in reaction_container:
+                reaction._compile_into_simulation(simulation)
+
+    def _set_proton_data_mcdc(self, simulation, path):
+        categories = {
+            "elastic-scattering": (
+                "elastic",
+                "proton_elastic_scattering_reactions",
+                ProtonReactionElasticScattering,
+            ),
+            "capture": ("capture", "proton_capture_reactions", ProtonReactionCapture),
+            "inelastic-scattering": (
+                "inelastic",
+                "proton_inelastic_scattering_reactions",
+                ProtonReactionInelasticScattering,
+            ),
+        }
+        with h5py.File(path, "r") as file:
+            check_format(file)
+            mass, excitation = nuclide_identity_from_name(self.name)
+            load_target_properties(
+                self,
+                file,
+                (
+                    "mass-number",
+                    "atomic-weight-ratio",
+                    "excitation-level",
+                    "fissionable",
+                    "radiation-length",
+                ),
+                identity={
+                    "mass_number": mass,
+                    "excitation_level": excitation,
+                },
+                peers=simulation.nuclides,
+            )
+            self.element._load_properties(file, field="atomic-number")
+
+            if "stopping-power" in file:
+                self.stopping_power = read_data(file["stopping-power"])
+                self.stopping_power._compile_into_simulation(simulation)
+            elif simulation.settings.condensed_interactions.proton:
+                raise ValueError(
+                    f"Proton condensed history requires stopping power for nuclide {self.name}"
+                )
+
+            if "reactions" not in file:
+                self.proton_xs_energy_grid = np.array([0.0, 1.0e10])
+                self.proton_elastic_xs = np.zeros(2)
+                self.proton_inelastic_xs = np.zeros(2)
+                self.proton_capture_xs = np.zeros(2)
+                self.proton_total_xs = np.zeros(2)
+                return
+
+            grid = read_xs_energy_grid(file)
+            self.proton_xs_energy_grid = grid
+            self.proton_elastic_xs = np.zeros_like(grid)
+            self.proton_inelastic_xs = np.zeros_like(grid)
+            self.proton_capture_xs = np.zeros_like(grid)
+            self.proton_total_xs = np.zeros_like(grid)
+            self.proton_elastic_scattering_reactions = []
+            self.proton_inelastic_scattering_reactions = []
+            self.proton_capture_reactions = []
+            for group in file["reactions"].values():
+                category = text(group.attrs["category"])
+                if category not in categories:
+                    raise ValueError(
+                        f"{group.name}: unknown proton reaction category {category!r}"
+                    )
+                xs_name, reaction_name, reaction_type = categories[category]
+                reaction = reaction_type.from_h5_group(group, simulation)
+                stop = reaction.xs_offset_ + len(reaction.xs)
+                if reaction.xs_offset_ < 0 or stop != len(grid):
+                    raise ValueError(
+                        f"{group.name}: cross-section segment does not end at the shared grid boundary"
+                    )
+                getattr(self, f"proton_{xs_name}_xs")[
+                    reaction.xs_offset_ :
+                ] += reaction.xs
+                getattr(self, reaction_name).append(reaction)
+            self.proton_total_xs = (
+                self.proton_elastic_xs
+                + self.proton_inelastic_xs
+                + self.proton_capture_xs
+            )
+
+        for reaction_list in (
+            self.proton_elastic_scattering_reactions,
+            self.proton_inelastic_scattering_reactions,
+            self.proton_capture_reactions,
+        ):
+            for reaction in reaction_list:
                 reaction._compile_into_simulation(simulation)
 
     def __repr__(self):

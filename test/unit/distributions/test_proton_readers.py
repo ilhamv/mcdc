@@ -5,9 +5,11 @@ import numpy as np
 import pytest
 
 from mcdc.object_.proton_reaction import (
+    ProtonReactionInelasticScattering,
     set_angular_distribution,
     set_energy_distribution,
 )
+from mcdc.constant import REFERENCE_FRAME_COM
 from mcdc.transport.data import evaluate_data_clamped
 from mcdc.transport.distribution import (
     sample_distribution,
@@ -79,3 +81,62 @@ def test_proton_spectrum_temperature_data(tmp_path, prepare_simulation, kind):
         expected
     )
     assert distribution.restriction_energy == 0.05e6
+
+
+def write_table(group, grid, values):
+    group.attrs["type"] = "table"
+    group["grid"] = grid
+    group["value"] = values
+    interpolation = group.create_group("interpolation")
+    interpolation["laws"] = np.array(["linear"], dtype=h5py.string_dtype("utf-8"))
+    interpolation["boundaries"] = [len(grid)]
+
+
+def write_energy_distribution(group):
+    group.attrs["type"] = "table"
+    group["value"] = [0.0, 1.0e6]
+    group["pdf"] = [1.0e-6, 1.0e-6]
+    interpolation = group.create_group("interpolation")
+    interpolation["laws"] = np.array(["linear"], dtype=h5py.string_dtype("utf-8"))
+    interpolation["boundaries"] = [2]
+
+
+def test_proton_mcdc_inelastic_and_cross_product(tmp_path):
+    with h5py.File(tmp_path / "reaction.h5", "w") as file:
+        group = file.create_group("MT-051")
+        group.attrs["ENDF-MT"] = 51
+        group["xs/value"] = [0.1, 0.2]
+        group["xs/offset"] = 0
+        group["reference-frame"] = "LAB"
+        group["Q-value"] = 0.0
+        write_table(group.create_group("multiplicity"), [1.0e6, 2.0e6], [1.0, 2.0])
+
+        angular = group.create_group("angular-cosine-distribution")
+        angular.attrs["type"] = "isotropic"
+        write_energy_distribution(group.create_group("energy-distribution"))
+
+        product = group.create_group("cross-products").create_group("0")
+        product["particle"] = "neutron"
+        product["reference-frame"] = "COM"
+        product["decay-rate"] = np.inf
+        write_table(product.create_group("yield"), [1.0e6, 2.0e6], [0.5, 1.0])
+        product_distribution = product.create_group("angle-energy-distribution")
+        product_distribution.attrs["type"] = "independent-angle-energy"
+        product_angle = product_distribution.create_group("angular-cosine-distribution")
+        product_angle.attrs["type"] = "isotropic"
+        write_energy_distribution(
+            product_distribution.create_group("energy-distribution")
+        )
+
+        reaction = ProtonReactionInelasticScattering.from_h5_group(group, None)
+
+    assert reaction.MT == 51
+    assert reaction.multiplicity_data.x.tolist() == [1.0e6, 2.0e6]
+    assert reaction.multiplicity_data.y.tolist() == [1.0, 2.0]
+    assert len(reaction.secondary_products) == 1
+    assert reaction.secondary_products[0].mass_number == 1
+    assert reaction.secondary_products[0].reference_frame == REFERENCE_FRAME_COM
+    assert reaction.secondary_products[0].production_yield.x.tolist() == [
+        1.0e6,
+        2.0e6,
+    ]

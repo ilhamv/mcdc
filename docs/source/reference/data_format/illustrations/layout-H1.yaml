@@ -50,10 +50,10 @@ reactions/:
     reference-frame: LAB or COM
     Q-value: float, eV
     cross-products/:
-      '{i}': CrossProduct  # Optional emitted species other than protons
+      '{i}': CrossProduct  # Optional emitted species other than protons; each may specify a reference frame
 
     # Category-specific
-    multiplicity: integer  # Outgoing protons only
+    multiplicity: integer or Data  # Outgoing protons only; Data for energy-dependent yields
     angular-cosine-distribution: Distribution, cosine  # Omit for a joint energy-angle spectrum
     energy-distribution: Distribution, eV  # Mixtures select among multiple spectra
 
@@ -67,4 +67,4 @@ reactions/:
     reference-frame: LAB or COM
     Q-value: float, eV
     cross-products/:
-      '{i}': CrossProduct  # Optional emitted species other than protons
+      '{i}': CrossProduct  # Optional emitted species other than protons; each may specify a reference frame

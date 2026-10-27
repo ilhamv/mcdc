@@ -181,8 +181,8 @@ Proton inelastic scattering
      - Type / shape / unit
      - Meaning
    * - ``multiplicity``
-     - integer
-     - Number of outgoing protons per reaction.
+     - integer or Data
+     - Number or mean number of outgoing protons per reaction; use Data when it depends on incident energy.
    * - ``angular-cosine-distribution``
      - Distribution, conditional
      - Required for energy-only spectra; omitted when outgoing angle is supplied jointly with energy.
@@ -190,7 +190,8 @@ Proton inelastic scattering
      - Distribution
      - Outgoing proton energy or joint energy-angle distribution; multiple spectra use a :ref:`mixture <distribution-mixture>`.
 
-Multiplicity is positive.
+Multiplicity is positive. A constant integer is used when the count is fixed;
+an energy-dependent yield uses a nonnegative Data table or polynomial.
 For energy-only spectra, the angular distribution is sampled independently at the incident energy.
 
 Electron reactions
@@ -276,6 +277,9 @@ The list is generic and is not grouped by particle name.
    * - ``particle``
      - string
      - Particle identifier, such as ``photon``, ``electron``, or ``proton``.
+   * - ``reference-frame``
+     - string, optional
+     - Frame of this product's distribution; defaults to the reaction's frame.
    * - ``yield``
      - Data
      - Mean emitted count per reaction as a function of incident energy in eV.
@@ -288,3 +292,7 @@ The list is generic and is not grouped by particle name.
 
 Yield is nonnegative and may be smaller or larger than one.
 Separate product records do not specify correlations between different emitted particles.
+An independent angle-energy representation stores ``type = independent-angle-energy``
+with ``angular-cosine-distribution`` and ``energy-distribution`` child Distributions.
+The product reference frame may differ from the reaction's frame when the source
+library specifies a separate frame for that product.

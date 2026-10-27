@@ -24,12 +24,13 @@ The :doc:`format conventions <../../reference/data_format/conventions>` and :doc
    * - Electron
      - To be documented.
      - —
-   * - Proton
-     - To be documented.
-     - —
+   * - :doc:`Proton <proton>`
+     - `TENDL2021 <https://tendl.imperial.ac.uk/tendl_2021/tendl2021.html>`: TENDL2021 ACE data
+     - `NIST PSTAR <https://physics.nist.gov/PhysRefData/Star/Text/PSTAR.html>`: stopping power tables
 
 .. toctree::
    :maxdepth: 1
 
    neutron
    photon
+   proton

@@ -1,8 +1,9 @@
-# This file was written by Anthropic's Claude.
-# Claude was used to understand & parse the ACE format,
-# and generate the desired hdf5 structure.
-"""
-MC/DC proton data library generator: TENDL-2021 proton ACE files -> MC/DC HDF5.
+"""Prepare MC/DC proton data from TENDL ACE and NIST PSTAR inputs.
+
+Writes temperature-independent ``H1-{nuclide}.h5`` files in the mcdc-data
+format. Source parsing and distribution conversion are shared with the neutron
+and photon generators; this module handles proton reaction selection and
+secondary-product records.
 
 Environment variables
     MCDC_ACELIB_PROTON  directory with the TENDL-2021 proton ACE files (*.ace)
@@ -14,25 +15,13 @@ Usage
     python generate.py --rewrite       # regenerate everything
     python generate.py --verbose       # detailed per-reaction output
     python generate.py --only p-Al027.ace [more.ace ...]
-
-Design notes (see also the README in this directory)
-  * ACEtk accessors are used by their exact names.  Two lower-case aliases in some
-    ACEtk builds are mis-wired (secondary_particle_production_cross_section_block
-    returns the TYRH block; photon_production_cross_section_block returns the main
-    SIG block), so this script uses the upper-case ACE-name accessors
-    (PTYPE, NTRO, MTRH, TYRH, SIGH, DLWH, ANDH, MTRP, SIGP, DLWP, ANDP).
-  * Secondary-particle multiplicities are NOT in TYRH (it is always +-1 in TENDL
-    proton files).  They are tabulated yields in SIGH (MFTYPE 12) / SIGP (MFTYPE 16):
-    "mean number of products per occurrence of that reaction, versus incident energy".
-    They are written as a `yield` table, never as a scalar.
-  * Anything unexpected raises ConversionError.  A failed file is reported at the end
-    and no partial output is left behind.
 """
 
 import argparse
 import os
+from pathlib import Path
+import re
 import sys
-import traceback
 from dataclasses import dataclass
 
 import ACEtk
@@ -40,12 +29,23 @@ import h5py
 import numpy as np
 from tqdm import tqdm
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from data_library_generator.common.ace_converter import (
+    EV_PER_MEV,
+    write_angular_distribution as write_h1_angular_distribution,
+    write_energy_distribution as write_h1_energy_distribution,
+)
+from data_library_generator.common.hdf5_writer import (
+    atomic_file,
+    interpolation,
+    prepared_file_exists,
+    quantity,
+)
+
 # ==============================================================================
 # Constants
 # ==============================================================================
-
-# Temperature written to all files (TENDL proton ACE files report 0 K)
-T_KELVIN = 0.0
 
 ELEMENT_SYMBOLS = (  # index 0 -> Z=1
     "H",
@@ -323,11 +323,6 @@ SUM_MT_PARTIALS = {
 }
 MAX_MT = 891  # reactions above this (e.g. 9xx partial capture) are not written
 
-# Upper edge [MeV] of the single-bin spectrum-probability grid written for reactions
-# with one outgoing-energy distribution.  Kept from the original script; NOTE it is
-# below the 200 MeV top of the TENDL data (see summary notes).
-SPECTRUM_GRID_MAX_MEV = 30.0
-
 # --- Secondary particles --------------------------------------------------------
 # ACE particle-type id (PTYPE block) -> (product name, ZAP = 1000*Z + A)
 ACE_PARTICLE_TO_PRODUCT = {
@@ -339,12 +334,8 @@ ACE_PARTICLE_TO_PRODUCT = {
     34: ("alpha", 2004),
 }
 
-# PLACEHOLDER: photons are not in PTYPE (they come from the separate photon-production
-# blocks) and have no Z/A.  ZAP = 0 is used for them for now.  It is NOT a real ZA
-# value; the MC/DC photon support has to decide what identifier it wants here.
+# Photons are stored in the separate MTRP/SIGP/DLWP/ANDP blocks.
 PHOTON_NAME = "photon"
-PHOTON_ZAP = 0
-PHOTON_ACE_ID = 2  # ACE's own id for photons
 
 # ACE photon-production reactions are numbered MTRP = 1000*MT + photon_index.
 PHOTON_MT_FACTOR = 1000
@@ -391,13 +382,6 @@ def frame_name(frame):
     fail(f"Unknown reference frame {frame!r}")
 
 
-def write_array(group, name, data, unit=None, dtype=np.float64):
-    ds = group.create_dataset(name, data=np.array(data, dtype=dtype))
-    if unit is not None:
-        ds.attrs["unit"] = unit
-    return ds
-
-
 def load_pstar_file(filepath):
     """Two-column PSTAR file (Energy MeV, Stopping power MeV cm2/g)."""
     energies, stopping = [], []
@@ -415,16 +399,28 @@ def load_pstar_file(filepath):
 
 
 def write_stopping_power(h5, pstar_dir, symbol, verbose=False):
-    """Write the stopping_power group if a PSTAR file exists. Returns True if written."""
-    path = os.path.join(pstar_dir, f"{symbol}.txt")
-    if not os.path.exists(path):
+    """Write PSTAR mass stopping power using the mcdc-data representation."""
+    path = Path(pstar_dir) / f"{symbol}.txt"
+    if not path.is_file():
         if verbose:
             print(f"  [warn] No PSTAR file for {symbol}")
         return False
     energy, stopping = load_pstar_file(path)
-    group = h5.create_group("stopping_power")
-    write_array(group, "energy", energy, unit="MeV")
-    write_array(group, "total_stopping_power", stopping, unit="MeV cm2/g")
+    if (
+        len(energy) < 2
+        or energy.shape != stopping.shape
+        or not np.all(np.isfinite(energy))
+        or not np.all(np.isfinite(stopping))
+        or np.any(energy <= 0)
+        or np.any(np.diff(energy) <= 0)
+        or np.any(stopping < 0)
+    ):
+        raise ValueError(f"{path}: invalid PSTAR stopping-power table")
+    group = h5.create_group("stopping-power")
+    group.attrs["type"] = "table"
+    quantity(group, "grid", energy * EV_PER_MEV, "eV")
+    quantity(group, "value", stopping * EV_PER_MEV, "eV cm2/g")
+    interpolation(group, len(energy))
     return True
 
 
@@ -439,13 +435,34 @@ def read_tabulated_yield(data, what):
     TabulatedMultiplicity (primary DLW) into (energy [MeV], value) arrays.
     Only linear-linear interpolation is supported (all TENDL-2021 files use it).
     """
+    offset = (
+        2
+        if isinstance(data, ACEtk.continuous.TabulatedSecondaryParticleMultiplicity)
+        else 0
+    )
     if not data.interpolation_data.is_linear_linear:
+        regions = int(data.NB)
+        boundaries = [int(data.xss(offset + index)) for index in range(2, regions + 2)]
+        interpolants = [
+            int(data.xss(offset + index))
+            for index in range(regions + 2, 2 * regions + 2)
+        ]
         fail(
             f"{what}: yield table is not linear-linear "
-            f"(NBT={list(data.NBT)}, INT={list(data.INT)})"
+            f"(NBT={boundaries}, INT={interpolants})"
         )
-    energy = np.array(data.energies, dtype=np.float64)
-    value = np.array(data.multiplicities, dtype=np.float64)
+    regions = int(data.NB)
+    count = int(data.NE)
+    energy_start = offset + 2 * regions + 3
+    value_start = energy_start + count
+    energy = np.array(
+        [data.xss(index) for index in range(energy_start, value_start)],
+        dtype=np.float64,
+    )
+    value = np.array(
+        [data.xss(index) for index in range(value_start, value_start + count)],
+        dtype=np.float64,
+    )
     if len(energy) != len(value) or len(energy) < 2:
         fail(
             f"{what}: malformed yield table ({len(energy)} energies, {len(value)} values)"
@@ -458,28 +475,30 @@ def read_tabulated_yield(data, what):
 
 
 def write_yield_table(group, name, energy, value):
-    """
-    Write a yield table as group `name` with datasets `energy` [MeV] and `value`
-    (mean products per occurrence of the reaction), attrs type='tabulated' and
-    interpolation='lin-lin' (the layout MC/DC uses for tabulated data).
-
-    ACE tables may repeat an energy point (zero-width interval, e.g. 30.0, 30.0 in
-    the MT-5 yields).  If the repeated points have the same value they are redundant
-    and one is dropped.  If the values differ the table has a real discontinuity:
-    both points are kept and attribute `has_discontinuity` is set.
-    """
+    """Write an incident-energy-dependent yield as a standard Data table."""
     energy = np.asarray(energy, dtype=np.float64)
     value = np.asarray(value, dtype=np.float64)
+    if (
+        energy.ndim != 1
+        or energy.shape != value.shape
+        or len(energy) < 2
+        or not np.all(np.isfinite(energy))
+        or not np.all(np.isfinite(value))
+        or np.any(np.diff(energy) < 0)
+        or np.any(value < 0)
+    ):
+        fail(f"{name}: invalid yield table")
     same_as_previous = np.zeros(len(energy), dtype=bool)
     same_as_previous[1:] = (energy[1:] == energy[:-1]) & (value[1:] == value[:-1])
     energy, value = energy[~same_as_previous], value[~same_as_previous]
+    if len(energy) < 2 or not np.any(np.diff(energy) > 0):
+        fail(f"{name}: yield table must contain at least two distinct energies")
 
     table = group.create_group(name)
-    table.attrs["type"] = "tabulated"
-    table.attrs["interpolation"] = "lin-lin"
-    table.attrs["has_discontinuity"] = bool(np.any(energy[1:] == energy[:-1]))
-    write_array(table, "energy", energy, unit="MeV")
-    write_array(table, "value", value)
+    table.attrs["type"] = "table"
+    quantity(table, "grid", energy * EV_PER_MEV, "eV")
+    quantity(table, "value", value)
+    interpolation(table, len(energy))
     return table
 
 
@@ -489,129 +508,38 @@ def write_yield_table(group, name, energy, value):
 
 
 def write_cosine_distribution(data, group):
-    """
-    Write an angular distribution into `group` (attribute `type` is set here).
-    Returns False if the angle is given inside the energy distribution (Kalbach-Mann).
-    """
-    C = ACEtk.continuous
-    if isinstance(data, C.DistributionGivenElsewhere):
-        group.attrs["type"] = "given_in_energy_distribution"
+    """Write an angular Distribution; return False when energy supplies the angle."""
+    if isinstance(data, ACEtk.continuous.DistributionGivenElsewhere):
         return False
-    if isinstance(data, C.FullyIsotropicDistribution):
-        group.attrs["type"] = "isotropic"
-        return True
-    if not isinstance(data, C.AngularDistributionData):
-        fail(f"Unsupported angular distribution {type(data).__name__}")
-
-    group.attrs["type"] = "tabulated"
-    group.attrs["unit"] = "MeV"
-    write_array(group, "incident_energies", data.incident_energies)
-    for i, sub in enumerate(data.distributions):
-        eg = group.create_group(f"E_in_{i + 1}")
-        if isinstance(sub, C.TabulatedAngularDistribution):
-            eg.attrs["type"] = "tabulated"
-            write_array(eg, "cosines", sub.cosines)
-            write_array(eg, "pdf", sub.pdf)
-            write_array(eg, "cdf", sub.cdf)
-        elif isinstance(sub, C.IsotropicAngularDistribution):
-            eg.attrs["type"] = "isotropic"
-        else:
-            fail(f"Unsupported angular sub-distribution {type(sub).__name__}")
+    write_h1_angular_distribution(group, data)
     return True
 
 
-def write_kalbach_mann(data, group):
-    """KalbachMannDistributionData -> flat arrays; offset[i] = start of table i.
-    Kalbach-Mann Distribution has LAW = 44"""
-    group.attrs["type"] = "kalbach-mann"
-    group.attrs["LAW"] = int(data.LAW)
-    write_array(group, "energy", data.incident_energies, unit="MeV")
-
-    offset, energy_out, pdf, cdf, precompound, slope = [], [], [], [], [], []
-    for i in range(1, data.number_incident_energies + 1):
-        dist = data.distribution(i)
-        offset.append(len(energy_out))
-        energy_out.extend(dist.outgoing_energies)
-        pdf.extend(dist.pdf)
-        cdf.extend(dist.cdf)
-        precompound.extend(dist.precompound_fraction_values)
-        slope.extend(dist.angular_distribution_slope_values)
-
-    write_array(group, "offset", offset, dtype=np.int32)
-    write_array(group, "energy_out", energy_out, unit="MeV")
-    write_array(group, "pdf", pdf)
-    write_array(group, "cdf", cdf)
-    write_array(group, "precompound_factor", precompound)
-    write_array(group, "angular_slope", slope)
-
-
-def write_tabulated_energy(data, group):
-    """
-    LAW 4 (OutgoingEnergyDistributionData) -> flat arrays in MC/DC's 'tabulated'
-    layout: energy (incident), offset, value (outgoing energies), pdf.  cdf is also
-    written.
-
-    ACE stores, per incident energy, INTT = 10*ND + I where I = 1 (histogram) or
-    2 (linear-linear) and ND is the number of DISCRETE LINES at the start of that
-    table (this is how TENDL photon spectra are stored: ND lines, then a continuum).
-    For discrete lines the 'pdf' entries are line probabilities, not densities.
-    Both are kept as `interpolation` and `n_discrete` (one entry per incident energy)
-    so the reader can split point masses and continuous densities into the shared
-    DistributionMultiTable representation.
-    """
-    group.attrs["type"] = "tabulated"
-    group.attrs["LAW"] = int(data.LAW)
-    write_array(group, "energy", data.incident_energies, unit="MeV")
-
-    offset, value, pdf, cdf, interpolation, n_discrete = [], [], [], [], [], []
-    for i in range(1, data.number_incident_energies + 1):
-        dist = data.distribution(i)
-        # The first two words of a tabulated-energy table are INTT and NP. Check that
-        # reading them this way agrees with the table length.
-        intt, n_points = int(dist.xss(1)), int(dist.xss(2))
-        if n_points != len(dist.outgoing_energies):
-            fail(
-                "Unexpected TabulatedEnergyDistribution layout: NP read from xss "
-                f"({n_points}) != number of outgoing energies "
-                f"({len(dist.outgoing_energies)})"
-            )
-        discrete, scheme = divmod(intt, 10)
-        if scheme not in (1, 2) or discrete > n_points:
-            fail(f"Unexpected INTT value {intt} for a table with {n_points} points")
-        offset.append(len(value))
-        value.extend(dist.outgoing_energies)
-        pdf.extend(dist.pdf)
-        cdf.extend(dist.cdf)
-        interpolation.append(scheme)
-        n_discrete.append(discrete)
-
-    write_array(group, "offset", offset, dtype=np.int32)
-    write_array(group, "value", value, unit="MeV")
-    write_array(group, "pdf", pdf)
-    write_array(group, "cdf", cdf)
-    write_array(group, "interpolation", interpolation, dtype=np.int32)
-    write_array(group, "n_discrete", n_discrete, dtype=np.int32)
-
-
 def write_energy_distribution(data, group):
-    """Write one outgoing-energy distribution; returns its `type` string."""
-    C = ACEtk.continuous
-    if isinstance(data, C.KalbachMannDistributionData):
-        write_kalbach_mann(data, group)
-    elif isinstance(data, C.OutgoingEnergyDistributionData):
-        write_tabulated_energy(data, group)
-    elif isinstance(data, C.LevelScatteringDistribution):
-        group.attrs["type"] = "level-scattering"
-        group.attrs["LAW"] = int(data.LAW)
-        group.create_dataset("C1", data=data.C1)
-        group.create_dataset("C2", data=data.C2)
-    else:
-        fail(
-            f"Unsupported energy distribution {type(data).__name__} "
-            "(the MC/DC proton loader reads Kalbach-Mann, tabulated and "
-            "level-scattering spectra)"
-        )
+    """Write an ACE energy or joint energy-angle Distribution."""
+    write_h1_energy_distribution(group, data)
     return group.attrs["type"]
+
+
+def is_joint_energy_distribution(data):
+    """Return whether an ACE spectrum supplies both outgoing energy and angle."""
+    C = ACEtk.continuous
+    joint_types = (
+        C.KalbachMannDistributionData,
+        C.EnergyAngleDistributionData,
+        C.NBodyPhaseSpaceDistribution,
+    )
+    if isinstance(data, C.MultiDistributionData):
+        joint = [
+            is_joint_energy_distribution(data.distribution(index))
+            for index in range(1, data.number_distributions + 1)
+        ]
+        if any(joint) and not all(joint):
+            fail(
+                "A product mixture cannot combine joint and independent angle-energy laws"
+            )
+        return all(joint)
+    return isinstance(data, joint_types)
 
 
 # ==============================================================================
@@ -620,50 +548,44 @@ def write_energy_distribution(data, group):
 
 
 def write_secondary_product(
-    parent, name, *, zap, ace_id, frame, yield_energy, yield_value, energy, angle
+    parent, name, *, frame, yield_energy, yield_value, energy, angle
 ):
-    """
-    One product of one reaction, as `parent/<name>`:
-      attrs   ZAP, particle_name, ace_particle_id, reference_frame ("LAB"/"COM")
-      yield/  energy [MeV], value  -- mean number of products per reaction occurrence
-      kalbach_mann/ or energy_spectrum/   the single outgoing-energy distribution
-      angular_cosine_distribution/        angle (or 'given_in_energy_distribution')
-    """
+    """Write one additional ACE product as a standard CrossProduct record."""
     C = ACEtk.continuous
-    if name in parent:
-        fail(f"Duplicate secondary product {name!r} in {parent.name}")
-    if isinstance(energy, C.MultiDistributionData):
-        fail(
-            f"{parent.name}/{name}: several energy distributions for one product are "
-            "not supported (MC/DC reads only the first)"
-        )
-
-    product = parent.create_group(name)
-    product.attrs["ZAP"] = zap
-    product.attrs["particle_name"] = name.split("_")[0]
-    product.attrs["ace_particle_id"] = ace_id
-    product.attrs["reference_frame"] = frame
+    joint = is_joint_energy_distribution(energy)
+    index = str(len(parent))
+    product = parent.create_group(index)
+    particle_name = {
+        "He3": "helium-3",
+        "alpha": "alpha",
+    }.get(name, name)
+    quantity(product, "particle", particle_name)
+    quantity(product, "reference-frame", frame)
     write_yield_table(product, "yield", yield_energy, yield_value)
+    quantity(product, "decay-rate", np.inf, "1/s")
 
-    is_kalbach_mann = isinstance(energy, C.KalbachMannDistributionData)
-    energy_group = product.create_group(
-        "kalbach_mann" if is_kalbach_mann else "energy_spectrum"
-    )
-    write_energy_distribution(energy, energy_group)
-
-    angle_group = product.create_group("angular_cosine_distribution")
-    angle_in_energy_block = not write_cosine_distribution(angle, angle_group)
-    if angle_in_energy_block and not is_kalbach_mann:
-        fail(
-            f"{parent.name}/{name}: angle 'given elsewhere' but the spectrum is not Kalbach-Mann"
+    distribution = product.create_group("angle-energy-distribution")
+    if joint:
+        write_energy_distribution(energy, distribution)
+    else:
+        if isinstance(angle, C.DistributionGivenElsewhere):
+            fail(
+                f"{parent.parent.name}/{name}: angle is not included in its energy distribution"
+            )
+        distribution.attrs["type"] = "independent-angle-energy"
+        write_cosine_distribution(
+            angle, distribution.create_group("angular-cosine-distribution")
+        )
+        write_energy_distribution(
+            energy, distribution.create_group("energy-distribution")
         )
     return product
 
 
 def _products_group(MT, reaction_groups, skipped_MTs, what, verbose):
-    """The `secondary_products` group of reaction MT, or None if MT was deliberately skipped."""
+    """Return a reaction's cross-products group or skip a redundant sum."""
     if MT in reaction_groups:
-        return reaction_groups[MT].require_group("secondary_products")
+        return reaction_groups[MT]["cross-products"]
     if MT in skipped_MTs:
         if verbose:
             note(f"{what}: MT-{MT:03} is a redundant sum in this file; skipped")
@@ -720,7 +642,7 @@ def write_secondary_particles(table, reaction_groups, skipped_MTs, verbose=False
 
             y_energy, y_value = read_tabulated_yield(yield_data, what)
             write_secondary_product(
-                group, name, zap=zap, ace_id=ace_id,
+                group, name,
                 frame=frame_name(tyrh.reference_frame(j)),
                 yield_energy=y_energy, yield_value=y_value,
                 energy=dlwh.energy_distribution_data(j),
@@ -765,7 +687,7 @@ def write_secondary_particles(table, reaction_groups, skipped_MTs, verbose=False
             frame = dlwp.reference_frame(k)
             y_energy, y_value = read_tabulated_yield(yield_data, what)
             write_secondary_product(
-                group, name, zap=PHOTON_ZAP, ace_id=PHOTON_ACE_ID,
+                group, name,
                 frame="LAB" if frame is None else frame_name(frame),
                 yield_energy=y_energy, yield_value=y_value,
                 energy=dlwp.energy_distribution_data(k),
@@ -848,76 +770,42 @@ def classify_reactions(table):
     return reactions, skipped
 
 
-def write_primary_spectra(group, data):
-    """Outgoing-proton energy spectra with their probability weights."""
-    C = ACEtk.continuous
-    if not isinstance(data, C.MultiDistributionData):
-        write_array(
-            group, "spectrum_probability_grid", [0.0, SPECTRUM_GRID_MAX_MEV], unit="MeV"
-        )
-        group.create_dataset("spectrum_probability", data=np.array([[1.0]]))
-        write_energy_distribution(data, group.create_group("energy_spectrum-1"))
-        return
-
-    n_dist = data.number_distributions
-    probs = data.probabilities
-    if all(p.number_interpolation_regions == 0 for p in probs):
-        prob_grid = np.array([0.0, SPECTRUM_GRID_MAX_MEV])
-        prob = np.zeros((1, n_dist))
-        for k in range(n_dist):
-            prob[0, k] = max(data.probability(k + 1).probabilities)
-    elif all(p.number_interpolation_regions == 1 for p in probs) and all(
-        p.interpolants[0] == 1 for p in probs
-    ):
-        prob_grid = np.array(data.probability(1).energies)
-        prob = np.zeros((len(prob_grid) - 1, n_dist))
-        for k in range(n_dist):
-            prob[:, k] = np.array(data.probability(k + 1).probabilities[:-1])
-    else:
-        fail("Unsupported multi-distribution probability interpolation")
-
-    write_array(group, "spectrum_probability_grid", prob_grid, unit="MeV")
-    group.create_dataset("spectrum_probability", data=prob)
-    for k in range(n_dist):
-        write_energy_distribution(
-            data.distribution(k + 1), group.create_group(f"energy_spectrum-{k + 1}")
-        )
-
-
 def write_reaction(group, table, rx, verbose):
-    """xs, Q-value, frame and (for inelastic) multiplicity, angle and spectra."""
+    """Write one H1 reaction in the standard mcdc-data layout."""
     tyr = table.frame_and_multiplicity_block
     xs_block = table.cross_section_block
-    group.attrs["MT"] = rx.MT
+    group.attrs["ENDF-MT"] = rx.MT
+    group.attrs["category"] = rx.group.replace("_", "-")
 
-    xs = write_array(group, "xs", xs_block.cross_sections(rx.index), unit="barns")
-    xs.attrs["offset"] = xs_block.energy_index(rx.index) - 1
-    write_array(
+    xs = group.create_group("xs")
+    quantity(xs, "value", xs_block.cross_sections(rx.index), "barn")
+    quantity(xs, "offset", xs_block.energy_index(rx.index) - 1)
+    interpolation(xs, len(xs["value"]))
+    quantity(
         group,
         "Q-value",
-        table.reaction_qvalue_block.q_value(rx.index),
-        unit="MeV",
-        dtype=float,
+        table.reaction_qvalue_block.q_value(rx.index) * EV_PER_MEV,
+        "eV",
     )
-    group.create_dataset(
-        "reference_frame", data=frame_name(tyr.reference_frame(rx.index))
-    )
+    quantity(group, "reference-frame", frame_name(tyr.reference_frame(rx.index)))
+    group.create_group("cross-products")
 
     if rx.group == "capture":
         return
 
     if rx.proton_yield is None:
-        group.create_dataset("multiplicity", data=rx.multiplicity)
-    else:  # energy-dependent: replaces the integer `multiplicity` dataset
-        write_yield_table(group, "proton_yield", *rx.proton_yield)
+        quantity(group, "multiplicity", rx.multiplicity)
+    else:
+        write_yield_table(group, "multiplicity", *rx.proton_yield)
 
     angle = table.angular_distribution_block.angular_distribution_data(rx.index)
-    angle_group = group.create_group("angular_cosine_distribution")
-    if not write_cosine_distribution(angle, angle_group) and verbose:
-        note(f"MT-{rx.MT:03} angular distribution is given in the energy block")
+    if not isinstance(angle, ACEtk.continuous.DistributionGivenElsewhere):
+        write_cosine_distribution(
+            angle, group.create_group("angular-cosine-distribution")
+        )
 
     spectra = table.energy_distribution_block.energy_distribution_data(rx.index)
-    write_primary_spectra(group, spectra)
+    write_energy_distribution(spectra, group.create_group("energy-distribution"))
 
 
 # ==============================================================================
@@ -925,142 +813,215 @@ def write_reaction(group, table, rx, verbose):
 # ==============================================================================
 
 
-def write_nuclide(h5, table, nuclide, Z, A, S, pstar_dir, verbose):
-    hdr = table.header
-    h5.attrs["source_title"] = hdr.title
-    h5.attrs["source_version"] = hdr.version
-    h5.attrs["source_date"] = hdr.date
-    comments = getattr(hdr, "comments", None)  # optional ACE header field
-    if comments is not None:
-        h5.attrs["source_comments"] = comments
-
-    h5.create_dataset("nuclide_name", data=nuclide)
-    h5.create_dataset("excitation_level", data=S)
-    write_array(h5, "temperature", T_KELVIN, unit="K", dtype=float)
-    h5.create_dataset("atomic_number", data=table.atom_number)
-    h5.create_dataset("mass_number", data=table.mass_number)
-    h5.create_dataset("atomic_weight_ratio", data=table.atomic_weight_ratio)
-    write_array(
-        h5, "radiation_length", radiation_length(Z, A), unit="g/cm2", dtype=float
-    )
-    h5.create_dataset(
-        "fissionable", data=False
-    )  # fission is rejected in classify_reactions
-    if pstar_dir is not None:
-        write_stopping_power(h5, pstar_dir, ELEMENT_SYMBOLS[Z - 1], verbose=verbose)
-
-    reactions, skipped = classify_reactions(table)
-    proton_reactions = h5.create_group("proton_reactions")
-    principal = table.principal_cross_section_block
-    write_array(proton_reactions, "xs_energy_grid", principal.energies, unit="MeV")
-
-    # Elastic scattering: cross section from the principal block, always COM.
-    elastic = proton_reactions.create_group("elastic_scattering/MT-002")
-    elastic.attrs["MT"] = 2
-    xs = write_array(elastic, "xs", principal.elastic, unit="barns")
-    xs.attrs["offset"] = 0
-    write_array(elastic, "Q-value", 0.0, unit="MeV", dtype=float)
-    elastic.create_dataset("reference_frame", data="COM")
-    angle = table.angular_distribution_block.angular_distribution_data(0)
-    if (
-        not write_cosine_distribution(
-            angle, elastic.create_group("angular_cosine_distribution")
-        )
-        and verbose
-    ):
-        note("MT-002 angular distribution is given in the energy block")
-
-    reaction_groups = {}
-    for rx in reactions:
-        group = proton_reactions.create_group(f"{rx.group}/MT-{rx.MT:03}")
-        write_reaction(group, table, rx, verbose)
-        reaction_groups[rx.MT] = group
-    if verbose:
-        by_group = {
-            g: [r.MT for r in reactions if r.group == g]
-            for g in ("capture", "inelastic_scattering")
+def source_libraries(table, include_pstar):
+    """Build provenance records for TENDL and, when used, PSTAR."""
+    header = table.header
+    title = str(getattr(header, "title", "") or "")
+    comments = str(getattr(header, "comments", "") or "")
+    release = re.search(r"\bTENDL[- ](\d{4})\b", f"{title} {comments}")
+    if release is None:
+        fail("ACE header does not identify a TENDL release")
+    tendl = {
+        "title": title,
+        "version": release.group(1),
+        "release-date": "",
+        "reference": "",
+        "comments": comments,
+        "format": "ACE",
+        "format-version": str(getattr(header, "version", "") or ""),
+        "processing-date": str(getattr(header, "date", "") or ""),
+    }
+    sources = {f"TENDL-{release.group(1)}": tendl}
+    if include_pstar:
+        sources["PSTAR"] = {
+            "title": "NIST PSTAR stopping-power tables",
+            "version": "",
+            "release-date": "",
+            "reference": "NIST PSTAR",
+            "comments": "",
+            "format": "PSTAR",
+            "format-version": "",
+            "processing-date": "",
         }
-        print(
-            f"  Capture: {by_group['capture']}\n  Inelastic: {by_group['inelastic_scattering']}"
-        )
-        print(f"  Not written (redundant sums / MT > {MAX_MT}): {sorted(skipped)}")
+    return sources
 
-    n_products = write_secondary_particles(
-        table, reaction_groups, skipped, verbose=verbose
+
+def _write_target_properties(file, table, Z, A, state):
+    quantity(file, "atomic-number", Z)
+    quantity(file, "mass-number", A)
+    quantity(file, "atomic-weight-ratio", table.atomic_weight_ratio)
+    quantity(file, "excitation-level", state)
+    quantity(file, "fissionable", False)
+    quantity(file, "radiation-length", radiation_length(Z, A), "g/cm2")
+
+
+def _write_reactions(file, table, verbose):
+    reactions, skipped = classify_reactions(table)
+    energy = np.asarray(table.principal_cross_section_block.energies) * EV_PER_MEV
+    if (
+        energy.ndim != 1
+        or len(energy) < 2
+        or not np.all(np.isfinite(energy))
+        or np.any(np.diff(energy) < 0)
+    ):
+        fail("Invalid principal proton energy grid")
+    quantity(file, "xs-energy-grid", energy, "eV")
+    root = file.create_group("reactions", track_order=True)
+
+    elastic = root.create_group("MT-002", track_order=True)
+    elastic.attrs["ENDF-MT"] = 2
+    elastic.attrs["category"] = "elastic-scattering"
+    xs = elastic.create_group("xs")
+    quantity(xs, "value", table.principal_cross_section_block.elastic, "barn")
+    quantity(xs, "offset", 0)
+    interpolation(xs, len(energy))
+    quantity(elastic, "reference-frame", "COM")
+    quantity(elastic, "Q-value", 0.0, "eV")
+    elastic.create_group("cross-products")
+    angle = table.angular_distribution_block.angular_distribution_data(0)
+    if isinstance(angle, ACEtk.continuous.DistributionGivenElsewhere):
+        fail("MT-002 elastic scattering has no explicit angular distribution")
+    write_cosine_distribution(
+        angle, elastic.create_group("angular-cosine-distribution")
     )
+    reaction_groups = {2: elastic}
+
+    for reaction in reactions:
+        group = root.create_group(f"MT-{reaction.MT:03}", track_order=True)
+        write_reaction(group, table, reaction, verbose)
+        reaction_groups[reaction.MT] = group
+    count = write_secondary_particles(table, reaction_groups, skipped, verbose)
     if verbose:
-        print(f"  Secondary products written: {n_products}")
+        print(f"  Reactions written: {len(reactions) + 1}")
+        print(f"  Redundant or unsupported MTs skipped: {sorted(skipped)}")
+        print(f"  Cross-products written: {count}")
 
 
-def process_ace_file(ace_path, output_dir, pstar_dir=None, verbose=False):
-    """Convert one proton ACE file to HDF5. Returns the output file name."""
-    table = ACEtk.ContinuousEnergyTable.from_file(ace_path)
+def write_nuclide(file, table, Z, A, state, pstar_path, verbose):
+    """Write target properties, optional stopping power, and H1 reactions."""
+    _write_target_properties(file, table, Z, A, state)
+    if pstar_path is not None:
+        write_stopping_power(file, pstar_path.parent, ELEMENT_SYMBOLS[Z - 1], verbose)
+    _write_reactions(file, table, verbose)
+
+
+def process_ace_file(
+    ace_path, output_dir, pstar_dir=None, verbose=False, rewrite=False
+):
+    """Convert one TENDL ACE evaluation into ``H1-{nuclide}.h5``."""
+    ace_path, output_dir = Path(ace_path), Path(output_dir)
+    table = ACEtk.ContinuousEnergyTable.from_file(str(ace_path))
     header = table.header
     Z, A, S = decode_ace_zaid(header.zaid)
     if not 1 <= Z <= len(ELEMENT_SYMBOLS):
         fail(f"Unsupported Z={Z} in {ace_path}")
     symbol = ELEMENT_SYMBOLS[Z - 1]
     nuclide = f"{symbol}{A}" if S == 0 else f"{symbol}{A}m{S}"
-
-    out_name = f"{nuclide}-{T_KELVIN}K.h5"
-    out_path = os.path.join(output_dir, out_name)
-    tmp_path = out_path + ".partial"
-    if verbose:
-        print(
-            f"\n{'=' * 80}\n  {os.path.basename(ace_path)}  ->  {out_name}  (Z={Z} A={A} S={S})"
+    out_name = f"H1-{nuclide}.h5"
+    out_path = output_dir / out_name
+    pstar_path = Path(pstar_dir) / f"{symbol}.txt" if pstar_dir is not None else None
+    if pstar_path is not None and not pstar_path.is_file():
+        pstar_path = None
+        if verbose:
+            print(f"  [warn] No PSTAR file for {symbol}")
+    sources = source_libraries(table, pstar_path is not None)
+    fields = (
+        "atomic-number",
+        "mass-number",
+        "atomic-weight-ratio",
+        "excitation-level",
+        "fissionable",
+        "radiation-length",
+        "xs-energy-grid",
+        "reactions",
+    )
+    selected, _ = classify_reactions(table)
+    required = list(fields)
+    for reaction in selected:
+        base = f"reactions/MT-{reaction.MT:03}"
+        required.extend(
+            f"{base}/{field}"
+            for field in (
+                "xs/value",
+                "xs/offset",
+                "reference-frame",
+                "Q-value",
+                "cross-products",
+            )
         )
-
-    # Write to a temporary name: a failed conversion must not leave a half-written
-    # file that a later (non --rewrite) run would mistake for a finished one.
-    try:
-        with h5py.File(tmp_path, "w") as h5:
-            write_nuclide(h5, table, nuclide, Z, A, S, pstar_dir, verbose)
-        os.replace(tmp_path, out_path)
-    except BaseException:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise
+        if reaction.group == "inelastic":
+            required.extend((f"{base}/multiplicity", f"{base}/energy-distribution"))
+    required.extend(
+        (
+            "reactions/MT-002/xs/value",
+            "reactions/MT-002/xs/offset",
+            "reactions/MT-002/reference-frame",
+            "reactions/MT-002/Q-value",
+            "reactions/MT-002/cross-products",
+            "reactions/MT-002/angular-cosine-distribution",
+        )
+    )
+    if pstar_path is not None:
+        required.extend(("stopping-power/grid", "stopping-power/value"))
+    if not rewrite and prepared_file_exists(out_path, required, sources):
+        if verbose:
+            print(f"Skip {out_name}: output file already exists")
+        return out_name
+    if verbose:
+        print(f"Create {out_name} from {ace_path.name}")
+    with atomic_file(out_path, sources) as file:
+        write_nuclide(file, table, Z, A, S, pstar_path, verbose)
     return out_name
 
 
-def process_pstar_only_file(symbol, A, awr, output_dir, pstar_dir, verbose=False):
-    """Minimal HDF5 file (stopping power only). Returns the file name, or None if no PSTAR file."""
-    pstar_path = os.path.join(pstar_dir, f"{symbol}.txt")
-    if not os.path.exists(pstar_path):
+def process_pstar_only_file(
+    symbol, A, awr, output_dir, pstar_dir, verbose=False, rewrite=False
+):
+    """Write a stopping-power-only H1 file when ACE data are unavailable."""
+    pstar_path = Path(pstar_dir) / f"{symbol}.txt"
+    if not pstar_path.is_file():
         return None
     Z = SYMBOL_TO_Z[symbol]
-    nuclide = f"{symbol}{A}"
-    out_name = f"{nuclide}-{T_KELVIN}K.h5"
-    out_path = os.path.join(output_dir, out_name)
-    tmp_path = out_path + ".partial"
+    out_name = f"H1-{symbol}{A}.h5"
+    out_path = Path(output_dir) / out_name
+    if out_path.is_file():
+        with h5py.File(out_path, "r") as file:
+            if "reactions" in file:
+                return out_name
+    sources = {
+        "PSTAR": {
+            "title": "NIST PSTAR stopping-power tables",
+            "version": "",
+            "release-date": "",
+            "reference": "NIST PSTAR",
+            "comments": "",
+            "format": "PSTAR",
+            "format-version": "",
+            "processing-date": "",
+        }
+    }
+    required = (
+        "atomic-number",
+        "mass-number",
+        "atomic-weight-ratio",
+        "excitation-level",
+        "fissionable",
+        "radiation-length",
+        "stopping-power/grid",
+        "stopping-power/value",
+    )
+    if not rewrite and prepared_file_exists(out_path, required, sources):
+        return out_name
     if verbose:
-        print(f"\n{'=' * 80}\n  (no ACE)  ->  {out_name}  [stopping power only]")
-
-    try:
-        with h5py.File(tmp_path, "w") as h5:
-            h5.attrs["source_title"] = "PSTAR (NIST) stopping power only - no ACE data"
-            h5.attrs["source_version"] = "N/A"
-            h5.attrs["source_date"] = "N/A"
-            h5.create_dataset("nuclide_name", data=nuclide)
-            h5.create_dataset("excitation_level", data=0)
-            write_array(h5, "temperature", T_KELVIN, unit="K", dtype=float)
-            h5.create_dataset("atomic_number", data=Z)
-            h5.create_dataset("mass_number", data=A)
-            h5.create_dataset("atomic_weight_ratio", data=awr)
-            write_array(
-                h5,
-                "radiation_length",
-                radiation_length(Z, A),
-                unit="g/cm2",
-                dtype=float,
-            )
-            h5.create_dataset("fissionable", data=False)
-            write_stopping_power(h5, pstar_dir, symbol, verbose=verbose)
-        os.replace(tmp_path, out_path)
-    except BaseException:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise
+        print(f"Create {out_name} from PSTAR")
+    with atomic_file(out_path, sources) as file:
+        quantity(file, "atomic-number", Z)
+        quantity(file, "mass-number", A)
+        quantity(file, "atomic-weight-ratio", awr)
+        quantity(file, "excitation-level", 0)
+        quantity(file, "fissionable", False)
+        quantity(file, "radiation-length", radiation_length(Z, A), "g/cm2")
+        write_stopping_power(file, pstar_path.parent, symbol, verbose)
     return out_name
 
 
@@ -1069,27 +1030,16 @@ def process_pstar_only_file(symbol, A, awr, output_dir, pstar_dir, verbose=False
 # ==============================================================================
 
 
-def nuclide_of(ace_path):
-    """Nuclide name (e.g. 'Al27') of an ACE file, from its header."""
-    header = ACEtk.Table.from_file(ace_path).header
-    Z, A, S = decode_ace_zaid(header.zaid)
-    symbol = ELEMENT_SYMBOLS[Z - 1] if 1 <= Z <= len(ELEMENT_SYMBOLS) else f"Z{Z}"
-    return f"{symbol}{A}" if S == 0 else f"{symbol}{A}m{S}"
-
-
-def require_env(name):
-    value = os.getenv(name)
-    if value is None:
-        sys.exit(f"[ERROR] Environment variable ${name} is not set.")
-    return value
-
-
 def main():
-    parser = argparse.ArgumentParser(description="MC/DC proton data generator")
+    parser = argparse.ArgumentParser(
+        description="Prepare MC/DC proton data from TENDL ACE and NIST PSTAR"
+    )
     parser.add_argument(
         "--rewrite", action="store_true", help="regenerate existing files"
     )
-    parser.add_argument("--verbose", action="store_true")
+    parser.add_argument(
+        "--verbose", action="store_true", help="Report files and reaction details"
+    )
     parser.add_argument(
         "--only",
         nargs="+",
@@ -1098,82 +1048,55 @@ def main():
     )
     args = parser.parse_args()
 
-    ace_dir = require_env("MCDC_ACELIB_PROTON")
-    pstar_dir = require_env("MCDC_PSTAR_LIB")
-    output_dir = require_env("MCDC_LIB_PROTON")
-    os.makedirs(output_dir, exist_ok=True)
-    print(
-        f"\nACE directory   : {ace_dir}\nPSTAR directory : {pstar_dir}\nOutput directory: {output_dir}\n"
-    )
-
-    ace_files = sorted(f for f in os.listdir(ace_dir) if f.endswith(".ace"))
-    print(f"{len(ace_files)} ACE files found")
+    for variable in ("MCDC_ACELIB_PROTON", "MCDC_PSTAR_LIB", "MCDC_LIB_PROTON"):
+        if not os.getenv(variable):
+            parser.error(f"Environment variable {variable} is not set")
+    ace_dir = Path(os.environ["MCDC_ACELIB_PROTON"])
+    pstar_dir = Path(os.environ["MCDC_PSTAR_LIB"])
+    output_dir = Path(os.environ["MCDC_LIB_PROTON"])
+    if not ace_dir.is_dir():
+        parser.error(f"ACE directory does not exist: {ace_dir}")
+    if not pstar_dir.is_dir():
+        parser.error(f"PSTAR directory does not exist: {pstar_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ace_files = sorted(path for path in ace_dir.iterdir() if path.suffix == ".ace")
     if args.only:
-        missing = [f for f in args.only if f not in ace_files]
+        available = {path.name for path in ace_files}
+        missing = [name for name in args.only if name not in available]
         if missing:
-            sys.exit(f"[ERROR] Not found in {ace_dir}: {missing}")
-        ace_files = sorted(args.only)
+            parser.error(f"ACE filenames not found in {ace_dir}: {', '.join(missing)}")
+        selected = set(args.only)
+        ace_files = [path for path in ace_files if path.name in selected]
 
-    # Pass 1: ACE files
-    done = {f.rsplit("-", 1)[0] for f in os.listdir(output_dir) if f.endswith(".h5")}
-    errors, targets = [], []
-    for name in ace_files:
-        if args.rewrite:
-            targets.append(name)
-            continue
-        try:
-            if nuclide_of(os.path.join(ace_dir, name)) not in done:
-                targets.append(name)
-        except Exception:
-            targets.append(name)  # unreadable header: let the conversion report it
-
-    bar = tqdm(
-        targets,
-        disable=args.verbose,
-        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} {postfix}",
+    print(
+        f"ACE directory: {ace_dir}\nPSTAR directory: {pstar_dir}\n"
+        f"Output directory: {output_dir}\n"
     )
-    for name in bar:
-        bar.set_postfix_str(name)
+    errors = []
+    progress = tqdm(ace_files, disable=args.verbose, unit="file")
+    for path in progress:
+        progress.set_postfix_str(path.name)
         try:
-            out = process_ace_file(
-                os.path.join(ace_dir, name), output_dir, pstar_dir, args.verbose
-            )
-            if args.verbose:
-                print(f"  -> wrote {out}")
-        except Exception as exc:
-            errors.append((name, f"{type(exc).__name__}: {exc}"))
-            if args.verbose:
-                traceback.print_exc()
+            process_ace_file(path, output_dir, pstar_dir, args.verbose, args.rewrite)
+        except (ConversionError, ValueError, OSError, AttributeError) as error:
+            errors.append((path.name, str(error)))
 
-    # Pass 2: stopping-power-only isotopes (H, He)
-    n_pstar = 0
-    existing = set(os.listdir(output_dir))
     for symbol, A, awr in PSTAR_ONLY_ISOTOPES:
-        nuclide = f"{symbol}{A}"
-        if not args.rewrite and f"{nuclide}-{T_KELVIN}K.h5" in existing:
-            continue
+        filename = f"H1-{symbol}{A}.h5"
         try:
             out = process_pstar_only_file(
-                symbol, A, awr, output_dir, pstar_dir, args.verbose
+                symbol, A, awr, output_dir, pstar_dir, args.verbose, args.rewrite
             )
-            if out is None:
-                if args.verbose:
-                    print(f"  [skip] No PSTAR data for {nuclide}")
-            else:
-                n_pstar += 1
-                if args.verbose:
-                    print(f"  -> wrote {out}  [stopping power only]")
-        except Exception as exc:
-            errors.append((nuclide, f"{type(exc).__name__}: {exc}"))
-            if args.verbose:
-                traceback.print_exc()
+            if out is None and args.verbose:
+                print(f"Skip {filename}: no PSTAR data")
+        except (ValueError, OSError) as error:
+            errors.append((filename, str(error)))
 
-    n_ok = len(targets) + n_pstar - sum(1 for name, _ in errors)
-    print(f"\nDone. {n_ok} written, {len(errors)} failed.")
+    print(f"\nDone. {len(ace_files)} ACE files processed; {len(errors)} failed.")
     if errors:
         print("\nFailed:")
-        for name, message in errors:
-            print(f"  {name}: {message}")
+        for filename, message in errors:
+            print(f"  {filename}: {message}")
         sys.exit(1)
 
 
