@@ -8,7 +8,7 @@ MC/DC Data Format
 This reference describes format version **0.1.0**, including file organization, physical units, reusable representations, and reaction fields.
 It is the specification for the format; the :doc:`annotated YAML illustrations <illustrations>` illustrate its structure.
 
-Data is organized by projectile and target, with an additional temperature token when required.
+Data is organized by projectile and target.
 
 .. list-table:: File organization
    :header-rows: 1
@@ -16,7 +16,7 @@ Data is organized by projectile and target, with an additional temperature token
 
    * - Filename
      - Contents
-   * - ``{projectile}-{target}[-{temperature}K].h5``
+   * - ``{projectile}-{target}.h5``
      - Target properties, projectile transport data, and contributing source libraries.
    * - ``atoms.h5``
      - Atomic evaluations indexed by element, including subshell identities and relaxation transitions.

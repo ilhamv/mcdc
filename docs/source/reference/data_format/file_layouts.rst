@@ -9,10 +9,11 @@ Atomic evaluations are stored separately in ``atoms.h5`` and shared by interacti
 Projectile files
 ----------------
 
-Filenames follow ``{projectile}-{target}[-{temperature}K].h5``, with the temperature token present for temperature-dependent data.
+Filenames follow ``{projectile}-{target}.h5``.
 Projectile identifiers are ``neutron``, ``electron``, and ``photon`` for those particles, and nuclide identifiers for nuclear projectiles, such as ``H1`` for protons, ``H2`` for deuterons, and ``He4`` for alpha particles.
 Other ions use the same notation, for example ``Si32``.
 The target is an element or nuclide identifier appropriate to the evaluation.
+For temperature-dependent data, the target identifier includes the temperature in kelvin, such as ``Si32-293.6K``.
 
 .. list-table:: Example filenames
    :header-rows: 1
