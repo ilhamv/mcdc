@@ -13,6 +13,7 @@ quantities have no unit attribute.
 """
 
 from dataclasses import dataclass
+from functools import wraps
 from numbers import Integral
 
 import ACEtk
@@ -20,6 +21,7 @@ import numpy as np
 
 from .hdf5_writer import (
     PROBABILITY_TOLERANCE,
+    ProbabilityTableError,
     incident_interpolation,
     interpolation,
     multi_table,
@@ -65,6 +67,63 @@ REDUNDANT_MTS = {1, 3, 4, 10}
 # https://www.nndc.bnl.gov/endfdocs/ENDF-102-2023.pdf
 NEUTRON_REACTION_MT_RANGES = ((1, 117), (152, 200))
 CATEGORY_ORDER = ("elastic-scattering", "capture", "inelastic-scattering", "fission")
+
+
+# ======================================================================================
+# Source context for conversion errors
+# ======================================================================================
+
+
+def _probability_table_context(source, error):
+    """Describe a packed-table failure using its ACE source coordinates.
+
+    Table indices are zero-based, matching the packed representation. LAW 61
+    cosine tables are flattened across outgoing-energy points; recover both
+    incident and outgoing coordinates when reporting one of those failures.
+    Source energies are reported in MeV before conversion to output units.
+    """
+    index = error.index
+    if error.path and error.path.endswith("/cosine-distributions"):
+        for table in source.distributions:
+            if index < len(table.outgoing_energies):
+                return (
+                    f"cosine table {index} (E_in = {table.incident_energy:g} MeV, "
+                    f"E_out = {table.outgoing_energies[index]:g} MeV)"
+                )
+            index -= len(table.outgoing_energies)
+    energies = getattr(source, "incident_energies", ())
+    kind = "outgoing-energy" if hasattr(source, "LAW") else "angular-cosine"
+    label = f"{kind} table {error.index}"
+    if error.index < len(energies):
+        label += f" (E_in = {energies[error.index]:g} MeV)"
+    return label
+
+
+def _distribution_errors(writer):
+    """Attach a distribution's HDF5 path, ACE law, and table coordinates.
+
+    Writers raise ValueError for source data that cannot be represented.
+    Packed-table failures additionally identify the failed table, so its
+    source coordinates can be reported without interpreting data in the
+    source-independent HDF5 writer. Exception chaining retains the cause.
+    """
+
+    @wraps(writer)
+    def write(group, source):
+        try:
+            return writer(group, source)
+        except ValueError as error:
+            location = group.name
+            law = getattr(source, "LAW", None)
+            if law is not None:
+                location += f" (ACE LAW {int(law)})"
+            if isinstance(error, ProbabilityTableError):
+                detail = f"{_probability_table_context(source, error)}: {error.reason}"
+            else:
+                detail = str(error)
+            raise ValueError(f"{location}: {detail}") from error
+
+    return write
 
 
 # ======================================================================================
@@ -488,7 +547,10 @@ def write_temperature(file, ace, target, verbose=False):
         if verbose:
             print(f"  MT {mt}: {reaction_name(mt)} ({category})")
         group = reactions.create_group(reaction_name(mt), track_order=True)
-        write_reaction(group, ace, mt, index, category, len(energy))
+        try:
+            write_reaction(group, ace, mt, index, category, len(energy))
+        except ValueError as error:
+            raise ValueError(f"MT {mt}: {error}") from error
 
 
 def write_reaction(group, ace, mt, index, category, energy_count):
@@ -847,6 +909,7 @@ def write_fission(group, ace):
 # ======================================================================================
 
 
+@_distribution_errors
 def write_angular_distribution(group, source):
     """Write explicit isotropy or incident-dependent cosine-density tables.
 
@@ -941,6 +1004,7 @@ def write_angular_distribution(group, source):
 # ======================================================================================
 
 
+@_distribution_errors
 def write_energy_distribution(group, source):
     """Write a supported outgoing-energy or joint energy-angle Distribution.
 

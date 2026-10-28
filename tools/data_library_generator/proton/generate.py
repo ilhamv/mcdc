@@ -36,6 +36,7 @@ from data_library_generator.common.ace_converter import (
     write_angular_distribution as write_proton_angular_distribution,
     write_energy_distribution as write_proton_energy_distribution,
 )
+from data_library_generator.common.batch import ConversionErrors, add_keep_going_option
 from data_library_generator.common.hdf5_writer import (
     atomic_file,
     interpolation,
@@ -1027,6 +1028,12 @@ def process_pstar_only_file(
 
 
 def main():
+    """Prepare selected ACE and optional PSTAR inputs with common error handling.
+
+    Stop on the first conversion failure unless --keep-going is supplied.
+    In continuation mode both ACE and PSTAR-only failures are collected and
+    reported together with a nonzero exit status after all inputs are tried.
+    """
     parser = argparse.ArgumentParser(
         description="Prepare MC/DC proton data from TENDL ACE and NIST PSTAR"
     )
@@ -1042,6 +1049,7 @@ def main():
         metavar="ACE_FILE",
         help="convert only these ACE file names",
     )
+    add_keep_going_option(parser)
     args = parser.parse_args()
 
     for variable in ("MCDC_ACELIB_PROTON", "MCDC_PSTAR_LIB", "MCDC_LIB_PROTON"):
@@ -1068,14 +1076,14 @@ def main():
         f"ACE directory: {ace_dir}\nPSTAR directory: {pstar_dir}\n"
         f"Output directory: {output_dir}\n"
     )
-    errors = []
+    failures = ConversionErrors(parser, keep_going=args.keep_going)
     progress = tqdm(ace_files, disable=args.verbose, unit="file")
     for path in progress:
         progress.set_postfix_str(path.name)
         try:
             process_ace_file(path, output_dir, pstar_dir, args.verbose, args.rewrite)
         except (ConversionError, ValueError, OSError, AttributeError) as error:
-            errors.append((path.name, str(error)))
+            failures.handle(path.name, error, progress=progress)
 
     for symbol, A, awr in PSTAR_ONLY_ISOTOPES:
         filename = f"proton-{symbol}{A}.h5"
@@ -1086,14 +1094,10 @@ def main():
             if out is None and args.verbose:
                 print(f"Skip {filename}: no PSTAR data")
         except (ValueError, OSError) as error:
-            errors.append((filename, str(error)))
+            failures.handle(filename, error)
 
-    print(f"\nDone. {len(ace_files)} ACE files processed; {len(errors)} failed.")
-    if errors:
-        print("\nFailed:")
-        for filename, message in errors:
-            print(f"  {filename}: {message}")
-        sys.exit(1)
+    failures.finish()
+    print(f"\nDone. {len(ace_files)} ACE files processed.")
 
 
 if __name__ == "__main__":

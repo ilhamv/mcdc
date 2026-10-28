@@ -36,12 +36,15 @@ From the repository root, set the input and output directories and run the gener
      - Regenerate photon data and any supplied atomic-relaxation data.
    * - ``--verbose``
      - Report filenames and reaction details during conversion.
+   * - ``--keep-going``
+     - Continue after conversion errors and summarize failed inputs at the end.
 
 Existing compatible photon data is reused unless ``--rewrite`` is supplied.
 Each photon file contains its target properties, transport data, and EPDL provenance.
 Atomic evaluations and their EADL provenance are shared through ``atoms.h5``.
 Incompatible formats or conflicting atomic numbers are reported as errors.
 A failed conversion preserves the previous photon file.
+See :doc:`index` for shared batch error handling.
 
 EADL files are optional.
 When a matching EADL file is supplied, its target must agree with the EPDL target.

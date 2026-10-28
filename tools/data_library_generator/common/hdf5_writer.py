@@ -43,6 +43,21 @@ SOURCE_FIELDS = (
 SOURCE_UNITS = {"temperature": "K", "kT": "eV"}
 
 
+class ProbabilityTableError(ValueError):
+    """Invalid packed table, with its index and path available to converters.
+
+    The writer identifies the failed table without interpreting its physical
+    coordinate. A source converter can use this information to report the
+    incident energy or other source coordinates associated with that table.
+    """
+
+    def __init__(self, index, reason, path):
+        self.index = index
+        self.reason = str(reason)
+        self.path = path
+        super().__init__(f"Packed PDF table {index}: {reason}")
+
+
 # ======================================================================================
 # File identity and source-library provenance
 # ======================================================================================
@@ -270,20 +285,18 @@ def _pdf_arrays(value, pdf, laws=None, boundaries=None):
     some or all probability to its discrete component.
     """
     value, pdf = np.asarray(value, dtype=float), np.asarray(pdf, dtype=float)
-    if (
-        value.ndim != 1
-        or value.shape != pdf.shape
-        or len(value) < 2
-        or not np.all(np.isfinite(value))
-        or not np.all(np.isfinite(pdf))
-        or np.any(pdf < 0)
-        or np.any(np.diff(value) < 0)
-        or value[-1] <= value[0]
-    ):
+    if value.ndim != 1 or value.shape != pdf.shape or len(value) < 2:
         raise ValueError(
-            "PDF coordinates must be finite and nondecreasing with positive support "
-            "width; densities must be matching finite nonnegative vectors"
+            "PDF coordinates and densities must be matching vectors with at least two points"
         )
+    if not np.all(np.isfinite(value)):
+        raise ValueError("PDF coordinates must be finite")
+    if not np.all(np.isfinite(pdf)) or np.any(pdf < 0):
+        raise ValueError("PDF densities must be finite and nonnegative")
+    if np.any(np.diff(value) < 0):
+        raise ValueError("PDF coordinates must be nondecreasing")
+    if value[-1] <= value[0]:
+        raise ValueError("PDF coordinates must have positive support width")
     laws, boundaries = _interpolation_arrays(len(value), laws, boundaries)
     mass, start = 0.0, 0
     for law, boundary in zip(laws.astype(str), boundaries):
@@ -481,7 +494,7 @@ def pdf_tables(group, tables, unit="eV"):
     The parent distribution and file publication remain the caller's
     responsibility.
     """
-    _write_pdf_arrays(group, _packed_pdf_arrays(tables), unit)
+    _write_pdf_arrays(group, _packed_pdf_arrays(tables, path=group.name), unit)
 
 
 def _pmf_arrays(value, pmf):
@@ -499,7 +512,7 @@ def _pmf_arrays(value, pmf):
     return value, pmf
 
 
-def _packed_pdf_arrays(tables, discrete_value=None, pmf=None):
+def _packed_pdf_arrays(tables, discrete_value=None, pmf=None, *, path=None):
     """Validate and pack probability components, preserving their combined mass.
 
     Continuous-only callers supply ordinary PDF tuples. MultiTable may also
@@ -549,7 +562,7 @@ def _packed_pdf_arrays(tables, discrete_value=None, pmf=None):
                     mass += float(np.sum(m))
             _check_probability_mass(mass)
         except ValueError as error:
-            raise ValueError(f"Packed PDF table {index}: {error}") from error
+            raise ProbabilityTableError(index, error, path) from error
         values.append(value)
         densities.append(pdf)
         rules.append(laws)
@@ -650,7 +663,7 @@ def multi_table(
     ):
         raise ValueError(f"{group.name}: invalid multi-table grid or table count")
     laws, boundaries = _incident_interpolation_arrays(grid, laws, boundaries)
-    arrays = _packed_pdf_arrays(tables, discrete_value, pmf)
+    arrays = _packed_pdf_arrays(tables, discrete_value, pmf, path=group.name)
     if "discrete-offsets" in arrays:
         counts = np.diff(arrays["discrete-offsets"])
         region = 0

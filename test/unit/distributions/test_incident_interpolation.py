@@ -18,13 +18,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
 from data_library_generator.common.hdf5_writer import multi_table
 
 
-def source_distribution(kind, grid, laws, boundaries):
+def source_distribution(kind, grid, laws, boundaries, *, invalid_table=None):
     """Construct actual ACEtk records with distinguishable endpoint spectra."""
     ACEtk = pytest.importorskip("ACEtk")
     distributions = []
     for i, energy in enumerate(grid):
         low, high = 100.0 * i, 100.0 * i + 10.0 * (i + 1)
         values = [low / 1e6, high / 1e6]
+        if i == invalid_table:
+            values.reverse()
         pdf = [1e6 / (high - low)] * 2
         if kind == 4:
             table = ACEtk.continuous.TabulatedEnergyDistribution(
@@ -52,6 +54,53 @@ def source_distribution(kind, grid, laws, boundaries):
         61: ACEtk.continuous.EnergyAngleDistributionData,
     }[kind]
     return cls(boundaries, laws, distributions)
+
+
+@pytest.mark.parametrize("kind", [4, 44, 61])
+def test_invalid_outgoing_table_reports_law_path_and_incident_energy(tmp_path, kind):
+    from data_library_generator.common.ace_converter import write_energy_distribution
+
+    source = source_distribution(kind, [5.0e6, 7.4e6], [], [], invalid_table=1)
+    with h5py.File(tmp_path / "invalid.h5", "w") as file:
+        distribution = file.create_group("reactions/test/energy-distribution")
+        with pytest.raises(ValueError) as error:
+            write_energy_distribution(distribution, source)
+    message = str(error.value)
+    assert "/reactions/test/energy-distribution" in message
+    assert f"ACE LAW {kind}" in message
+    assert "outgoing-energy table 1 (E_in = 7.4 MeV)" in message
+    assert "PDF coordinates must be nondecreasing" in message
+
+
+def test_invalid_conditional_angle_reports_incident_and_outgoing_energy(tmp_path):
+    ACEtk = pytest.importorskip("ACEtk")
+    from data_library_generator.common.ace_converter import write_energy_distribution
+
+    tables = []
+    for incident in (5.0, 7.4):
+        angles = [
+            ACEtk.continuous.TabulatedAngularDistributionWithProbability(
+                outgoing,
+                1.0,
+                cumulative,
+                2,
+                [1.0, -1.0] if incident == 7.4 and outgoing == 1.0 else [-1.0, 1.0],
+                [0.5, 0.5],
+                [0.0, 1.0],
+            )
+            for outgoing, cumulative in ((0.0, 0.0), (1.0, 1.0))
+        ]
+        tables.append(
+            ACEtk.continuous.TabulatedEnergyAngleDistribution(incident, 2, angles)
+        )
+    source = ACEtk.continuous.EnergyAngleDistributionData([], [], tables)
+    with h5py.File(tmp_path / "invalid-cosine.h5", "w") as file:
+        with pytest.raises(ValueError) as error:
+            write_energy_distribution(file, source)
+    message = str(error.value)
+    assert "ACE LAW 61" in message
+    assert "cosine table 1 (E_in = 7.4 MeV, E_out = 1 MeV)" in message
+    assert "PDF coordinates must be nondecreasing" in message
 
 
 def convert(tmp_path, kind, grid, laws, boundaries):

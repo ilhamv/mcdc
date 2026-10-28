@@ -28,6 +28,14 @@ The :doc:`format conventions <../../reference/data_format/conventions>` and :doc
      - `TENDL2021 <https://tendl.imperial.ac.uk/tendl_2021/tendl2021.html>`: TENDL2021 ACE data
      - `NIST PSTAR <https://physics.nist.gov/PhysRefData/Star/Text/PSTAR.html>`: stopping power tables
 
+Batch conversion
+----------------
+
+The neutron, photon, and proton generators stop at the first conversion error by default.
+Use ``--keep-going`` to process the remaining inputs and summarize all failed conversions at the end.
+Successful conversions are retained, and the command returns a nonzero exit status if any conversion fails.
+Error messages identify the source input and include reaction or distribution context when available.
+
 .. toctree::
    :maxdepth: 1
 

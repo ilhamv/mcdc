@@ -33,10 +33,14 @@ From the repository root, set the input and output directories and run the gener
      - Regenerate existing neutron files.
    * - ``--verbose``
      - Report filenames and reaction details during conversion.
+   * - ``--keep-going``
+     - Continue after conversion errors and summarize failed files at the end.
 
 Existing compatible data is reused unless ``--rewrite`` is supplied.
 Incompatible formats or conflicting identity fields are reported as errors.
 A failed rewrite preserves the previous neutron file.
+See :doc:`index` for shared batch error handling.
+Distribution errors identify the reaction, distribution path, ACE law, and table coordinates when available.
 
 Temperature
 -----------

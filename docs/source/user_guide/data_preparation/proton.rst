@@ -44,9 +44,12 @@ From the repository root, set the source and output directories and run the gene
      - Regenerate existing output files.
    * - ``--verbose``
      - Print each conversion, reaction summary, and warning instead of showing the progress bar.
+   * - ``--keep-going``
+     - Continue after conversion errors and summarize failed ACE and PSTAR inputs at the end.
 
 Existing compatible outputs are reused unless ``--rewrite`` is supplied.
-An input that cannot be represented is reported as an error and does not publish a partial replacement; the generator continues with the remaining selected files.
+An input that cannot be represented is reported as an error and does not publish a partial replacement.
+See :doc:`index` for shared batch error handling.
 For simulations, make the output directory available through ``MCDC_LIB`` (or place the generated files in the configured library directory).
 
 Prepared data

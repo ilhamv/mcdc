@@ -31,6 +31,7 @@ from data_library_generator.common.epics_converter import (
     read_source_libraries,
     write_photon,
 )
+from data_library_generator.common.batch import ConversionErrors, add_keep_going_option
 from data_library_generator.common.hdf5_writer import (
     atomic_file,
     check_format,
@@ -113,7 +114,9 @@ def main():
     EPDL files in ``MCDC_EPICS_LIB`` are processed. Matching EADL files are read
     from that same directory when present. ``--rewrite`` regenerates photon
     data, and ``--verbose`` replaces the progress bar with reaction details.
-    Conversion stops at the first error and reports its source filename.
+    Conversion stops at the first error unless ``--keep-going`` is supplied.
+    Both modes report failed source filenames and exit with status 1 if any
+    conversion fails; continuation mode summarizes failures after all inputs.
     """
     parser = argparse.ArgumentParser(description="Prepare MC/DC photon data from EPICS")
     parser.add_argument(
@@ -125,6 +128,7 @@ def main():
     parser.add_argument(
         "--verbose", action="store_true", help="Report reaction details"
     )
+    add_keep_going_option(parser)
     args = parser.parse_args()
     for variable in ("MCDC_EPICS_LIB", "MCDC_LIB"):
         if not os.getenv(variable):
@@ -153,6 +157,7 @@ def main():
         parser.error(f"No EPDL element files found in {source_dir}")
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"EPICS directory: {source_dir}\nOutput directory: {output_dir}\n")
+    failures = ConversionErrors(parser, keep_going=args.keep_going)
     progress = tqdm(paths, disable=args.verbose, unit="element")
     for path in progress:
         progress.set_postfix_str(path.name)
@@ -166,7 +171,8 @@ def main():
                 args.verbose,
             )
         except (ValueError, OSError) as error:
-            parser.exit(1, f"{path.name}: {error}\n")
+            failures.handle(path.name, error, progress=progress)
+    failures.finish()
 
 
 if __name__ == "__main__":

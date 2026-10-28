@@ -31,6 +31,7 @@ from data_library_generator.common.ace_converter import (
     read_target,
     write_temperature,
 )
+from data_library_generator.common.batch import ConversionErrors, add_keep_going_option
 from data_library_generator.common.hdf5_writer import (
     atomic_file,
     check_format,
@@ -100,8 +101,9 @@ def main():
         Argument parsing handles help with status 0 and invalid arguments
         with status 2. Missing environment variables or a missing input
         directory also produce status 2. A ``ValueError`` or ``OSError``
-        from conversion terminates the batch with status 1 and the input
-        filename in the error message.
+        from conversion produces status 1 with the input filename and error.
+        Without ``--keep-going``, the first failure terminates the batch;
+        with it, failures are summarized after all selected files are tried.
     OSError
         Creating the output directory or listing the input directory fails.
 
@@ -114,9 +116,9 @@ def main():
     selected in sorted order, without a filename-suffix filter.
 
     ``--rewrite`` and ``--verbose`` are passed to each conversion. Verbose
-    output replaces the progress bar. The batch stops at the first caught
-    conversion error; files already completed are retained. Exceptions other
-    than the caught ``ValueError`` and ``OSError`` propagate unchanged.
+    output replaces the progress bar. ``--keep-going`` retains successful
+    outputs and reports all caught conversion failures at the end. Exceptions
+    other than the caught ``ValueError`` and ``OSError`` propagate unchanged.
     """
     # Parse file selection, rewrite behavior, and reporting options
     parser = argparse.ArgumentParser(description="Prepare MC/DC neutron data from ACE")
@@ -129,6 +131,7 @@ def main():
     parser.add_argument(
         "--ace-files", nargs="+", help="Select filenames from MCDC_ACE_LIB"
     )
+    add_keep_going_option(parser)
     args = parser.parse_args()
 
     # Validate configured directories and create the output location
@@ -148,13 +151,15 @@ def main():
     )
     # Process inputs sequentially and attach filenames to reported conversion errors
     print(f"ACE directory: {ace_dir}\nOutput directory: {output_dir}\n")
+    failures = ConversionErrors(parser, keep_going=args.keep_going)
     progress = tqdm(paths, disable=args.verbose, unit="file")
     for path in progress:
         progress.set_postfix_str(path.name)
         try:
             convert_file(path, output_dir, args.rewrite, args.verbose)
         except (ValueError, OSError) as error:
-            parser.exit(1, f"{path.name}: {error}\n")
+            failures.handle(path.name, error, progress=progress)
+    failures.finish()
 
 
 if __name__ == "__main__":
