@@ -51,11 +51,11 @@ Electron file
 Proton file
 -----------
 
-``H1-{nuclide}.h5`` contains target properties and proton data; other nuclear projectiles use the same naming pattern.
+``proton-{nuclide}.h5`` contains target properties and proton data; other nuclear projectiles use the same naming pattern.
 
-:download:`Download layout-H1.yaml <illustrations/layout-H1.yaml>`.
+:download:`Download layout-proton.yaml <illustrations/layout-proton.yaml>`.
 
-.. literalinclude:: illustrations/layout-H1.yaml
+.. literalinclude:: illustrations/layout-proton.yaml
    :language: yaml
 
 Atomic library

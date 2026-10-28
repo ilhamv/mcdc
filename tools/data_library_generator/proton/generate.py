@@ -1,6 +1,6 @@
 """Prepare MC/DC proton data from TENDL ACE and NIST PSTAR inputs.
 
-Writes temperature-independent ``H1-{nuclide}.h5`` files in the mcdc-data
+Writes temperature-independent ``proton-{nuclide}.h5`` files in the mcdc-data
 format. Source parsing and distribution conversion are shared with the neutron
 and photon generators; this module handles proton reaction selection and
 secondary-product records.
@@ -33,8 +33,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from data_library_generator.common.ace_converter import (
     EV_PER_MEV,
-    write_angular_distribution as write_h1_angular_distribution,
-    write_energy_distribution as write_h1_energy_distribution,
+    write_angular_distribution as write_proton_angular_distribution,
+    write_energy_distribution as write_proton_energy_distribution,
 )
 from data_library_generator.common.hdf5_writer import (
     atomic_file,
@@ -330,7 +330,7 @@ ACE_PARTICLE_TO_PRODUCT = {
     9: ("proton", 1001),
     31: ("deuteron", 1002),
     32: ("triton", 1003),
-    33: ("He3", 2003),
+    33: ("helion", 2003),
     34: ("alpha", 2004),
 }
 
@@ -511,13 +511,13 @@ def write_cosine_distribution(data, group):
     """Write an angular Distribution; return False when energy supplies the angle."""
     if isinstance(data, ACEtk.continuous.DistributionGivenElsewhere):
         return False
-    write_h1_angular_distribution(group, data)
+    write_proton_angular_distribution(group, data)
     return True
 
 
 def write_energy_distribution(data, group):
     """Write an ACE energy or joint energy-angle Distribution."""
-    write_h1_energy_distribution(group, data)
+    write_proton_energy_distribution(group, data)
     return group.attrs["type"]
 
 
@@ -555,11 +555,7 @@ def write_secondary_product(
     joint = is_joint_energy_distribution(energy)
     index = str(len(parent))
     product = parent.create_group(index)
-    particle_name = {
-        "He3": "helium-3",
-        "alpha": "alpha",
-    }.get(name, name)
-    quantity(product, "particle", particle_name)
+    quantity(product, "particle", name)
     quantity(product, "reference-frame", frame)
     write_yield_table(product, "yield", yield_energy, yield_value)
     quantity(product, "decay-rate", np.inf, "1/s")
@@ -771,7 +767,7 @@ def classify_reactions(table):
 
 
 def write_reaction(group, table, rx, verbose):
-    """Write one H1 reaction in the standard mcdc-data layout."""
+    """Write one proton reaction in the standard mcdc-data layout."""
     tyr = table.frame_and_multiplicity_block
     xs_block = table.cross_section_block
     group.attrs["ENDF-MT"] = rx.MT
@@ -898,7 +894,7 @@ def _write_reactions(file, table, verbose):
 
 
 def write_nuclide(file, table, Z, A, state, pstar_path, verbose):
-    """Write target properties, optional stopping power, and H1 reactions."""
+    """Write target properties, optional stopping power, and proton reactions."""
     _write_target_properties(file, table, Z, A, state)
     if pstar_path is not None:
         write_stopping_power(file, pstar_path.parent, ELEMENT_SYMBOLS[Z - 1], verbose)
@@ -908,7 +904,7 @@ def write_nuclide(file, table, Z, A, state, pstar_path, verbose):
 def process_ace_file(
     ace_path, output_dir, pstar_dir=None, verbose=False, rewrite=False
 ):
-    """Convert one TENDL ACE evaluation into ``H1-{nuclide}.h5``."""
+    """Convert one TENDL ACE evaluation into ``proton-{nuclide}.h5``."""
     ace_path, output_dir = Path(ace_path), Path(output_dir)
     table = ACEtk.ContinuousEnergyTable.from_file(str(ace_path))
     header = table.header
@@ -917,7 +913,7 @@ def process_ace_file(
         fail(f"Unsupported Z={Z} in {ace_path}")
     symbol = ELEMENT_SYMBOLS[Z - 1]
     nuclide = f"{symbol}{A}" if S == 0 else f"{symbol}{A}m{S}"
-    out_name = f"H1-{nuclide}.h5"
+    out_name = f"proton-{nuclide}.h5"
     out_path = output_dir / out_name
     pstar_path = Path(pstar_dir) / f"{symbol}.txt" if pstar_dir is not None else None
     if pstar_path is not None and not pstar_path.is_file():
@@ -977,12 +973,12 @@ def process_ace_file(
 def process_pstar_only_file(
     symbol, A, awr, output_dir, pstar_dir, verbose=False, rewrite=False
 ):
-    """Write a stopping-power-only H1 file when ACE data are unavailable."""
+    """Write a stopping-power-only proton file when ACE data are unavailable."""
     pstar_path = Path(pstar_dir) / f"{symbol}.txt"
     if not pstar_path.is_file():
         return None
     Z = SYMBOL_TO_Z[symbol]
-    out_name = f"H1-{symbol}{A}.h5"
+    out_name = f"proton-{symbol}{A}.h5"
     out_path = Path(output_dir) / out_name
     if out_path.is_file():
         with h5py.File(out_path, "r") as file:
@@ -1082,7 +1078,7 @@ def main():
             errors.append((path.name, str(error)))
 
     for symbol, A, awr in PSTAR_ONLY_ISOTOPES:
-        filename = f"H1-{symbol}{A}.h5"
+        filename = f"proton-{symbol}{A}.h5"
         try:
             out = process_pstar_only_file(
                 symbol, A, awr, output_dir, pstar_dir, args.verbose, args.rewrite

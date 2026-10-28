@@ -240,7 +240,7 @@ def read_cross_products(group):
         "photon": (0, 0),
         "deuteron": (1, 2),
         "triton": (1, 3),
-        "helium-3": (2, 3),
+        "helion": (2, 3),
         "alpha": (2, 4),
     }
     products = []

@@ -233,9 +233,9 @@ class Nuclide(MCDCObject):
 
     def set_proton_data(self, simulation):
         data_dir = os.environ["MCDC_LIB"]
-        h1_path = os.path.join(data_dir, f"H1-{self.name}.h5")
-        if os.path.isfile(h1_path):
-            self._set_proton_data_mcdc(simulation, h1_path)
+        proton_path = os.path.join(data_dir, f"proton-{self.name}.h5")
+        if os.path.isfile(proton_path):
+            self._set_proton_data_mcdc(simulation, proton_path)
             return
 
         nuclide_name = self.name

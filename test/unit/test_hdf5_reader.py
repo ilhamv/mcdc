@@ -46,7 +46,7 @@ def write_product(parent, index=0, particle="neutron"):
         ("photon", PARTICLE_PHOTON, (0, 0)),
         ("deuteron", PARTICLE_ANY, (1, 2)),
         ("triton", PARTICLE_ANY, (1, 3)),
-        ("helium-3", PARTICLE_ANY, (2, 3)),
+        ("helion", PARTICLE_ANY, (2, 3)),
         ("alpha", PARTICLE_ANY, (2, 4)),
     ],
 )

@@ -10,8 +10,9 @@ Projectile files
 ----------------
 
 Filenames follow ``{projectile}-{target}.h5``.
-Projectile identifiers are ``neutron``, ``electron``, and ``photon`` for those particles, and nuclide identifiers for nuclear projectiles, such as ``H1`` for protons, ``H2`` for deuterons, and ``He4`` for alpha particles.
-Other ions use the same notation, for example ``Si32``.
+Projectile identifiers use established particle names, including ``neutron``, ``electron``, and ``photon``.
+For light nuclear projectiles, use ``proton`` (H1), ``deuteron`` (H2), ``triton`` (H3), ``helion`` (He3), and ``alpha`` (He4), each denoting the bare nucleus.
+Other ions use nuclide identifiers, for example ``Si32``, unless an established particle name is available.
 The target is an element or nuclide identifier appropriate to the evaluation.
 For temperature-dependent data, the target identifier includes the temperature in kelvin, such as ``Si32-293.6K``.
 
@@ -26,9 +27,15 @@ For temperature-dependent data, the target identifier includes the temperature i
      - Photon transport on elemental silicon.
    * - ``electron-Si.h5``
      - Electron transport on elemental silicon.
-   * - ``H1-Si32.h5``
+   * - ``proton-Si32.h5``
      - Proton transport on Si32.
-   * - ``He4-Si32.h5``
+   * - ``deuteron-Si32.h5``
+     - Deuteron transport on Si32.
+   * - ``triton-Si32.h5``
+     - Triton transport on Si32.
+   * - ``helion-Si32.h5``
+     - Helion transport on Si32.
+   * - ``alpha-Si32.h5``
      - Alpha-particle transport on Si32.
 
 Target properties

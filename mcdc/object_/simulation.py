@@ -520,7 +520,7 @@ class Simulation(MCDCBase):
         if settings.proton_transport.active:
             N_nuclide = len(self.nuclides)
             for index, nuclide in enumerate(self.nuclides, start=1):
-                file_name = f"{nuclide.name}.h5"
+                file_name = f"proton-{nuclide.name}.h5"
                 print_msg(f" Loading proton data [{index}/{N_nuclide}]: {file_name}")
                 nuclide.set_proton_data(self)
             for material in self.materials:

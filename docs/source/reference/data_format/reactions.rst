@@ -148,7 +148,7 @@ Total-fission and chance-fission cross sections must not be included together as
 Proton reactions
 ----------------
 
-These reactions reside in ``/reactions`` within ``H1-{nuclide}.h5``.
+These reactions reside in ``/reactions`` within ``proton-{nuclide}.h5``.
 All include the basic fields, with ``cross-products`` available for species other than protons.
 
 .. list-table:: Proton transport categories
