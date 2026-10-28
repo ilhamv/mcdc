@@ -8,7 +8,14 @@ Source-library metadata stays in the files.
 import numpy as np
 import warnings
 
-from mcdc.constant import INTERPOLATION_LINEAR, REFERENCE_FRAME_COM, REFERENCE_FRAME_LAB
+from mcdc.constant import (
+    INF,
+    INTERPOLATION_LINEAR,
+    PARTICLE_ANY,
+    PARTICLE_TYPE_BY_NAME,
+    REFERENCE_FRAME_COM,
+    REFERENCE_FRAME_LAB,
+)
 
 from mcdc.object_.data import DataPolynomial, DataTable, encode_interpolation
 from mcdc.object_.distribution import (
@@ -22,7 +29,9 @@ from mcdc.object_.distribution import (
     DistributionKalbachMann,
     DistributionTableEnergyAngle,
     DistributionNBody,
+    DistributionNone,
 )
+from mcdc.object_.secondary_product import SecondaryProduct
 
 # ======================================================================================
 # File identity and target properties
@@ -145,6 +154,17 @@ def read_xs_energy_grid(group):
     return grid
 
 
+def read_reference_frame(group):
+    """Read an explicit LAB or COM frame from a reaction or product record."""
+    if "reference-frame" not in group:
+        raise ValueError(f"{group.name}: missing required reference-frame")
+    frame = text(group["reference-frame"][()])
+    frames = {"LAB": REFERENCE_FRAME_LAB, "COM": REFERENCE_FRAME_COM}
+    if frame not in frames:
+        raise ValueError(f"{group.name}: unknown reference frame {frame!r}")
+    return frames[frame]
+
+
 def read_reaction_properties(group):
     """Read source MT, cross-section segment, offset, and reference frame.
 
@@ -156,11 +176,7 @@ def read_reaction_properties(group):
     MT = int(group.attrs.get("ENDF-MT", 0))
     xs = np.asarray(group["xs/value"][()], dtype=np.float64)
     offset = int(group["xs/offset"][()])
-    frame = text(group["reference-frame"][()])
-    frames = {"LAB": REFERENCE_FRAME_LAB, "COM": REFERENCE_FRAME_COM}
-    if frame not in frames:
-        raise ValueError(f"{group.name}: unknown reference frame {frame!r}")
-    return MT, xs, offset, frames[frame]
+    return MT, xs, offset, read_reference_frame(group)
 
 
 def set_xs_interpolation(reaction, group):
@@ -194,6 +210,74 @@ def xs_is_linear(reaction):
         np.all(reaction.xs_interpolations == INTERPOLATION_LINEAR)
         and (reaction.xs_offset_ == 0 or reaction.xs[0] == 0.0)
     )
+
+
+# ======================================================================================
+# Cross-species products
+# ======================================================================================
+
+
+def read_cross_products(group):
+    """Read a reaction or subshell's CrossProduct records in numeric order.
+
+    Return an empty list when the container has no products. Each product must
+    explicitly declare a LAB or COM reference frame, independent of its parent.
+    Yield Data and energy Distributions are read in runtime units. Independent
+    angle-energy records supply separate angular and energy objects; joint
+    records use DistributionNone for the separate angular field.
+
+    Each complete energy Distribution, including a Mixture, occupies one
+    spectrum slot with unit selection probability. Positive finite decay rates
+    describe delayed products; positive infinity denotes prompt emission.
+    Parsing product records does not establish transport support for a reaction.
+    """
+    if "cross-products" not in group:
+        return []
+    identities = {
+        "neutron": (0, 1),
+        "proton": (1, 1),
+        "electron": (-1, -1),
+        "photon": (0, 0),
+        "deuteron": (1, 2),
+        "triton": (1, 3),
+        "helium-3": (2, 3),
+        "alpha": (2, 4),
+    }
+    products = []
+    for product in numbered_groups(group["cross-products"]):
+        particle = text(product["particle"][()])
+        if particle not in identities:
+            raise ValueError(f"{product.name}: unsupported particle {particle!r}")
+        particle_type = PARTICLE_TYPE_BY_NAME.get(particle, PARTICLE_ANY)
+        atomic_number, mass_number = identities[particle]
+        decay_rate = float(product["decay-rate"][()])
+        if np.isnan(decay_rate) or decay_rate <= 0 or np.isneginf(decay_rate):
+            raise ValueError(f"{product.name}: invalid decay rate")
+        reference_frame = read_reference_frame(product)
+
+        distribution = product["angle-energy-distribution"]
+        if text(distribution.attrs["type"]) == "independent-angle-energy":
+            angular = read_distribution(distribution["angular-cosine-distribution"])
+            spectrum = read_distribution(distribution["energy-distribution"])
+        else:
+            angular = DistributionNone()
+            spectrum = read_distribution(distribution)
+        products.append(
+            SecondaryProduct(
+                particle_type,
+                read_data(product["yield"]),
+                reference_frame,
+                angular,
+                np.array([0.0, INF]),
+                np.ones((1, 1)),
+                [spectrum],
+                atomic_number=atomic_number,
+                mass_number=mass_number,
+                delayed=bool(np.isfinite(decay_rate)),
+                decay_constant=decay_rate,
+            )
+        )
+    return products
 
 
 # ======================================================================================

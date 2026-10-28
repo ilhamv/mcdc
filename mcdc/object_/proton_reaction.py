@@ -16,12 +16,17 @@ from mcdc.constant import (
     REFERENCE_FRAME_LAB,
     PARTICLE_NEUTRON,
     PARTICLE_PROTON,
-    PARTICLE_ELECTRON,
     PARTICLE_ANY,
 )
 from mcdc.object_.secondary_product import SecondaryProduct
 from mcdc.object_.data import DataBase, DataPolynomial, DataTable
-from mcdc.object_.hdf5_reader import read_data, read_distribution, text
+from mcdc.object_.hdf5_reader import (
+    read_cross_products,
+    read_data,
+    read_distribution,
+    read_reference_frame,
+    text,
+)
 from mcdc.object_.base import MCDCPolymorphic
 from mcdc.object_.distribution import (
     DistributionBase,
@@ -111,7 +116,7 @@ class ProtonReactionElasticScattering(ProtonReactionBase):
             MT, xs, xs_offset, reference_frame, _ = set_mcdc_basic_properties(h5_group)
             mu = read_distribution(h5_group["angular-cosine-distribution"])
             reaction = cls(MT, xs, xs_offset, reference_frame, mu)
-            read_mcdc_cross_products(reaction, h5_group, reference_frame)
+            reaction.secondary_products = read_cross_products(h5_group)
             return reaction
         MT, xs, xs_offset, reference_frame, _ = set_basic_properties(h5_group)
         mu = set_angular_distribution(h5_group["angular_cosine_distribution"])
@@ -211,7 +216,7 @@ class ProtonReactionInelasticScattering(ProtonReactionBase):
 
         # Load other species without changing the outgoing-proton multiplicity.
         if mcdc_format:
-            read_mcdc_cross_products(reaction, h5_group, reference_frame)
+            reaction.secondary_products = read_cross_products(h5_group)
         elif "secondary_products" in h5_group:
             for name in sorted(h5_group["secondary_products"]):
                 product_group = h5_group["secondary_products"][name]
@@ -248,7 +253,7 @@ class ProtonReactionCapture(ProtonReactionBase):
                 h5_group
             )
             reaction = cls(MT, xs, xs_offset, reference_frame, q_value)
-            read_mcdc_cross_products(reaction, h5_group, reference_frame)
+            reaction.secondary_products = read_cross_products(h5_group)
             return reaction
         MT, xs, xs_offset, reference_frame, q_value = set_basic_properties(h5_group)
         return cls(MT, xs, xs_offset, reference_frame, q_value)
@@ -264,10 +269,7 @@ def set_mcdc_basic_properties(h5_group):
     MT = int(h5_group.attrs["ENDF-MT"])
     xs = np.asarray(h5_group["xs/value"][()], dtype=float64)
     xs_offset = int(h5_group["xs/offset"][()])
-    frames = {"LAB": REFERENCE_FRAME_LAB, "COM": REFERENCE_FRAME_COM}
-    frame_name = text(h5_group["reference-frame"][()])
-    if frame_name not in frames:
-        raise ValueError(f"{h5_group.name}: unknown reference frame {frame_name!r}")
+    reference_frame = read_reference_frame(h5_group)
     if (
         xs.ndim != 1
         or xs_offset < 0
@@ -276,71 +278,7 @@ def set_mcdc_basic_properties(h5_group):
         or np.any(xs < 0)
     ):
         raise ValueError(f"{h5_group.name}: invalid cross-section values or offset")
-    return MT, xs, xs_offset, frames[frame_name], float64(h5_group["Q-value"][()])
-
-
-def read_mcdc_cross_products(reaction, group, reference_frame):
-    """Load standard CrossProduct records into the proton reaction."""
-    if "cross-products" not in group:
-        return
-    particle_ids = {
-        "neutron": (PARTICLE_NEUTRON, 0, 1),
-        "proton": (PARTICLE_PROTON, 1, 1),
-        "electron": (PARTICLE_ELECTRON, -1, -1),
-        "photon": (PARTICLE_ANY, 0, 0),
-        "deuteron": (PARTICLE_ANY, 1, 2),
-        "triton": (PARTICLE_ANY, 1, 3),
-        "helium-3": (PARTICLE_ANY, 2, 3),
-        "alpha": (PARTICLE_ANY, 2, 4),
-    }
-    products = group["cross-products"]
-    names = sorted(products, key=int)
-    if names != [str(index) for index in range(len(names))]:
-        raise ValueError(
-            f"{products.name}: expected contiguous zero-based product indices"
-        )
-    for name in names:
-        product = products[name]
-        particle = text(product["particle"].asstr()[()])
-        if particle not in particle_ids:
-            raise ValueError(f"{product.name}: unsupported particle {particle!r}")
-        particle_type, atomic_number, mass_number = particle_ids[particle]
-        decay_rate = float(product["decay-rate"][()])
-        if np.isnan(decay_rate) or decay_rate <= 0 or np.isneginf(decay_rate):
-            raise ValueError(f"{product.name}: invalid decay rate")
-        if "reference-frame" in product:
-            frames = {"LAB": REFERENCE_FRAME_LAB, "COM": REFERENCE_FRAME_COM}
-            frame_name = text(product["reference-frame"][()])
-            if frame_name not in frames:
-                raise ValueError(
-                    f"{product.name}: unknown reference frame {frame_name!r}"
-                )
-            product_frame = frames[frame_name]
-        else:
-            product_frame = reference_frame
-
-        distribution = product["angle-energy-distribution"]
-        if text(distribution.attrs["type"]) == "independent-angle-energy":
-            angular = read_distribution(distribution["angular-cosine-distribution"])
-            spectrum = read_distribution(distribution["energy-distribution"])
-        else:
-            angular = DistributionNone()
-            spectrum = read_distribution(distribution)
-        reaction.secondary_products.append(
-            SecondaryProduct(
-                particle_type,
-                read_data(product["yield"]),
-                product_frame,
-                angular,
-                np.array([0.0, INF]),
-                np.ones((1, 1)),
-                [spectrum],
-                atomic_number=atomic_number,
-                mass_number=mass_number,
-                delayed=bool(np.isfinite(decay_rate)),
-                decay_constant=decay_rate,
-            )
-        )
+    return MT, xs, xs_offset, reference_frame, float64(h5_group["Q-value"][()])
 
 
 def read_spectrum_mixture(group):

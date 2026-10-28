@@ -50,7 +50,7 @@ reactions/:
     reference-frame: LAB or COM
     Q-value: float, eV
     cross-products/:
-      '{i}': CrossProduct  # Optional emitted species other than protons; each may specify a reference frame
+      '{i}': CrossProduct  # Optional emitted species other than protons
 
     # Category-specific
     multiplicity: integer or Data  # Outgoing protons only; Data for energy-dependent yields
@@ -67,4 +67,4 @@ reactions/:
     reference-frame: LAB or COM
     Q-value: float, eV
     cross-products/:
-      '{i}': CrossProduct  # Optional emitted species other than protons; each may specify a reference frame
+      '{i}': CrossProduct  # Optional emitted species other than protons

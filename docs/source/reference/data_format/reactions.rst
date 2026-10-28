@@ -278,8 +278,8 @@ The list is generic and is not grouped by particle name.
      - string
      - Particle identifier, such as ``photon``, ``electron``, or ``proton``.
    * - ``reference-frame``
-     - string, optional
-     - Frame of this product's distribution; defaults to the reaction's frame.
+     - string
+     - ``LAB`` or ``COM``; frame of this product's distribution.
    * - ``yield``
      - Data
      - Mean emitted count per reaction as a function of incident energy in eV.
@@ -292,7 +292,5 @@ The list is generic and is not grouped by particle name.
 
 Yield is nonnegative and may be smaller or larger than one.
 Separate product records do not specify correlations between different emitted particles.
-An independent angle-energy representation stores ``type = independent-angle-energy``
-with ``angular-cosine-distribution`` and ``energy-distribution`` child Distributions.
-The product reference frame may differ from the reaction's frame when the source
-library specifies a separate frame for that product.
+An independent angle-energy representation stores ``type = independent-angle-energy`` with ``angular-cosine-distribution`` and ``energy-distribution`` child Distributions.
+Every product declares its own reference frame, which may differ from the reaction's frame.

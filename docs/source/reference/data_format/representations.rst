@@ -129,7 +129,7 @@ Each table representation specifies its interpolation laws and any restrictions 
 Distribution
 ------------
 
-A Distribution describes sampled quantities in the reaction's declared reference frame.
+A Distribution describes sampled quantities in the containing reaction's or product's declared reference frame.
 Energy distributions supply outgoing energy in eV; angular distributions supply a dimensionless cosine relative to the incident direction; joint distributions supply both.
 The layouts below define stored fields and constraints; :doc:`../ace_distributions` describes their physical models and sampling.
 

@@ -9,7 +9,7 @@ from mcdc.object_.proton_reaction import (
     set_angular_distribution,
     set_energy_distribution,
 )
-from mcdc.constant import REFERENCE_FRAME_COM
+from mcdc.constant import REFERENCE_FRAME_COM, REFERENCE_FRAME_LAB
 from mcdc.transport.data import evaluate_data_clamped
 from mcdc.transport.distribution import (
     sample_distribution,
@@ -101,7 +101,8 @@ def write_energy_distribution(group):
     interpolation["boundaries"] = [2]
 
 
-def test_proton_mcdc_inelastic_and_cross_product(tmp_path):
+@pytest.mark.parametrize("product_frame", ["LAB", "COM", None, "invalid"])
+def test_proton_mcdc_inelastic_and_cross_product(tmp_path, product_frame):
     with h5py.File(tmp_path / "reaction.h5", "w") as file:
         group = file.create_group("MT-051")
         group.attrs["ENDF-MT"] = 51
@@ -117,7 +118,8 @@ def test_proton_mcdc_inelastic_and_cross_product(tmp_path):
 
         product = group.create_group("cross-products").create_group("0")
         product["particle"] = "neutron"
-        product["reference-frame"] = "COM"
+        if product_frame is not None:
+            product["reference-frame"] = product_frame
         product["decay-rate"] = np.inf
         write_table(product.create_group("yield"), [1.0e6, 2.0e6], [0.5, 1.0])
         product_distribution = product.create_group("angle-energy-distribution")
@@ -128,6 +130,14 @@ def test_proton_mcdc_inelastic_and_cross_product(tmp_path):
             product_distribution.create_group("energy-distribution")
         )
 
+        if product_frame is None:
+            with pytest.raises(ValueError, match="missing required reference-frame"):
+                ProtonReactionInelasticScattering.from_h5_group(group, None)
+            return
+        if product_frame == "invalid":
+            with pytest.raises(ValueError, match="unknown reference frame"):
+                ProtonReactionInelasticScattering.from_h5_group(group, None)
+            return
         reaction = ProtonReactionInelasticScattering.from_h5_group(group, None)
 
     assert reaction.MT == 51
@@ -135,7 +145,10 @@ def test_proton_mcdc_inelastic_and_cross_product(tmp_path):
     assert reaction.multiplicity_data.y.tolist() == [1.0, 2.0]
     assert len(reaction.secondary_products) == 1
     assert reaction.secondary_products[0].mass_number == 1
-    assert reaction.secondary_products[0].reference_frame == REFERENCE_FRAME_COM
+    expected_frame = {"LAB": REFERENCE_FRAME_LAB, "COM": REFERENCE_FRAME_COM}
+    assert (
+        reaction.secondary_products[0].reference_frame == expected_frame[product_frame]
+    )
     assert reaction.secondary_products[0].production_yield.x.tolist() == [
         1.0e6,
         2.0e6,
