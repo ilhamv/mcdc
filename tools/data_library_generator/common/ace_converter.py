@@ -1,20 +1,16 @@
-"""Translate ACEtk objects into the MC/DC transport-data representations.
+"""Convert ACE data into MC/DC HDF5 records.
 
-Projectile generators open ACE tables, select output filenames, and manage HDF5
-file lifetimes. This module interprets source physics records, converts units,
-and maps them into the MC/DC layout through :mod:`.hdf5_writer`. Related
-conversion functions are grouped by their role and projectile.
-
-Source energies are in MeV. Energy coordinates and parameters are multiplied
-by ``EV_PER_MEV``, while energy probability densities are divided by the same
-factor to preserve probability. Polynomial coefficients require a separate
-conversion for each power. Cross sections remain in barns, and dimensionless
-quantities have no unit attribute.
+This module handles ACE parsing, physics-record conversion, unit conversion,
+and HDF5 layout. Projectile generators coordinate output files and non-ACE
+inputs. Source energies are in MeV; output energy coordinates use eV, cross
+sections use barns, and dimensionless values have no unit attribute.
 """
 
 from dataclasses import dataclass
 from functools import wraps
 from numbers import Integral
+import re
+from pathlib import Path
 
 import ACEtk
 import numpy as np
@@ -75,13 +71,7 @@ CATEGORY_ORDER = ("elastic-scattering", "capture", "inelastic-scattering", "fiss
 
 
 def _probability_table_context(source, error):
-    """Describe a packed-table failure using its ACE source coordinates.
-
-    Table indices are zero-based, matching the packed representation. LAW 61
-    cosine tables are flattened across outgoing-energy points; recover both
-    incident and outgoing coordinates when reporting one of those failures.
-    Source energies are reported in MeV before conversion to output units.
-    """
+    """Describe a failed packed table by its ACE source coordinates."""
     index = error.index
     if error.path and error.path.endswith("/cosine-distributions"):
         for table in source.distributions:
@@ -100,16 +90,11 @@ def _probability_table_context(source, error):
 
 
 def _distribution_errors(writer):
-    """Attach a distribution's HDF5 path, ACE law, and table coordinates.
-
-    Writers raise ValueError for source data that cannot be represented.
-    Packed-table failures additionally identify the failed table, so its
-    source coordinates can be reported without interpreting data in the
-    source-independent HDF5 writer. Exception chaining retains the cause.
-    """
+    """Add the HDF5 path and ACE law to distribution-conversion errors."""
 
     @wraps(writer)
     def write(group, source):
+        """Run a distribution writer and add context to its ValueError."""
         try:
             return writer(group, source)
         except ValueError as error:
@@ -133,23 +118,7 @@ def _distribution_errors(writer):
 
 @dataclass(frozen=True)
 class Target:
-    """Immutable target identity used to coordinate the three output files.
-
-    Attributes
-    ----------
-    symbol : str
-        Element symbol with standard capitalization, such as ``"Co"``.
-    atomic_number : int
-        Number of protons in the target nucleus.
-    mass_number : int
-        Total number of protons and neutrons in the target nucleus.
-    excitation_level : int
-        Excitation-state index, with zero denoting the ground state. This is
-        an index used in names such as ``Co58m1``, not an excitation energy.
-    temperature : float
-        Nominal source-library temperature in kelvin, obtained from the Lib81
-        suffix mapping rather than its rounded ACE thermal-energy value.
-    """
+    """Nuclide identity and nominal Lib81 temperature for neutron outputs."""
 
     symbol: str
     atomic_number: int
@@ -159,60 +128,18 @@ class Target:
 
     @property
     def nuclide(self):
-        """Return the nuclide identifier used for filenames and source matching.
-
-        Returns
-        -------
-        str
-            Element symbol followed by mass number, with ``m`` and the state
-            index appended for an excited state, for example ``Co58m1``.
-        """
+        """Return the nuclide name, including an isomer suffix when needed."""
         suffix = f"m{self.excitation_level}" if self.excitation_level else ""
         return f"{self.symbol}{self.mass_number}{suffix}"
 
     @property
     def filename(self):
-        """Return the temperature-file basename, for example ``neutron-H2-293.6K.h5``.
-
-        Returns
-        -------
-        str
-            The neutron prefix, nuclide identifier, nominal temperature, and
-            the suffix ``K.h5``. No directory is included.
-        """
+        """Return the neutron HDF5 filename for this nuclide and temperature."""
         return f"neutron-{self.nuclide}-{self.temperature}K.h5"
 
 
 def read_target(ace):
-    """Extract target identity and the nominal Lib81 temperature.
-
-    Parameters
-    ----------
-    ace : ACEtk.ContinuousEnergyTable
-        Parsed table exposing its ZAID, atomic number, mass number, and
-        isomeric-state index through ACEtk.
-
-    Returns
-    -------
-    Target
-        Identity shared by the element, nuclide, and temperature outputs.
-
-    Raises
-    ------
-    ValueError
-        The suffix of ``ace.header.zaid`` is absent from
-        ``ACE_TEMPERATURE_LIB81``.
-    KeyError
-        The atomic number is absent from the element-symbol lookup.
-
-    Notes
-    -----
-    ACEtk supplies the interpreted nuclide and isomer identities; this
-    function does not decode them from the ZAID's leading digits. Only the
-    suffix is interpreted here. The nominal temperature controls filenames
-    and the output target temperature. The original ACE thermal energy is
-    preserved separately in source provenance by ``read_source_libraries``.
-    """
+    """Read nuclide identity from ACEtk and temperature from the Lib81 suffix."""
     # Resolve the nominal library temperature used in output filenames
     suffix = ace.header.zaid.split(".")[-1]
     if suffix not in ACE_TEMPERATURE_LIB81:
@@ -227,47 +154,7 @@ def read_target(ace):
 
 
 def read_source_libraries(ace, target, with_temperature=False):
-    """Build source-library metadata for one output file without writing it.
-
-    Parameters
-    ----------
-    ace : ACEtk.ContinuousEnergyTable
-        Parsed table whose header provides the source title, comments,
-        format version, processing date, and thermal energy.
-    target : Target
-        Interpreted target identity and nominal temperature.
-    with_temperature : bool, optional
-        Include the nominal ``temperature`` in K and original ACE ``kT``
-        converted from MeV to eV. Projectile generators enable this only
-        for temperature-dependent projectile files.
-
-    Returns
-    -------
-    dict of str to dict
-        Library identifiers mapped to scalar metadata values, suitable for
-        ``hdf5_writer.stamp``. The supported identifier is ``"Lib81"``.
-        String fields are ``title``, ``version``, ``release-date``,
-        ``reference``, ``comments``, ``format``, ``format-version``, and
-        ``processing-date``; optional temperature fields are numeric.
-
-    Raises
-    ------
-    ValueError
-        Neither the title nor comments identify Lib81 as a whitespace-
-        separated token.
-
-    Notes
-    -----
-    Library identity comes from header text, not the ZAID or input filename.
-    The ACE header version and date describe the source format and processing;
-    they are not assigned to the library's release version or release date.
-    Unavailable release information and other missing strings are empty.
-    A reference is extracted from the title's text following ``Ref.``.
-
-    This function does not create ``conversion-time``. The HDF5 writer records
-    that timestamp when it actually writes the source record, allowing
-    skipped conversions to leave provenance unchanged.
-    """
+    """Build Lib81 provenance metadata, optionally including source temperature."""
     # Identify the source library from its header text
     header = ace.header
     title = str(getattr(header, "title", "") or "")
@@ -300,29 +187,7 @@ def read_source_libraries(ace, target, with_temperature=False):
 
 
 def interpolation_law(code):
-    """Translate an ACE interpolation code into an MC/DC law name.
-
-    Parameters
-    ----------
-    code : int
-        ACE code: 1 for histogram, 2 for linear-linear, 3 for linear in
-        log(x), 4 for linear in log(y), or 5 for log-log interpolation.
-
-    Returns
-    -------
-    str
-        ``histogram``, ``linear``, ``semilog-x``, ``semilog-y``, or ``log``.
-
-    Raises
-    ------
-    ValueError
-        The code cannot be converted to an integer or has no supported law.
-
-    Notes
-    -----
-    This converts a rule identifier only; it does not interpolate values or
-    verify that coordinates satisfy a logarithmic law's positivity domain.
-    """
+    """Map a supported ACE interpolation code to its MC/DC law name."""
     try:
         return ACE_INTERPOLATION[int(code)]
     except KeyError:
@@ -330,39 +195,13 @@ def interpolation_law(code):
 
 
 def write_interpolation(group, source, count):
-    """Write ACE interpolation regions using MC/DC names and local indices.
-
-    Parameters
-    ----------
-    group : h5py.Group
-        Parent table representation in which to create ``interpolation``.
-    source : object
-        ACEtk interpolation data exposing ``interpolants`` and ``boundaries``.
-        Source boundaries are one-based upper-point indices.
-    count : int
-        Number of points in the table being described, not necessarily the
-        length of a projectile's full shared energy grid.
-
-    Raises
-    ------
-    ValueError
-        A source law is unsupported or the converted regions fail the HDF5
-        writer's count, ordering, or endpoint checks.
-
-    Notes
-    -----
-    The source's one-based upper-point indices already equal the exclusive
-    point boundaries used by MC/DC, so the final boundary remains ``count``.
-    An empty source law list means a single linear region.
-    The child group contains ``laws`` and ``boundaries`` datasets; existing
-    interpolation groups are not replaced. No table values are modified.
-    """
+    """Write ACE interpolation laws and point boundaries to a table group."""
     laws, boundaries = _interpolation_regions(source, count)
     interpolation(group, count, laws, boundaries)
 
 
 def _interpolation_regions(source, count):
-    """Translate source rules into named laws and exclusive point boundaries."""
+    """Return named interpolation laws and their point boundaries."""
     laws = [interpolation_law(code) for code in source.interpolants]
     boundaries = np.asarray(source.boundaries, dtype=np.int64)
     if not laws:
@@ -376,27 +215,7 @@ def _interpolation_regions(source, count):
 
 
 def reaction_name(mt):
-    """Return the MC/DC group name assigned to a neutron reaction MT.
-
-    Parameters
-    ----------
-    mt : int
-        ENDF reaction identifier.
-
-    Returns
-    -------
-    str
-        A descriptive name for explicitly mapped reactions, an
-        ``inelastic-level-{i}`` name for MT 51--90, or ``reaction-{mt}``
-        for an identifier without a dedicated name.
-
-    Notes
-    -----
-    Naming does not select reactions or assign transport categories. An
-    unmapped identifier can still have a stable fallback name. This name is
-    an MC/DC key, not an original GNDS label; the MT value is preserved
-    independently in the reaction's ``ENDF-MT`` attribute.
-    """
+    """Return the MC/DC group name for an MT, with a fallback for unmapped MTs."""
     names = {
         2: "elastic",
         16: "neutron-emission-2",
@@ -424,51 +243,11 @@ def reaction_name(mt):
 
 
 def retained_reactions(ace):
-    """Select and categorize the neutron reaction records to be written.
+    """Select supported neutron reactions and assign their transport categories.
 
-    Parameters
-    ----------
-    ace : ACEtk.ContinuousEnergyTable
-        Parsed table with matching reaction-number and frame/multiplicity
-        blocks. Those blocks use one-based reaction indices.
-
-    Returns
-    -------
-    list of tuple
-        Records ``(mt, index, category)`` sorted first by ``CATEGORY_ORDER``
-        and then by MT. ``index`` is the ACEtk reaction index, except that
-        ``(2, 0, "elastic-scattering")`` is an explicit elastic sentinel.
-        Elastic cross sections are read from the principal block instead
-        of the ordinary reaction cross-section list.
-
-    Raises
-    ------
-    ValueError
-        The reaction and multiplicity blocks have different lengths; total
-        fission and chance-fission entries coexist; or a selected non-fission
-        reaction does not have a nonnegative integer neutron multiplicity.
-
-    Notes
-    -----
-    The selection is not a lossless enumeration of the ACE table. MT 1, 3,
-    4, and 10 are omitted as aggregate quantities. MT 2 is skipped in the
-    ordinary list because it has already been added through the sentinel.
-    ``NEUTRON_REACTION_MT_RANGES`` admits MT 1--117 and 152--200 before
-    aggregate filtering. MT 152--200 describe 49 independent channels,
-    including (n,5n)--(n,8n) and mixed-particle emission. Other MT families,
-    including inclusive production totals, auxiliary quantities, and
-    resolved product branches, are excluded. The function does not verify
-    that a retained aggregate covers each omitted branch.
-
-    Fission MTs are recognized explicitly. Other selected reactions with
-    zero outgoing neutrons are categorized as ``capture``, including
-    charged-particle emission channels, while positive neutron multiplicity
-    gives ``inelastic-scattering``. Within MT 152--200, the neutron-free
-    channels are 155, 182, 191--193, and 197. Categories use the source
-    neutron multiplicities; cross-species emissions do not change them.
-    Energy-dependent multiplicity is not converted here. The function
-    reads source records without modifying the ACE table or writing HDF5
-    objects.
+    Returns sorted ``(MT, ACE index, category)`` records, including elastic
+    scattering with index zero. Rejects inconsistent reaction blocks and
+    unsupported neutron multiplicities.
     """
     # Check that source reaction records can be interpreted consistently
     numbers = ace.reaction_number_block
@@ -500,41 +279,7 @@ def retained_reactions(ace):
 
 
 def write_temperature(file, ace, target, verbose=False):
-    """Write target temperature, the neutron grid, and selected reactions.
-
-    Parameters
-    ----------
-    file : h5py.File
-        Writable output containing no temperature datasets or neutron group.
-        The caller manages its lifetime and stamps format/source metadata.
-    ace : ACEtk.ContinuousEnergyTable
-        Source of the principal energy grid and neutron reaction records.
-    target : Target
-        Nominal temperature in K used for ``temperature`` and for computing
-        ``kT`` in eV with ``BOLTZMANN_K``.
-    verbose : bool, optional
-        Print each selected reaction's MT, output name, and category.
-
-    Raises
-    ------
-    ValueError
-        Reaction selection or a delegated reaction/distribution conversion
-        encounters unsupported or inconsistent source data.
-
-    Notes
-    -----
-    The source principal energy grid is converted from MeV to eV and stored
-    once as ``xs-energy-grid``. Reaction groups are
-    created in selection order and populated by ``write_reaction``.
-    Aggregate or auxiliary data excluded by ``retained_reactions`` is not
-    written. Source thermal-energy provenance is supplied separately by
-    ``read_source_libraries``; it may differ from computed ``kT`` through
-    source rounding.
-
-    Writes are direct and may leave a partially populated open file on
-    failure. The caller uses ``hdf5_writer.atomic_file`` to publish the
-    projectile file only after conversion succeeds.
-    """
+    """Write neutron temperature data, the shared energy grid, and reactions."""
     # Write the target thermodynamic state and shared neutron energy grid
     quantity(file, "temperature", target.temperature, "K")
     quantity(file, "kT", target.temperature * BOLTZMANN_K, "eV")
@@ -554,47 +299,10 @@ def write_temperature(file, ace, target, verbose=False):
 
 
 def write_reaction(group, ace, mt, index, category, energy_count):
-    """Populate one selected neutron reaction in its final HDF5 layout.
+    """Write a neutron reaction's cross section and category-specific data.
 
-    Parameters
-    ----------
-    group : h5py.Group
-        New reaction group, already named by the caller.
-    ace : ACEtk.ContinuousEnergyTable
-        Source table providing cross sections, Q-values, reference frames,
-        angular distributions, energy spectra, and fission production data.
-    mt : int
-        Reaction identifier to store as ``ENDF-MT``.
-    index : int
-        One-based ACEtk reaction index, or zero for elastic scattering.
-    category : str
-        Selected ``elastic-scattering``, ``capture``,
-        ``inelastic-scattering``, or ``fission`` category.
-    energy_count : int
-        Full length of the containing projectile's shared energy grid.
-
-    Raises
-    ------
-    ValueError
-        A source frame is unsupported, cross sections do not extend from
-        their offset to the end of the shared grid, or a delegated conversion
-        rejects source data.
-
-    Notes
-    -----
-    Common output consists of category/source attributes, ``xs`` with a
-    zero-based offset and linear interpolation, ``reference-frame``, a
-    Q-value converted to eV, and an empty ``cross-products`` group. Cross
-    sections remain in barns. Elastic data uses the principal block, offset
-    zero, Q-value zero, and the COM frame.
-
-    Capture stops after the common fields. Inelastic reactions add neutron
-    multiplicity and a mixture Distribution with component probability Data.
-    Fission adds a prompt Distribution and reaction-local multiplicities and
-    delayed-neutron data. Separate angular data is written only when ACE
-    does not identify it as supplied through the energy-angle distribution.
-    This function does not extract cross-species products or validate sums
-    against total cross sections. It does not roll back partial group writes.
+    Inelastic and fission reactions also include their multiplicity and
+    distributions. Cross sections must align with the shared energy grid.
     """
     # Resolve reaction identity, cross-section values, Q-value, and reference frame
     group.attrs["ENDF-MT"] = mt
@@ -654,33 +362,7 @@ def write_reaction(group, ace, mt, index, category, energy_count):
 
 
 def write_mixture_distribution(group, source):
-    """Compose source spectra with their incident-energy probability Data.
-
-    Parameters
-    ----------
-    group : h5py.Group
-        Destination Distribution group. Components are stored under contiguous
-        zero-based ``components/{i}`` groups, each containing ``probability``
-        Data and a ``distribution`` Distribution.
-    source : object
-        One ACEtk spectrum or MultiDistributionData containing the spectra and
-        their applicability functions. A single spectrum receives probability
-        one as a constant polynomial.
-
-    Notes
-    -----
-    Probability tables keep their own incident-energy grids and interpolation
-    regions. Constant probabilities become Data polynomials; varying functions
-    become Data tables with eV inputs and dimensionless values. The source's
-    missing interpolation regions imply linear interpolation. Probabilities are
-    not resampled onto a common grid or renormalized during conversion.
-
-    Constant mixtures are checked for unit total probability. Transport checks
-    the total at the sampled incident energy for varying functions. Source
-    values must be finite and nonnegative; invalid coordinates, logarithmic
-    domains, interpolation rules, or delegated spectrum conversions raise
-    ValueError. Writes may be partial; the caller owns atomic file publication.
-    """
+    """Write ACE spectra as a mixture with per-component probability Data."""
     if isinstance(source, ACEtk.continuous.MultiDistributionData):
         count = source.number_distributions
         spectra = [source.distribution(i + 1) for i in range(count)]
@@ -705,12 +387,7 @@ def write_mixture_distribution(group, source):
 
 
 def _write_distribution_probability(group, source):
-    """Write one applicability function as polynomial or interpolation-aware Data.
-
-    None denotes a sole spectrum with probability one. Input arrays are checked
-    without changing values; logarithmic regions require positive coordinates
-    or ordinates on every positive-width interval using the respective rule.
-    """
+    """Write a component probability as constant or tabulated H1 Data."""
     if source is None:
         values, energy = np.array([1.0]), np.array([0.0])
     else:
@@ -761,36 +438,7 @@ def _write_distribution_probability(group, source):
 
 
 def write_multiplicity(group, source):
-    """Write an ACE fission multiplicity as a Data polynomial or table.
-
-    Parameters
-    ----------
-    group : h5py.Group
-        Empty destination for a dimensionless mean-neutron-yield function
-        whose input is incident energy in eV.
-    source : object
-        ACEtk multiplicity record: type 1 supplies ascending polynomial
-        coefficients, and type 2 supplies energies, multiplicities, and
-        interpolation data.
-
-    Raises
-    ------
-    ValueError
-        The multiplicity type or interpolation representation is unsupported.
-
-    Notes
-    -----
-    For a source polynomial in MeV, coefficient i is divided by
-    ``EV_PER_MEV**i`` so evaluation with an eV input gives the same yield.
-    Multiple coefficients carry individual unit strings: ``1``, ``1/eV``,
-    ``1/eV^2``, and so on. A lone dimensionless coefficient has no unit
-    attribute and retains the polynomial representation.
-
-    Table records receive an eV grid, unchanged dimensionless yields,
-    and converted interpolation regions. This function does not infer
-    whether the source yield is prompt, delayed, or total; its caller must
-    select the physically appropriate source record.
-    """
+    """Write an ACE fission multiplicity as polynomial or tabulated H1 Data."""
     if source.type == 1:
         # Convert each polynomial coefficient for its corresponding power of eV
         group.attrs["type"] = "polynomial"
@@ -818,43 +466,7 @@ def write_multiplicity(group, source):
 
 
 def write_fission(group, ace):
-    """Copy nuclide-wide ACE fission yields and delayed groups into a reaction.
-
-    Parameters
-    ----------
-    group : h5py.Group
-        Fission reaction receiving ``prompt-multiplicity``,
-        ``delayed-multiplicity``, and ``delayed-neutrons``. Prompt spectra
-        and angular data are written separately by ``write_reaction``.
-    ace : ACEtk.ContinuousEnergyTable
-        Table supplying fission multiplicity, delayed multiplicity,
-        precursor, and delayed-energy-distribution blocks.
-
-    Raises
-    ------
-    ValueError
-        Fission multiplicity is missing; only total multiplicity is supplied
-        alongside delayed data; a precursor fraction is not represented by
-        two equal probabilities with no interpolation regions; or a delayed
-        spectrum has an unsupported representation.
-
-    Notes
-    -----
-    The source fission-block multiplicity is written as prompt yield. A
-    total-only source is accepted only when no delayed-multiplicity block
-    is present; the function does not reconstruct prompt yield by subtraction.
-    An absent delayed yield is represented explicitly as constant zero.
-
-    Delayed group i maps to index i in ``fractions`` and ``decay-rates`` and
-    to ``energy-distribution-{i}``. Fractions are copied without
-    renormalization; ACEtk decay constants are written directly with unit
-    ``1/s``. Absent precursor data produces empty arrays and no group spectra.
-    Energy conversion is delegated to ``write_energy_distribution``.
-
-    Each reaction owns a copy of these data, including chance-fission
-    reactions whose ACE source shares a single nuclide-wide yield block.
-    The ``fission-production-source`` attribute records that provenance.
-    """
+    """Copy ACE prompt, delayed, and precursor data into a fission reaction."""
     # Require an unambiguous prompt yield before writing production data
     prompt = ace.fission_multiplicity_block
     delayed = ace.delayed_fission_multiplicity_block
@@ -905,47 +517,717 @@ def write_fission(group, ace):
 
 
 # ======================================================================================
+# Proton reactions and secondary products
+# ======================================================================================
+
+
+@dataclass
+class ProtonReaction:
+    """Selected proton reaction with its ACE index and output classification."""
+
+    MT: int
+    index: int
+    group: str
+    multiplicity: int = 0
+    proton_yield: tuple | None = None
+
+
+PROTON_REDUNDANT_MTS = frozenset({1, 3, 10, 101})
+PROTON_SUM_MT_PARTIALS = {
+    4: range(50, 92),
+    16: range(875, 892),
+    103: range(600, 650),
+    104: range(650, 700),
+    105: range(700, 750),
+    106: range(750, 800),
+    107: range(800, 850),
+}
+PROTON_MAX_MT = 891
+PROTON_ELEMENT_SYMBOLS = (
+    "H",
+    "He",
+    "Li",
+    "Be",
+    "B",
+    "C",
+    "N",
+    "O",
+    "F",
+    "Ne",
+    "Na",
+    "Mg",
+    "Al",
+    "Si",
+    "P",
+    "S",
+    "Cl",
+    "Ar",
+    "K",
+    "Ca",
+    "Sc",
+    "Ti",
+    "V",
+    "Cr",
+    "Mn",
+    "Fe",
+    "Co",
+    "Ni",
+    "Cu",
+    "Zn",
+    "Ga",
+    "Ge",
+    "As",
+    "Se",
+    "Br",
+    "Kr",
+    "Rb",
+    "Sr",
+    "Y",
+    "Zr",
+    "Nb",
+    "Mo",
+    "Tc",
+    "Ru",
+    "Rh",
+    "Pd",
+    "Ag",
+    "Cd",
+    "In",
+    "Sn",
+    "Sb",
+    "Te",
+    "I",
+    "Xe",
+    "Cs",
+    "Ba",
+    "La",
+    "Ce",
+    "Pr",
+    "Nd",
+    "Pm",
+    "Sm",
+    "Eu",
+    "Gd",
+    "Tb",
+    "Dy",
+    "Ho",
+    "Er",
+    "Tm",
+    "Yb",
+    "Lu",
+    "Hf",
+    "Ta",
+    "W",
+    "Re",
+    "Os",
+    "Ir",
+    "Pt",
+    "Au",
+    "Hg",
+    "Tl",
+    "Pb",
+    "Bi",
+    "Po",
+    "At",
+    "Rn",
+    "Fr",
+    "Ra",
+    "Ac",
+    "Th",
+    "Pa",
+    "U",
+    "Np",
+    "Pu",
+    "Am",
+    "Cm",
+    "Bk",
+    "Cf",
+    "Es",
+    "Fm",
+    "Md",
+    "No",
+    "Lr",
+    "Rf",
+    "Db",
+    "Sg",
+    "Bh",
+    "Hs",
+    "Mt",
+    "Ds",
+    "Rg",
+    "Cn",
+    "Nh",
+    "Fl",
+    "Mc",
+    "Lv",
+    "Ts",
+    "Og",
+)
+PROTON_SYMBOL_TO_Z = {
+    symbol: z for z, symbol in enumerate(PROTON_ELEMENT_SYMBOLS, start=1)
+}
+ACE_PROTON_PRODUCT_NAMES = {
+    1: "neutron",
+    9: "proton",
+    31: "deuteron",
+    32: "triton",
+    33: "helion",
+    34: "alpha",
+}
+ACE_PHOTON_MT_FACTOR = 1000
+
+
+@dataclass
+class ProtonACEData:
+    """Parsed ACE data and output metadata for one proton target."""
+
+    table: object
+    Z: int
+    A: int
+    state: int
+    symbol: str
+    nuclide: str
+    output_name: str
+    pstar_path: Path | None
+    sources: dict
+    reactions: list
+    skipped_mts: set
+    required_paths: list
+
+
+def decode_ace_zaid(zaid):
+    """Decode atomic number, mass number, and isomer state from a proton ZAID."""
+    za = int(zaid.strip().split(".")[0])
+    state = 0
+    if za >= 600000:
+        state = (za % 1000) // 400
+        za -= state * 400
+    return za // 1000, za % 1000, state
+
+
+def prepare_proton_ace(ace_path, pstar_dir=None):
+    """Parse proton ACE data and prepare target, reaction, and output metadata.
+
+    The result includes provenance, an optional matching PSTAR file, and the
+    HDF5 paths used to determine whether an existing output can be reused.
+    """
+    table = ACEtk.ContinuousEnergyTable.from_file(str(ace_path))
+    Z, A, state = decode_ace_zaid(table.header.zaid)
+    if not 1 <= Z <= len(PROTON_ELEMENT_SYMBOLS):
+        raise ValueError(f"Unsupported Z={Z} in {ace_path}")
+    symbol = PROTON_ELEMENT_SYMBOLS[Z - 1]
+    nuclide = f"{symbol}{A}" if state == 0 else f"{symbol}{A}m{state}"
+    pstar_path = Path(pstar_dir) / f"{symbol}.txt" if pstar_dir else None
+    if pstar_path is not None and not pstar_path.is_file():
+        pstar_path = None
+
+    reactions, skipped_mts = classify_proton_reactions(table)
+    required_paths = [
+        "atomic-number",
+        "mass-number",
+        "atomic-weight-ratio",
+        "excitation-level",
+        "fissionable",
+        "radiation-length",
+        "xs-energy-grid",
+        "reactions",
+        "reactions/MT-002/xs/value",
+        "reactions/MT-002/xs/offset",
+        "reactions/MT-002/reference-frame",
+        "reactions/MT-002/Q-value",
+        "reactions/MT-002/cross-products",
+        "reactions/MT-002/angular-cosine-distribution",
+    ]
+    for reaction in reactions:
+        base = f"reactions/MT-{reaction.MT:03}"
+        required_paths.extend(
+            f"{base}/{field}"
+            for field in (
+                "xs/value",
+                "xs/offset",
+                "reference-frame",
+                "Q-value",
+                "cross-products",
+            )
+        )
+        if reaction.group == "inelastic_scattering":
+            required_paths.extend(
+                (f"{base}/multiplicity", f"{base}/energy-distribution")
+            )
+    if pstar_path is not None:
+        required_paths.extend(("stopping-power/grid", "stopping-power/value"))
+
+    return ProtonACEData(
+        table=table,
+        Z=Z,
+        A=A,
+        state=state,
+        symbol=symbol,
+        nuclide=nuclide,
+        output_name=f"proton-{nuclide}.h5",
+        pstar_path=pstar_path,
+        sources=read_proton_source_libraries(table, pstar_path is not None),
+        reactions=reactions,
+        skipped_mts=skipped_mts,
+        required_paths=required_paths,
+    )
+
+
+def ace_reference_frame_name(frame):
+    """Map an ACE reference frame to its H1 name, ``LAB`` or ``COM``."""
+    frames = {
+        ACEtk.ReferenceFrame.Laboratory: "LAB",
+        ACEtk.ReferenceFrame.CentreOfMass: "COM",
+    }
+    if frame not in frames:
+        raise ValueError(f"Unknown ACE reference frame {frame!r}")
+    return frames[frame]
+
+
+def read_proton_source_libraries(ace, include_pstar):
+    """Build provenance records for the TENDL source and optional PSTAR data."""
+    header = ace.header
+    title = str(getattr(header, "title", "") or "")
+    comments = str(getattr(header, "comments", "") or "")
+    release = re.search(r"\bTENDL[- ](\d{4})\b", f"{title} {comments}")
+    if release is None:
+        raise ValueError("ACE header does not identify a TENDL release")
+    sources = {
+        f"TENDL-{release.group(1)}": {
+            "title": title,
+            "version": release.group(1),
+            "release-date": "",
+            "reference": "",
+            "comments": comments,
+            "format": "ACE",
+            "format-version": str(getattr(header, "version", "") or ""),
+            "processing-date": str(getattr(header, "date", "") or ""),
+        }
+    }
+    if include_pstar:
+        sources["PSTAR"] = {
+            "title": "NIST PSTAR stopping-power tables",
+            "version": "",
+            "release-date": "",
+            "reference": "NIST PSTAR",
+            "comments": "",
+            "format": "PSTAR",
+            "format-version": "",
+            "processing-date": "",
+        }
+    return sources
+
+
+def read_proton_yield(data, what):
+    """Read a linear-linear ACE yield table as energy and multiplicity arrays."""
+    offset = (
+        2
+        if isinstance(data, ACEtk.continuous.TabulatedSecondaryParticleMultiplicity)
+        else 0
+    )
+    if not data.interpolation_data.is_linear_linear:
+        regions = int(data.NB)
+        boundaries = [int(data.xss(offset + i)) for i in range(2, regions + 2)]
+        interpolants = [
+            int(data.xss(offset + i)) for i in range(regions + 2, 2 * regions + 2)
+        ]
+        raise ValueError(
+            f"{what}: yield table is not linear-linear "
+            f"(NBT={boundaries}, INT={interpolants})"
+        )
+    regions = int(data.NB)
+    count = int(data.NE)
+    energy_start = offset + 2 * regions + 3
+    value_start = energy_start + count
+    energy = np.array(
+        [data.xss(i) for i in range(energy_start, value_start)], dtype=np.float64
+    )
+    value = np.array(
+        [data.xss(i) for i in range(value_start, value_start + count)],
+        dtype=np.float64,
+    )
+    if len(energy) < 2:
+        raise ValueError(f"{what}: yield table contains fewer than two points")
+    if np.any(np.diff(energy) < 0.0):
+        raise ValueError(f"{what}: yield energies are not non-decreasing")
+    if np.any(value < 0.0):
+        raise ValueError(f"{what}: negative yield")
+    return energy, value
+
+
+def _write_proton_yield(group, name, energy, value):
+    """Write an incident-energy-dependent yield as H1 table Data."""
+    energy = np.asarray(energy, dtype=np.float64)
+    value = np.asarray(value, dtype=np.float64)
+    if (
+        energy.ndim != 1
+        or energy.shape != value.shape
+        or len(energy) < 2
+        or not np.all(np.isfinite(energy))
+        or not np.all(np.isfinite(value))
+        or np.any(np.diff(energy) < 0)
+        or np.any(value < 0)
+    ):
+        raise ValueError(f"{name}: invalid yield table")
+    same_as_previous = np.zeros(len(energy), dtype=bool)
+    same_as_previous[1:] = (energy[1:] == energy[:-1]) & (value[1:] == value[:-1])
+    energy, value = energy[~same_as_previous], value[~same_as_previous]
+    if len(energy) < 2 or not np.any(np.diff(energy) > 0):
+        raise ValueError(
+            f"{name}: yield table must contain at least two distinct energies"
+        )
+
+    table = group.create_group(name)
+    table.attrs["type"] = "table"
+    quantity(table, "grid", energy * EV_PER_MEV, "eV")
+    quantity(table, "value", value)
+    interpolation(table, len(energy))
+
+
+def _is_joint_proton_spectrum(source):
+    """Return whether an ACE spectrum also describes its angular distribution."""
+    continuous = ACEtk.continuous
+    joint_types = (
+        continuous.KalbachMannDistributionData,
+        continuous.EnergyAngleDistributionData,
+        continuous.NBodyPhaseSpaceDistribution,
+    )
+    if isinstance(source, continuous.MultiDistributionData):
+        joint = [
+            _is_joint_proton_spectrum(source.distribution(index))
+            for index in range(1, source.number_distributions + 1)
+        ]
+        if any(joint) and not all(joint):
+            raise ValueError(
+                "A product mixture cannot combine joint and independent angle-energy laws"
+            )
+        return all(joint)
+    return isinstance(source, joint_types)
+
+
+def _write_proton_cross_product(
+    parent, name, *, frame, yield_energy, yield_value, energy, angle
+):
+    """Write a secondary-particle product and its yield and distributions."""
+    continuous = ACEtk.continuous
+    product = parent.create_group(str(len(parent)))
+    quantity(product, "particle", name)
+    quantity(product, "reference-frame", frame)
+    _write_proton_yield(product, "yield", yield_energy, yield_value)
+    quantity(product, "decay-rate", np.inf, "1/s")
+
+    distribution = product.create_group("angle-energy-distribution")
+    if _is_joint_proton_spectrum(energy):
+        write_energy_distribution(distribution, energy)
+        return
+    if isinstance(angle, continuous.DistributionGivenElsewhere):
+        raise ValueError(
+            f"{parent.parent.name}/{name}: angle is not included in its energy distribution"
+        )
+    distribution.attrs["type"] = "independent-angle-energy"
+    write_angular_distribution(
+        distribution.create_group("angular-cosine-distribution"), angle
+    )
+    write_energy_distribution(distribution.create_group("energy-distribution"), energy)
+
+
+def classify_proton_reactions(ace):
+    """Select proton reactions and classify capture versus inelastic channels.
+
+    Returns the selected records and MTs omitted as redundant or unsupported.
+    Raises ``ValueError`` for unsupported fission or invalid yield data.
+    """
+    numbers = ace.reaction_number_block
+    multiplicities = ace.frame_and_multiplicity_block
+    distributions = ace.energy_distribution_block
+    count = multiplicities.number_reactions
+    present = {numbers.MT(index) for index in range(1, count + 1)}
+
+    skipped = set(PROTON_REDUNDANT_MTS)
+    for aggregate, partials in PROTON_SUM_MT_PARTIALS.items():
+        if aggregate in present and present.intersection(partials):
+            skipped.add(aggregate)
+    skipped.update(mt for mt in present if mt > PROTON_MAX_MT)
+    if present.intersection((18, 19, 20, 21, 38)) or (
+        ace.fission_multiplicity_block is not None
+    ):
+        raise ValueError("Fission data in a proton ACE file are not supported")
+
+    reactions = []
+    for index in range(1, count + 1):
+        mt = numbers.MT(index)
+        if mt == 2 or mt in skipped:
+            continue
+        multiplicity = multiplicities.multiplicity(index)
+        if multiplicity == 0:
+            reactions.append(ProtonReaction(mt, index, "capture"))
+        elif multiplicity > 100:
+            if index > distributions.number_reactions:
+                raise ValueError(
+                    f"MT-{mt:03}: energy-dependent multiplicity but no DLW entry"
+                )
+            data = distributions.multiplicity_data(index)
+            if not isinstance(data, ACEtk.continuous.TabulatedMultiplicity):
+                raise ValueError(
+                    f"MT-{mt:03}: TYR={multiplicity} but multiplicity data is "
+                    f"{type(data).__name__}"
+                )
+            reactions.append(
+                ProtonReaction(
+                    mt,
+                    index,
+                    "inelastic_scattering",
+                    proton_yield=read_proton_yield(data, f"proton yield of MT-{mt:03}"),
+                )
+            )
+        else:
+            reactions.append(
+                ProtonReaction(mt, index, "inelastic_scattering", multiplicity)
+            )
+    return reactions, skipped
+
+
+def _write_proton_reaction(group, ace, reaction):
+    """Write one proton reaction's cross section and channel data."""
+    index = reaction.index
+    group.attrs["ENDF-MT"] = reaction.MT
+    group.attrs["category"] = reaction.group.replace("_", "-")
+
+    cross_sections = ace.cross_section_block
+    xs = group.create_group("xs")
+    quantity(xs, "value", cross_sections.cross_sections(index), "barn")
+    quantity(xs, "offset", cross_sections.energy_index(index) - 1)
+    interpolation(xs, len(xs["value"]))
+    quantity(
+        group,
+        "Q-value",
+        ace.reaction_qvalue_block.q_value(index) * EV_PER_MEV,
+        "eV",
+    )
+    quantity(
+        group,
+        "reference-frame",
+        ace_reference_frame_name(
+            ace.frame_and_multiplicity_block.reference_frame(index)
+        ),
+    )
+    group.create_group("cross-products")
+    if reaction.group == "capture":
+        return
+
+    if reaction.proton_yield is None:
+        quantity(group, "multiplicity", reaction.multiplicity)
+    else:
+        _write_proton_yield(group, "multiplicity", *reaction.proton_yield)
+    angle = ace.angular_distribution_block.angular_distribution_data(index)
+    if not isinstance(angle, ACEtk.continuous.DistributionGivenElsewhere):
+        write_angular_distribution(
+            group.create_group("angular-cosine-distribution"), angle
+        )
+    write_energy_distribution(
+        group.create_group("energy-distribution"),
+        ace.energy_distribution_block.energy_distribution_data(index),
+    )
+
+
+def _write_proton_cross_products(ace, reaction_groups, skipped_mts, verbose):
+    """Write proton ACE secondary-particle and photon yields and distributions."""
+    continuous = ACEtk.continuous
+    written = 0
+
+    for particle_index in range(1, ace.NTYPE + 1):
+        ace_id = ace.PTYPE.particle_type(particle_index)
+        if ace_id not in ACE_PROTON_PRODUCT_NAMES:
+            raise ValueError(f"Unknown ACE secondary-particle id {ace_id}")
+        if ace_id == 9:
+            raise ValueError("Proton listed as a secondary particle type")
+        name = ACE_PROTON_PRODUCT_NAMES[ace_id]
+        count = ace.NTRO.NP(particle_index)
+        reaction_numbers = ace.MTRH(particle_index)
+        particle_multiplicity = ace.TYRH(particle_index)
+        yields = ace.SIGH(particle_index)
+        energy = ace.DLWH(particle_index)
+        angles = ace.ANDH(particle_index)
+        sizes = (
+            reaction_numbers.number_reactions,
+            particle_multiplicity.number_reactions,
+            len(yields.data),
+            energy.number_reactions,
+            angles.number_reactions,
+        )
+        if any(size != count for size in sizes):
+            raise ValueError(
+                f"{name}: inconsistent block sizes {sizes}, expected {count} each"
+            )
+
+        for index in range(1, count + 1):
+            mt = reaction_numbers.MT(index)
+            what = f"{name} from MT-{mt:03}"
+            if particle_multiplicity.multiplicity(index) != 1:
+                raise ValueError(
+                    f"{what}: TYRH multiplicity "
+                    f"{particle_multiplicity.multiplicity(index)} (expected 1)"
+                )
+            yield_data = yields.data[index - 1]
+            if yield_data.MT != mt or yield_data.MFTYPE != 12:
+                raise ValueError(f"{what}: unsupported SIGH yield record")
+            group = _proton_products_group(
+                mt, reaction_groups, skipped_mts, what, verbose
+            )
+            if group is None:
+                continue
+            yield_energy, yield_value = read_proton_yield(yield_data, what)
+            _write_proton_cross_product(
+                group,
+                name,
+                frame=ace_reference_frame_name(
+                    particle_multiplicity.reference_frame(index)
+                ),
+                yield_energy=yield_energy,
+                yield_value=yield_value,
+                energy=energy.energy_distribution_data(index),
+                angle=angles.angular_distribution_data(index),
+            )
+            written += 1
+            if verbose:
+                print(
+                    f"      MT-{mt:03} {name}: yield "
+                    f"{yield_value.min():g}..{yield_value.max():g}"
+                )
+
+    count = ace.NTRP
+    if count:
+        reactions = ace.MTRP
+        yields = ace.SIGP
+        energy = ace.DLWP
+        angles = ace.ANDP
+        sizes = (
+            reactions.number_reactions,
+            len(yields.data),
+            energy.number_reactions,
+            angles.number_reactions,
+        )
+        if any(size != count for size in sizes):
+            raise ValueError(
+                f"photon: inconsistent block sizes {sizes}, expected {count} each"
+            )
+        for index in range(1, count + 1):
+            mt, photon_index = divmod(reactions.MT(index), ACE_PHOTON_MT_FACTOR)
+            name = "photon" if photon_index == 1 else f"photon_{photon_index}"
+            what = f"{name} from MT-{mt:03}"
+            yield_data = yields.data[index - 1]
+            if not isinstance(
+                yield_data, continuous.TabulatedSecondaryParticleMultiplicity
+            ):
+                raise ValueError(
+                    f"{what}: SIGP entry is a {type(yield_data).__name__}, "
+                    "not a yield table"
+                )
+            if yield_data.MT != mt or yield_data.MFTYPE not in (12, 16):
+                raise ValueError(f"{what}: unexpected SIGP yield record")
+            group = _proton_products_group(
+                mt, reaction_groups, skipped_mts, what, verbose
+            )
+            if group is None:
+                continue
+            frame = energy.reference_frame(index)
+            yield_energy, yield_value = read_proton_yield(yield_data, what)
+            _write_proton_cross_product(
+                group,
+                name,
+                frame="LAB" if frame is None else ace_reference_frame_name(frame),
+                yield_energy=yield_energy,
+                yield_value=yield_value,
+                energy=energy.energy_distribution_data(index),
+                angle=angles.angular_distribution_data(index),
+            )
+            written += 1
+            if verbose:
+                print(
+                    f"      MT-{mt:03} {name}: yield "
+                    f"{yield_value.min():g}..{yield_value.max():g}"
+                )
+    return written
+
+
+def _proton_products_group(mt, reaction_groups, skipped_mts, what, verbose):
+    """Return a product's parent group, or skip it when its MT was omitted."""
+    if mt in reaction_groups:
+        return reaction_groups[mt]["cross-products"]
+    if mt in skipped_mts:
+        if verbose:
+            print(f"  [note] {what}: MT-{mt:03} is a redundant sum; skipped")
+        return None
+    raise ValueError(f"{what}: MT-{mt:03} has no reaction group in the output")
+
+
+def write_proton_reactions(file, ace, reactions, skipped_mts, verbose=False):
+    """Write the proton energy grid, reactions, and secondary products."""
+    energy = np.asarray(ace.principal_cross_section_block.energies) * EV_PER_MEV
+    if (
+        energy.ndim != 1
+        or len(energy) < 2
+        or not np.all(np.isfinite(energy))
+        or np.any(np.diff(energy) < 0)
+    ):
+        raise ValueError("Invalid principal proton energy grid")
+    quantity(file, "xs-energy-grid", energy, "eV")
+    root = file.create_group("reactions", track_order=True)
+
+    elastic = root.create_group("MT-002", track_order=True)
+    elastic.attrs["ENDF-MT"] = 2
+    elastic.attrs["category"] = "elastic-scattering"
+    xs = elastic.create_group("xs")
+    quantity(xs, "value", ace.principal_cross_section_block.elastic, "barn")
+    quantity(xs, "offset", 0)
+    interpolation(xs, len(energy))
+    quantity(elastic, "reference-frame", "COM")
+    quantity(elastic, "Q-value", 0.0, "eV")
+    elastic.create_group("cross-products")
+    angle = ace.angular_distribution_block.angular_distribution_data(0)
+    if isinstance(angle, ACEtk.continuous.DistributionGivenElsewhere):
+        raise ValueError(
+            "MT-002 elastic scattering has no explicit angular distribution"
+        )
+    write_angular_distribution(
+        elastic.create_group("angular-cosine-distribution"), angle
+    )
+    reaction_groups = {2: elastic}
+
+    for reaction in reactions:
+        group = root.create_group(f"MT-{reaction.MT:03}", track_order=True)
+        _write_proton_reaction(group, ace, reaction)
+        reaction_groups[reaction.MT] = group
+    product_count = _write_proton_cross_products(
+        ace, reaction_groups, skipped_mts, verbose
+    )
+    if verbose:
+        print(f"  Reactions written: {len(reactions) + 1}")
+        print(f"  Redundant or unsupported MTs skipped: {sorted(skipped_mts)}")
+        print(f"  Cross-products written: {product_count}")
+
+
+def write_proton_ace_target_properties(file, data, radiation_length):
+    """Write target identity and physical properties for a proton ACE file."""
+    quantity(file, "atomic-number", data.Z)
+    quantity(file, "mass-number", data.A)
+    quantity(file, "atomic-weight-ratio", data.table.atomic_weight_ratio)
+    quantity(file, "excitation-level", data.state)
+    quantity(file, "fissionable", False)
+    quantity(file, "radiation-length", radiation_length, "g/cm2")
+
+
+# ======================================================================================
 # Angular distributions
 # ======================================================================================
 
 
 @_distribution_errors
 def write_angular_distribution(group, source):
-    """Write explicit isotropy or incident-dependent cosine-density tables.
+    """Convert ACE angular data to isotropic, table, or multi-table H1 form.
 
-    Parameters
-    ----------
-    group : h5py.Group
-        Empty destination Distribution group.
-    source : object
-        ACEtk ``FullyIsotropicDistribution`` or an angular distribution
-        exposing incident energies and isotropic, equiprobable-bin, or
-        tabulated cosine distributions.
-
-    Raises
-    ------
-    ValueError
-        A per-energy distribution type is unsupported, equiprobable-bin
-        boundaries are invalid, or a delegated probability-table writer
-        rejects the coordinates, densities, or interpolation.
-
-    Notes
-    -----
-    Fully isotropic data needs only ``type = isotropic``. A single incident
-    entry uses a standalone ``table``, or ``isotropic`` for an isotropic entry.
-    Longer sequences use ``multi-table`` with an eV ``grid``, linear
-    interpolation between incident energies, and packed cosine tables.
-    Tabulated entries retain their source PDF interpolation law. An embedded
-    isotropic entry becomes a uniform cosine PDF on [-1, 1]. Equiprobable
-    entries become histogram PDFs: each of the 32 bins has density
-    ``1 / (32 * bin_width)``. Bin boundaries must be finite, strictly
-    increasing, and within [-1, 1]; the final histogram ordinate is unused.
-    The three entry types may appear together in the same sequence.
-
-    Both cosine and cosine-density datasets are dimensionless and omit unit
-    attributes.
-    Angles stored jointly with outgoing energy are handled by the energy
-    distribution writer instead of this function.
+    Supports isotropic, equiprobable-bin, and tabulated cosine distributions.
+    Raises ``ValueError`` for unsupported types or invalid source tables.
     """
     # Represent isotropy without constructing an artificial cosine table
     if isinstance(source, ACEtk.continuous.FullyIsotropicDistribution):
@@ -1006,60 +1288,11 @@ def write_angular_distribution(group, source):
 
 @_distribution_errors
 def write_energy_distribution(group, source):
-    """Write a supported outgoing-energy or joint energy-angle Distribution.
+    """Convert supported ACE energy and joint energy-angle laws to H1 form.
 
-    Parameters
-    ----------
-    group : h5py.Group
-        Empty destination for a Distribution, including a mixture and its
-        component probability Data.
-    source : object
-        ACEtk level-scattering, evaporation, simple Maxwellian fission,
-        N-body phase-space, outgoing-energy table, Kalbach--Mann, or
-        energy-angle table, or MultiDistributionData object.
-
-    Raises
-    ------
-    ValueError
-        The source class or N-body parameters are unsupported,
-        incident-energy interpolation is not histogram or linear,
-        or a delegated table/interpolation writer rejects data.
-
-    Notes
-    -----
-    Energy coordinates and parameters are converted from MeV to eV, while
-    energy PDFs are divided by ``EV_PER_MEV``. Angular cosines, cosine PDFs,
-    level-scattering C2, precompound fractions, angular slopes, and N-body
-    energy fractions remain dimensionless. PDF tables are copied without
-    normalization.
-
-    Level scattering writes C1 and C2. Evaporation and Maxwellian spectra
-    write restriction energy and spectral-temperature Data tables,
-    preserving that function's interpolation regions. N-body data preserves
-    the particle count, total mass ratio, normalized energy-fraction grid,
-    and its PDF interpolation. Target mass and reaction Q-value supply the
-    incident-energy-dependent energy scale during transport.
-
-    Outgoing-energy tables use ``multi-table`` with packed PDF/PMF components
-    on an eV incident-energy grid. Leading discrete entries retain their
-    dimensionless masses and corresponding line indices; continuous densities
-    retain their individual interpolation laws and combined probability.
-    Correlated sources pack outgoing
-    densities in ``tables/outgoing-energy``. Energy-angle sources additionally
-    pack conditional angular densities in ``tables/cosine-distributions``,
-    ordered by the concatenated outgoing-energy points. Kalbach--Mann sources
-    retain one Data record per incident energy under each parameter group.
-    ACE supplies these parameter values on the outgoing-energy grid, which
-    is retained in each parameter's Data table.
-    Histogram/linear incident-energy interpolation regions are retained for
-    outgoing-energy and correlated tables in a separate outer interpolation
-    group. They are independent of each table's PDF interpolation.
-
-    Source interpolation within each PDF or parameter table is retained.
-    Multiple spectra compose their probability Data and distributions through
-    ``write_mixture_distribution``.
-    Existing objects are not replaced, and an error can leave partial output
-    in the destination group; the caller owns file publication and cleanup.
+    Handles analytic, tabulated, correlated, and mixed spectra; converts
+    energy units and preserves source interpolation. Unsupported data raise
+    ``ValueError``.
     """
     if isinstance(source, ACEtk.continuous.MultiDistributionData):
         write_mixture_distribution(group, source)
