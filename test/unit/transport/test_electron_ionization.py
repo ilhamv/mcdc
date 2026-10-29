@@ -59,7 +59,7 @@ def ionization_model(tmp_path, monkeypatch, prepare_simulation):
         cdf=[0.0, 1.0, 0.0, 0.25, 1.0, 0.0, 0.25, 1.0],
     )
     monkeypatch.setenv("MCDC_LIB", str(tmp_path))
-    material = mcdc.Material(element_composition={"H": 1.0})
+    material = mcdc.Material(number_density={"H": 1.0})
     cell = mcdc.Cell(fill=material)
 
     def configure(simulation):
@@ -83,7 +83,7 @@ def test_ionization_library_without_spectrum_above_binding_energy(
     monkeypatch.setenv("MCDC_LIB", str(tmp_path))
 
     with pytest.raises(SystemExit):
-        material = mcdc.Material(element_composition={"H": 1.0})
+        material = mcdc.Material(number_density={"H": 1.0})
         cell = mcdc.Cell(fill=material)
 
         def configure(simulation):

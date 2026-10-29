@@ -105,7 +105,7 @@ def _write_proton_library(path):
 def inelastic_model(tmp_path, monkeypatch, prepare_simulation, neutron_library):
     _write_proton_library(tmp_path)
     monkeypatch.setenv("MCDC_LIB", str(tmp_path))
-    material = mcdc.Material(element_composition={"H": 1.0})
+    material = mcdc.Material(number_density={"H": 1.0})
     cell = mcdc.Cell(fill=material)
 
     def configure(simulation):
@@ -222,7 +222,7 @@ def test_multiplicity_does_not_assign_one_particle_per_spectrum(
         group["multiplicity"][()] = 2
         _set_alternative_spectra(group, [0.0, 10.0], [[0.0, 1.0]])
     monkeypatch.setenv("MCDC_LIB", str(tmp_path))
-    material = mcdc.Material(nuclide_composition={"H1": 1.0})
+    material = mcdc.Material(number_density={"H1": 1.0})
 
     def configure(simulation):
         simulation.settings.proton_transport.active = True

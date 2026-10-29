@@ -23,7 +23,8 @@ NEUTRON_MASS = 939.565413e6  # eV/c^2
 ELECTRON_MASS = 510.99895069e3  # eV/c^2
 PROTON_MASS = 938.27208943e6  # eV/c^2
 BOLTZMANN_K = 8.61733326e-5  # eV/K
-
+AVOGADRO_BARN_CM = 0.602214076  # N_A * 1e-24 [atoms/mol * cm^2/barn]
+NEUTRON_MASS_AMU = 1.00866491595  # Neutron mass in u; converts neutron-relative atomic weight ratios to u
 # Physics thresholds
 ELECTRON_CUTOFF_ENERGY = 100  # eV
 PHOTON_CUTOFF_ENERGY = 1  # eV

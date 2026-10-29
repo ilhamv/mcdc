@@ -10,12 +10,12 @@ simulation = mcdc.Simulation("Pincell k-eigenvalue")
 # Material
 # Minimal fuel/moderator composition keeps continuous-energy data preparation short.
 fuel = mcdc.Material(
-    nuclide_composition={
+    number_density={
         "U235": 0.02296654086611654,
     }
 )
 moderator = mcdc.Material(
-    nuclide_composition={
+    number_density={
         "H1": 0.05129627050184732,
     }
 )

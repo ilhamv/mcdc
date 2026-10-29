@@ -9,7 +9,7 @@ os.environ["MCDC_LIB"] = "../mcdc-regression_test_data/"
 simulation = mcdc.Simulation("Basic weight windows")
 
 # Material
-mat = mcdc.Material(element_composition={"Al": 1.0})
+mat = mcdc.Material(number_density={"Al": 1.0})
 
 # Geometry
 pitch = 1.25984

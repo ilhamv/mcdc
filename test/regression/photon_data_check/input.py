@@ -19,7 +19,7 @@ def build_simulation():
     simulation = mcdc.Simulation("Three-element photon mcdc-data")
     cells, sources = [], []
     for i, name in enumerate(CASES):
-        material = mcdc.Material(name=name, element_composition={name: 0.05})
+        material = mcdc.Material(name=name, number_density={name: 0.05})
         left = mcdc.Surface.PlaneX(x=10.0 * i, boundary_condition="vacuum")
         right = mcdc.Surface.PlaneX(x=10.0 * i + 5.0, boundary_condition="vacuum")
         cells.append(mcdc.Cell(+left & -right, fill=material))

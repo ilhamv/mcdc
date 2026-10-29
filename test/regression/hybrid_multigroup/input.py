@@ -9,7 +9,7 @@ simulation = mcdc.Simulation("Hybrid multigroup regression")
 
 # Native composition combined with multigroup data selects hybrid transport
 material = mcdc.Material(
-    nuclide_composition={"H1": 5.0e-2},
+    number_density={"H1": 5.0e-2},
     neutron_multigroup=mcdc.NeutronMultigroupData(
         capture=np.array([0.2]),
         scatter=np.array([[0.8]]),

@@ -105,10 +105,8 @@ def test_shared_element_identity_and_material_densities(hydrogen_library, monkey
         return open_file(path, *args, **kwargs)
 
     monkeypatch.setattr(h5py, "File", count_element_reads)
-    cold = mcdc.Material(
-        nuclide_composition={"H2": 0.02, "H3": 0.03}, temperature=293.6
-    )
-    hot = mcdc.Material(nuclide_composition={"H2": 0.07}, temperature=600.0)
+    cold = mcdc.Material(number_density={"H2": 0.02, "H3": 0.03}, temperature=293.6)
+    hot = mcdc.Material(number_density={"H2": 0.07}, temperature=600.0)
     model = mcdc.Simulation()
     model.set_model([mcdc.Cell(fill=cold), mcdc.Cell(fill=hot)])
     model.set_sources([mcdc.Source(energy=5.0)])
@@ -148,13 +146,49 @@ def test_shared_element_identity_and_material_densities(hydrogen_library, monkey
     assert Z == 1.0
 
 
+@pytest.mark.parametrize("mass_input", ["mass_density", "mass_fractions"])
+def test_mass_composition_reads_library_weights_and_survives_recompilation(
+    hydrogen_library, monkeypatch, mass_input
+):
+    from mcdc.constant import AVOGADRO_BARN_CM, NEUTRON_MASS_AMU
+    from mcdc.object_.material import ISOTOPIC_ABUNDANCE
+
+    monkeypatch.setitem(ISOTOPIC_ABUNDANCE, "H", {"H2": 1.0, "H3": 3.0})
+    inputs = (
+        {"mass_density": {"H2": 0.2, "H": 0.8}}
+        if mass_input == "mass_density"
+        else {"mass_fractions": {"H2": 0.2, "H": 0.8}, "density": 1.0}
+    )
+    material = mcdc.Material(**inputs)
+    model = mcdc.Simulation()
+    model.set_model([mcdc.Cell(fill=material)])
+    model.set_sources([mcdc.Source(energy=5.0)])
+    explicit = 0.2 * AVOGADRO_BARN_CM / (1.9968 * NEUTRON_MASS_AMU)
+    natural = (
+        0.8 * AVOGADRO_BARN_CM / ((0.25 * 1.9968 + 0.75 * 2.990) * NEUTRON_MASS_AMU)
+    )
+
+    for _ in range(2):
+        model.compile()
+        assert material.number_density == pytest.approx({"H2": explicit, "H": natural})
+        densities = {n.name: d for n, d in material.nuclide_composition.items()}
+        assert densities == pytest.approx(
+            {"H2": explicit + 0.25 * natural, "H3": 0.75 * natural}
+        )
+        assert len(model.elements) == 1
+        element = model.elements[0]
+        assert all(n.element is element for n in model.nuclides)
+        assert not hasattr(element, "atomic_weight_ratio")
+        np.testing.assert_allclose(material.element_densities, [explicit + natural])
+
+
 def test_elemental_input_expands_to_nuclides_with_shared_element(
     hydrogen_library, monkeypatch, prepare_simulation
 ):
     from mcdc.object_.material import ISOTOPIC_ABUNDANCE
 
     monkeypatch.setitem(ISOTOPIC_ABUNDANCE, "H", {"H2": 1.0, "H3": 3.0})
-    material = mcdc.Material(element_composition={"H": 0.08})
+    material = mcdc.Material(number_density={"H": 0.08})
     container, _ = prepare_simulation(
         cells=[mcdc.Cell(fill=material)], sources=[mcdc.Source(energy=5.0)]
     )
@@ -170,7 +204,7 @@ def test_elemental_input_expands_to_nuclides_with_shared_element(
 
 
 def prepare_library(prepare_simulation):
-    material = mcdc.Material(nuclide_composition={"H2": 0.02})
+    material = mcdc.Material(number_density={"H2": 0.02})
     return prepare_simulation(
         cells=[mcdc.Cell(fill=material)], sources=[mcdc.Source(energy=5.0)]
     )
@@ -180,7 +214,7 @@ def test_material_temperature_comes_from_available_files(library):
     import shutil
 
     shutil.copyfile(library / "neutron-H2-293.6K.h5", library / "neutron-H2-456.7K.h5")
-    material = mcdc.Material(nuclide_composition={"H2": 0.02}, temperature=450.0)
+    material = mcdc.Material(number_density={"H2": 0.02}, temperature=450.0)
     assert material.nuclides[0].temperature == 456.7
 
 
@@ -626,8 +660,8 @@ def test_repeated_nuclide_properties_warn_and_use_last_file(hydrogen_library):
     """Different temperatures share the final basic properties and stable objects."""
     with h5py.File(hydrogen_library / "neutron-H2-600.0K.h5", "a") as file:
         file["atomic-weight-ratio"][()] = 2.1
-    cold = mcdc.Material(nuclide_composition={"H2": 0.02}, temperature=293.6)
-    hot = mcdc.Material(nuclide_composition={"H2": 0.03}, temperature=600.0)
+    cold = mcdc.Material(number_density={"H2": 0.02}, temperature=293.6)
+    hot = mcdc.Material(number_density={"H2": 0.03}, temperature=600.0)
     model = mcdc.Simulation()
     model.set_model([mcdc.Cell(fill=cold), mcdc.Cell(fill=hot)])
     model.set_sources([mcdc.Source(energy=5.0)])
@@ -655,7 +689,7 @@ def test_target_identity_conflicts_are_errors(library, field, value):
     with h5py.File(library / "neutron-H2-293.6K.h5", "a") as file:
         file[field][()] = value
     model = mcdc.Simulation()
-    model.set_model([mcdc.Cell(fill=mcdc.Material(nuclide_composition={"H2": 0.02}))])
+    model.set_model([mcdc.Cell(fill=mcdc.Material(number_density={"H2": 0.02}))])
     model.set_sources([mcdc.Source(energy=5.0)])
     with pytest.raises(ValueError, match="contradicts target"):
         model.compile()

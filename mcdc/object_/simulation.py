@@ -491,11 +491,7 @@ class Simulation(MCDCBase):
 
         # Complete native-material compositions for the transported particles
         for material in self.materials:
-            if (
-                settings.neutron_transport.active
-                and material.element_composition
-                and len(material.nuclides) == 0
-            ):
+            if settings.neutron_transport.active:
                 set_nuclides_from_elements(material, self)
             if material.nuclide_composition:
                 set_elements_from_nuclides(material, self)

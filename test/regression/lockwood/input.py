@@ -47,9 +47,7 @@ e_name = f"{ENERGY:.2g}"
 # =============================================================================
 # Set materials
 # =============================================================================
-mat = mcdc.Material(
-    element_composition={MATERIAL_SYMBOL: MAT_DENSITY_ATOMS_PER_BARN_CM}
-)
+mat = mcdc.Material(number_density={MATERIAL_SYMBOL: MAT_DENSITY_ATOMS_PER_BARN_CM})
 
 # =============================================================================
 # Set geometry (surfaces and cells)

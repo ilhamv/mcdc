@@ -28,7 +28,7 @@ simulation = mcdc.Simulation("Energy deposition in a lead cylinder")
 # ======================================================================================
 # Finite lead cylinder, four radial shells by four axial segments.
 
-lead = mcdc.Material(element_composition={"Pb": 0.03299}, name="lead")
+lead = mcdc.Material(number_density={"Pb": 0.03299}, name="lead")
 
 RADII = [5.0, 10.0, 15.0, 20.0]
 Z_BOUNDS = [-20.0, -10.0, 0.0, 10.0, 20.0]

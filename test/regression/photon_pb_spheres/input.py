@@ -28,7 +28,7 @@ simulation = mcdc.Simulation("10 MeV photon source in lead")
 
 # Lead at 11.35 g/cm^3:
 #   n = 11.35 g/cm^3 * 6.022e23 /mol / 207.2 g/mol * 1e-24 = 0.03299 atoms/barn-cm
-lead = mcdc.Material(element_composition={"Pb": 0.03299}, name="lead")
+lead = mcdc.Material(number_density={"Pb": 0.03299}, name="lead")
 
 RADII = [float(r) for r in range(2, 41, 2)]
 

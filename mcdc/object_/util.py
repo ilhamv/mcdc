@@ -109,6 +109,11 @@ def nuclide_identity_from_name(name):
     return int(match.group(2)), int(match.group(3) or 0)
 
 
+def is_nuclide_name(name: str) -> bool:
+    """Return whether a name has a nuclide mass number and optional isomer index."""
+    return _NUCLIDE_NAME_RE.fullmatch(name) is not None
+
+
 def element_symbol_from_nuclide_name(nuclide_name: str) -> str:
     """Return the element symbol of a nuclide name.
 

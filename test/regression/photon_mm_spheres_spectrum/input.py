@@ -53,30 +53,28 @@ def composition(density, weight_fractions):
     }
 
 
-lead = mcdc.Material(element_composition=composition(11.34, {"Pb": 1.0}), name="lead")
+lead = mcdc.Material(mass_fractions={"Pb": 1.0}, density=11.34, name="lead")
 water = mcdc.Material(
-    element_composition=composition(1.0, {"H": 0.111898, "O": 0.888102}), name="water"
+    mass_fractions={"H": 0.111898, "O": 0.888102}, density=1.0, name="water"
 )
 concrete = mcdc.Material(
-    element_composition=composition(
-        2.3,
-        {
-            "O": 0.529107,
-            "Na": 0.016,
-            "Mg": 0.002,
-            "Al": 0.033872,
-            "Si": 0.337021,
-            "Ca": 0.044,
-            "Fe": 0.014,
-            "H": 0.010,
-        },
-    ),
+    mass_fractions={
+        "O": 0.529107,
+        "Na": 0.016,
+        "Mg": 0.002,
+        "Al": 0.033872,
+        "Si": 0.337021,
+        "Ca": 0.044,
+        "Fe": 0.014,
+        "H": 0.010,
+    },
+    density=2.3,
     name="concrete",
 )
 air = mcdc.Material(
-    element_composition=composition(0.00129, {"N": 0.7818, "O": 0.2097, "Ar": 0.0085}),
-    name="air",
+    mass_fractions={"N": 0.7818, "O": 0.2097, "Ar": 0.0085}, density=0.00129, name="air"
 )
+
 
 # ======================================================================================
 # Set model

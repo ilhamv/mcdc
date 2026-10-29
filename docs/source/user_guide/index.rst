@@ -43,7 +43,7 @@ changing selected inputs.
    :maxdepth: 1
 
    simulation_lifecycle
-   materials_and_multigroup
+   materials_and_data
    sources
    iterative_simulations
    tallies

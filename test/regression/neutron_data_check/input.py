@@ -27,7 +27,7 @@ def build_simulation():
     cells, sources = [], []
     for i, (name, temperature) in enumerate(CASES):
         material = mcdc.Material(
-            name=name, nuclide_composition={name: 0.02}, temperature=temperature
+            name=name, number_density={name: 0.02}, temperature=temperature
         )
         left = mcdc.Surface.PlaneX(x=10.0 * i, boundary_condition="vacuum")
         right = mcdc.Surface.PlaneX(x=10.0 * i + 5.0, boundary_condition="vacuum")

@@ -101,7 +101,7 @@ def _write_proton_library(path):
 def capture_model(tmp_path, monkeypatch, prepare_simulation, neutron_library):
     _write_proton_library(tmp_path)
     monkeypatch.setenv("MCDC_LIB", str(tmp_path))
-    material = mcdc.Material(element_composition={"H": 1.0})
+    material = mcdc.Material(number_density={"H": 1.0})
     cell = mcdc.Cell(fill=material)
 
     def configure(simulation):
