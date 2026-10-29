@@ -9,8 +9,10 @@ import pytest
 
 pytest.importorskip("ACEtk")
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
+from data_library_generator.common import ace_converter
 from data_library_generator.common.ace_converter import (
     BOLTZMANN_K,
+    read_proton_source_libraries,
     read_source_libraries,
     read_target,
 )
@@ -132,13 +134,11 @@ def test_source_library_override_preserves_header_and_temperature(library):
 
 @pytest.mark.parametrize("library", ["TENDL-2021", "TENDL 2021"])
 def test_tendl_provenance_uses_shared_metadata_reader(library):
-    from data_library_generator.proton.generate import source_libraries
-
     ace = source(library)
     metadata = read_source_libraries(ace)["TENDL-2021"]
     assert metadata["version"] == "2021"
     assert metadata["title"] == ace.header.title
-    proton_sources = source_libraries(ace, True)
+    proton_sources = read_proton_source_libraries(ace, True)
     assert proton_sources["TENDL-2021"] == metadata
     assert proton_sources["PSTAR"]["format"] == "PSTAR"
 
@@ -150,20 +150,56 @@ def test_lanl_header_with_underlying_tendl_reference_keeps_lanl_identity(library
 
 
 def test_proton_provenance_accepts_an_unrecognized_ace_library():
-    from data_library_generator.proton.generate import source_libraries
-
     ace = source("OtherLibrary")
-    assert list(source_libraries(ace, False)) == ["unknown"]
-    assert list(source_libraries(ace, False, source_library="MyEvaluation")) == [
-        "MyEvaluation"
-    ]
+    assert list(read_proton_source_libraries(ace, False)) == ["unknown"]
+    assert list(
+        read_proton_source_libraries(ace, False, source_library="MyEvaluation")
+    ) == ["MyEvaluation"]
 
 
 def test_ace_label_cannot_overwrite_pstar_provenance():
-    from data_library_generator.proton.generate import source_libraries
-
     with pytest.raises(ValueError, match="conflicts with PSTAR provenance"):
-        source_libraries(source("OtherLibrary"), True, source_library="PSTAR")
+        read_proton_source_libraries(
+            source("OtherLibrary"), True, source_library="PSTAR"
+        )
+
+
+@pytest.mark.parametrize("override", [None, "CustomLibrary"])
+@pytest.mark.parametrize("include_pstar", [False, True])
+def test_proton_preparation_preserves_provenance_and_required_paths(
+    tmp_path, monkeypatch, override, include_pstar
+):
+    ace = source("Lib81x")
+    pstar_dir = tmp_path / "pstar"
+    pstar_dir.mkdir()
+    if include_pstar:
+        (pstar_dir / "Na.txt").touch()
+    monkeypatch.setattr(
+        ace_converter,
+        "ACEtk",
+        SimpleNamespace(
+            ContinuousEnergyTable=SimpleNamespace(from_file=lambda path: ace)
+        ),
+    )
+    reactions = [ace_converter.ProtonReaction(51, 1, "inelastic_scattering", 1)]
+    monkeypatch.setattr(
+        ace_converter, "classify_proton_reactions", lambda table: (reactions, {1, 3})
+    )
+
+    data = ace_converter.prepare_proton_ace(
+        tmp_path / "input.ace", pstar_dir, source_library=override
+    )
+
+    label = override or "Lib81x"
+    assert list(data.sources) == ([label, "PSTAR"] if include_pstar else [label])
+    assert data.sources[label]["title"] == ace.header.title
+    assert data.output_name == "proton-Na22.h5"
+    assert data.pstar_path == (pstar_dir / "Na.txt" if include_pstar else None)
+    assert data.reactions == reactions
+    assert data.skipped_mts == {1, 3}
+    assert "reactions/MT-051/multiplicity" in data.required_paths
+    assert "reactions/MT-051/energy-distribution" in data.required_paths
+    assert ("stopping-power/value" in data.required_paths) == include_pstar
 
 
 @pytest.mark.parametrize("label", ["", " ", ".", "..", "not/a/group", 42])
