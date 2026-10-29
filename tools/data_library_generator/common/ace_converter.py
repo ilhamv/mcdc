@@ -15,6 +15,7 @@ quantities have no unit attribute.
 from dataclasses import dataclass
 from functools import wraps
 from numbers import Integral
+import re
 
 import ACEtk
 import numpy as np
@@ -44,6 +45,8 @@ ACE_INTERPOLATION = {
     4: "semilog-y",
     5: "log",
 }
+ACE_NOMINAL_TEMPERATURE_LIBRARIES = ("Lib81", "Lib81x")
+# Lib81 and Lib81x share these nominal temperature suffixes.
 ACE_TEMPERATURE_LIB81 = {
     "10c": 293.6,
     "11c": 600.0,
@@ -127,13 +130,37 @@ def _distribution_errors(writer):
 
 
 # ======================================================================================
-# Target identity
+# Target identity and source-library metadata
 # ======================================================================================
+
+
+def identify_source_library(ace):
+    """Recognize a library label in header text, returning None if unknown.
+
+    LANL labels match ``Lib<number>[x]`` and retain their original spelling.
+    TENDL release labels use ``TENDL-YYYY`` or ``TENDL YYYY`` and are returned
+    as ``TENDL-YYYY``. A LANL label takes precedence over a TENDL reference
+    to the underlying evaluation. Library-specific temperature conventions
+    apply only to explicitly supported releases; recognizing a label does
+    not imply a temperature mapping or restrict which inputs can be converted.
+    """
+    header = ace.header
+    title = str(getattr(header, "title", "") or "")
+    comments = str(getattr(header, "comments", "") or "")
+    text = f"{title} {comments}"
+    tokens = text.split()
+    library = next(
+        (token for token in tokens if re.fullmatch(r"Lib[0-9]+x?", token)), None
+    )
+    if library is not None:
+        return library
+    release = re.search(r"\bTENDL[- ](\d{4})\b", text)
+    return f"TENDL-{release.group(1)}" if release else None
 
 
 @dataclass(frozen=True)
 class Target:
-    """Immutable target identity used to coordinate the three output files.
+    """Immutable target identity and temperature for a neutron evaluation.
 
     Attributes
     ----------
@@ -147,8 +174,8 @@ class Target:
         Excitation-state index, with zero denoting the ground state. This is
         an index used in names such as ``Co58m1``, not an excitation energy.
     temperature : float
-        Nominal source-library temperature in kelvin, obtained from the Lib81
-        suffix mapping rather than its rounded ACE thermal-energy value.
+        Target temperature in kelvin. Recognized library conventions provide
+        nominal values; otherwise it is derived from the ACE thermal energy.
     """
 
     symbol: str
@@ -177,14 +204,14 @@ class Target:
         Returns
         -------
         str
-            The neutron prefix, nuclide identifier, nominal temperature, and
+            The neutron prefix, nuclide identifier, target temperature, and
             the suffix ``K.h5``. No directory is included.
         """
         return f"neutron-{self.nuclide}-{self.temperature}K.h5"
 
 
 def read_target(ace):
-    """Extract target identity and the nominal Lib81 temperature.
+    """Extract target identity and temperature from an ACE table.
 
     Parameters
     ----------
@@ -195,38 +222,44 @@ def read_target(ace):
     Returns
     -------
     Target
-        Identity shared by the element, nuclide, and temperature outputs.
+        Nuclide identity and target temperature for the neutron output.
 
     Raises
     ------
     ValueError
-        The suffix of ``ace.header.zaid`` is absent from
-        ``ACE_TEMPERATURE_LIB81``.
+        The header thermal energy is negative or nonfinite.
     KeyError
         The atomic number is absent from the element-symbol lookup.
 
     Notes
     -----
     ACEtk supplies the interpreted nuclide and isomer identities; this
-    function does not decode them from the ZAID's leading digits. Only the
-    suffix is interpreted here. The nominal temperature controls filenames
-    and the output target temperature. The original ACE thermal energy is
-    preserved separately in source provenance by ``read_source_libraries``.
+    function does not decode them from the ZAID's leading digits. Lib81 and
+    Lib81x suffixes use their nominal temperatures when a mapping exists.
+    Other cases use header kT in MeV, converted to kelvin. The original ACE
+    thermal energy is retained in provenance by read_source_libraries.
+    Provenance label overrides do not change temperature interpretation.
     """
-    # Resolve the nominal library temperature used in output filenames
+    # Use header thermal energy unless a recognized nominal convention applies.
+    kT = float(ace.header.temperature) * EV_PER_MEV
+    if not np.isfinite(kT) or kT < 0:
+        raise ValueError("ACE header kT must be finite and nonnegative")
+    temperature = kT / BOLTZMANN_K
     suffix = ace.header.zaid.split(".")[-1]
-    if suffix not in ACE_TEMPERATURE_LIB81:
-        raise ValueError(f"Unknown Lib81 temperature suffix: {suffix}")
+    if identify_source_library(ace) in ACE_NOMINAL_TEMPERATURE_LIBRARIES:
+        temperature = ACE_TEMPERATURE_LIB81.get(suffix, temperature)
     return Target(
         Z_TO_SYMBOL[ace.atom_number],
         ace.atom_number,
         ace.mass_number,
         ace.isomeric_state,
-        ACE_TEMPERATURE_LIB81[suffix],
+        temperature,
     )
 
 
-def read_source_libraries(ace, target, with_temperature=False):
+def read_source_libraries(
+    ace, target=None, with_temperature=False, *, source_library=None
+):
     """Build source-library metadata for one output file without writing it.
 
     Parameters
@@ -234,18 +267,22 @@ def read_source_libraries(ace, target, with_temperature=False):
     ace : ACEtk.ContinuousEnergyTable
         Parsed table whose header provides the source title, comments,
         format version, processing date, and thermal energy.
-    target : Target
-        Interpreted target identity and nominal temperature.
+    target : Target, optional
+        Interpreted target identity and temperature; required when including
+        temperature metadata.
     with_temperature : bool, optional
-        Include the nominal ``temperature`` in K and original ACE ``kT``
+        Include the target ``temperature`` in K and original ACE ``kT``
         converted from MeV to eV. Projectile generators enable this only
         for temperature-dependent projectile files.
+    source_library : str, optional
+        Provenance subgroup name. When omitted, use a recognized header label
+        or ``unknown``. This label does not affect temperature interpretation.
 
     Returns
     -------
     dict of str to dict
         Library identifiers mapped to scalar metadata values, suitable for
-        ``hdf5_writer.stamp``. The supported identifier is ``"Lib81"``.
+        ``hdf5_writer.stamp``. Library labels never restrict conversion.
         String fields are ``title``, ``version``, ``release-date``,
         ``reference``, ``comments``, ``format``, ``format-version``, and
         ``processing-date``; optional temperature fields are numeric.
@@ -253,12 +290,14 @@ def read_source_libraries(ace, target, with_temperature=False):
     Raises
     ------
     ValueError
-        Neither the title nor comments identify Lib81 as a whitespace-
-        separated token.
+        The supplied source identifier is empty, contains a slash, or is a
+        reserved HDF5 path component; or temperature metadata lacks a target.
 
     Notes
     -----
-    Library identity comes from header text, not the ZAID or input filename.
+    Library identity comes from header text or an explicit caller-supplied
+    identifier, not the ZAID or input directory. Unknown libraries retain
+    their title, comments, format, and processing date without rejection.
     The ACE header version and date describe the source format and processing;
     they are not assigned to the library's release version or release date.
     Unavailable release information and other missing strings are empty.
@@ -268,18 +307,29 @@ def read_source_libraries(ace, target, with_temperature=False):
     that timestamp when it actually writes the source record, allowing
     skipped conversions to leave provenance unchanged.
     """
-    # Identify the source library from its header text
+    # Resolve the provenance label while retaining the original header fields.
     header = ace.header
     title = str(getattr(header, "title", "") or "")
     comments = str(getattr(header, "comments", "") or "")
-    if "Lib81" not in f"{title} {comments}".split():
-        raise ValueError(
-            "ACE header does not identify a supported source library (Lib81)"
-        )
+    detected_library = identify_source_library(ace)
+    library = (
+        source_library if source_library is not None else detected_library or "unknown"
+    )
+    if (
+        not isinstance(library, str)
+        or not library.strip()
+        or library in (".", "..")
+        or "/" in library
+    ):
+        raise ValueError(f"Invalid source-library identifier: {library!r}")
     # Collect provenance applicable to the target file
     source = {
         "title": title,
-        "version": "",
+        "version": (
+            detected_library.split("-", 1)[1]
+            if detected_library and detected_library.startswith("TENDL-")
+            else ""
+        ),
         "release-date": "",
         "reference": title.split("Ref.", 1)[1].strip() if "Ref." in title else "",
         "comments": comments,
@@ -289,9 +339,11 @@ def read_source_libraries(ace, target, with_temperature=False):
     }
     # Attach source temperature information to temperature-specific records
     if with_temperature:
+        if target is None:
+            raise ValueError("Source temperature metadata requires a target")
         source["temperature"] = target.temperature
         source["kT"] = float(header.temperature) * EV_PER_MEV
-    return {"Lib81": source}
+    return {library: source}
 
 
 # ======================================================================================
@@ -510,7 +562,7 @@ def write_temperature(file, ace, target, verbose=False):
     ace : ACEtk.ContinuousEnergyTable
         Source of the principal energy grid and neutron reaction records.
     target : Target
-        Nominal temperature in K used for ``temperature`` and for computing
+        Target temperature in K used for ``temperature`` and for computing
         ``kT`` in eV with ``BOLTZMANN_K``.
     verbose : bool, optional
         Print each selected reaction's MT, output name, and category.

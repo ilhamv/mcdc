@@ -4,7 +4,7 @@
 Proton
 ======
 
-The generator in ``tools/data_library_generator/proton/`` converts continuous-energy proton ACE evaluations from TENDL into :doc:`MC/DC transport data <../../reference/data_format/index>`.
+The generator in ``tools/data_library_generator/proton/`` converts continuous-energy proton ACE evaluations into :doc:`MC/DC transport data <../../reference/data_format/index>`.
 It writes one temperature-independent ``proton-{nuclide}.h5`` file per target nuclide, following the :doc:`proton file layout <../../reference/data_format/illustrations>`.
 Optional NIST PSTAR tables provide proton mass stopping power.
 H-1, H-2, He-3, and He-4 stopping-power files are also created when their PSTAR data exist but no ACE evaluation was selected.
@@ -14,7 +14,7 @@ Requirements and usage
 
 Use a Python environment with ACEtk, ``h5py``, ``numpy``, and ``tqdm``.
 Install ACEtk following its `project instructions <https://github.com/njoy/ACEtk>`_.
-Download the TENDL proton ACE data, such as `TENDL-2021 <https://tendl.imperial.ac.uk/tendl_2021/tar.html>`_.
+Proton ACE evaluations are available from sources such as `TENDL-2021 <https://tendl.imperial.ac.uk/tendl_2021/tar.html>`_.
 The generator expects extracted ``*.ace`` files in one directory.
 
 PSTAR stopping-power input is optional per element, but the ``MCDC_PSTAR_LIB`` directory must exist.
@@ -46,6 +46,8 @@ From the repository root, set the source and output directories and run the gene
      - Print each conversion, reaction summary, and warning instead of showing the progress bar.
    * - ``--keep-going``
      - Continue after conversion errors and summarize failed ACE and PSTAR inputs at the end.
+   * - ``--source-library NAME``
+     - Set the ACE provenance label described in :doc:`index`; PSTAR retains its own record.
 
 Existing compatible outputs are reused unless ``--rewrite`` is supplied.
 An input that cannot be represented is reported as an error and does not publish a partial replacement.

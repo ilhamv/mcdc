@@ -1,4 +1,4 @@
-"""Prepare MC/DC proton data from TENDL ACE and NIST PSTAR inputs.
+"""Prepare MC/DC proton data from ACE and NIST PSTAR inputs.
 
 Writes temperature-independent ``proton-{nuclide}.h5`` files in the mcdc-data
 format. Source parsing and distribution conversion are shared with the neutron
@@ -6,7 +6,7 @@ and photon generators; this module handles proton reaction selection and
 secondary-product records.
 
 Environment variables
-    MCDC_ACELIB_PROTON  directory with the TENDL-2021 proton ACE files (*.ace)
+    MCDC_ACELIB_PROTON  directory with proton ACE files (*.ace)
     MCDC_PSTAR_LIB      directory with NIST PSTAR stopping-power tables (<Symbol>.txt)
     MCDC_LIB_PROTON     output directory for the MC/DC HDF5 files
 
@@ -20,7 +20,6 @@ Usage
 import argparse
 import os
 from pathlib import Path
-import re
 import sys
 from dataclasses import dataclass
 
@@ -33,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from data_library_generator.common.ace_converter import (
     EV_PER_MEV,
+    read_source_libraries,
     write_angular_distribution as write_proton_angular_distribution,
     write_energy_distribution as write_proton_energy_distribution,
 )
@@ -810,26 +810,12 @@ def write_reaction(group, table, rx, verbose):
 # ==============================================================================
 
 
-def source_libraries(table, include_pstar):
-    """Build provenance records for TENDL and, when used, PSTAR."""
-    header = table.header
-    title = str(getattr(header, "title", "") or "")
-    comments = str(getattr(header, "comments", "") or "")
-    release = re.search(r"\bTENDL[- ](\d{4})\b", f"{title} {comments}")
-    if release is None:
-        fail("ACE header does not identify a TENDL release")
-    tendl = {
-        "title": title,
-        "version": release.group(1),
-        "release-date": "",
-        "reference": "",
-        "comments": comments,
-        "format": "ACE",
-        "format-version": str(getattr(header, "version", "") or ""),
-        "processing-date": str(getattr(header, "date", "") or ""),
-    }
-    sources = {f"TENDL-{release.group(1)}": tendl}
+def source_libraries(table, include_pstar, *, source_library=None):
+    """Build ACE provenance through the common reader and add PSTAR when used."""
+    sources = read_source_libraries(table, source_library=source_library)
     if include_pstar:
+        if "PSTAR" in sources:
+            raise ValueError("ACE source-library label conflicts with PSTAR provenance")
         sources["PSTAR"] = {
             "title": "NIST PSTAR stopping-power tables",
             "version": "",
@@ -903,9 +889,15 @@ def write_nuclide(file, table, Z, A, state, pstar_path, verbose):
 
 
 def process_ace_file(
-    ace_path, output_dir, pstar_dir=None, verbose=False, rewrite=False
+    ace_path,
+    output_dir,
+    pstar_dir=None,
+    verbose=False,
+    rewrite=False,
+    *,
+    source_library=None,
 ):
-    """Convert one TENDL ACE evaluation into ``proton-{nuclide}.h5``."""
+    """Convert one ACE evaluation into ``proton-{nuclide}.h5``."""
     ace_path, output_dir = Path(ace_path), Path(output_dir)
     table = ACEtk.ContinuousEnergyTable.from_file(str(ace_path))
     header = table.header
@@ -921,7 +913,9 @@ def process_ace_file(
         pstar_path = None
         if verbose:
             print(f"  [warn] No PSTAR file for {symbol}")
-    sources = source_libraries(table, pstar_path is not None)
+    sources = source_libraries(
+        table, pstar_path is not None, source_library=source_library
+    )
     fields = (
         "atomic-number",
         "mass-number",
@@ -1035,7 +1029,7 @@ def main():
     reported together with a nonzero exit status after all inputs are tried.
     """
     parser = argparse.ArgumentParser(
-        description="Prepare MC/DC proton data from TENDL ACE and NIST PSTAR"
+        description="Prepare MC/DC proton data from ACE and NIST PSTAR"
     )
     parser.add_argument(
         "--rewrite", action="store_true", help="regenerate existing files"
@@ -1048,6 +1042,11 @@ def main():
         nargs="+",
         metavar="ACE_FILE",
         help="convert only these ACE file names",
+    )
+    parser.add_argument(
+        "--source-library",
+        metavar="NAME",
+        help="Label ACE source provenance; default: recognize the header or use unknown",
     )
     add_keep_going_option(parser)
     args = parser.parse_args()
@@ -1081,7 +1080,14 @@ def main():
     for path in progress:
         progress.set_postfix_str(path.name)
         try:
-            process_ace_file(path, output_dir, pstar_dir, args.verbose, args.rewrite)
+            process_ace_file(
+                path,
+                output_dir,
+                pstar_dir,
+                args.verbose,
+                args.rewrite,
+                source_library=args.source_library,
+            )
         except (ConversionError, ValueError, OSError, AttributeError) as error:
             failures.handle(path.name, error, progress=progress)
 

@@ -44,17 +44,23 @@ from data_library_generator.common.hdf5_writer import (
 # ======================================================================================
 
 
-def convert_file(ace_path, output_dir, rewrite=False, verbose=False):
+def convert_file(
+    ace_path, output_dir, rewrite=False, verbose=False, *, source_library=None
+):
     """Write one self-contained neutron projectile file from an ACE table.
 
     The file contains element and nuclide properties, target temperature,
     neutron reactions, and source provenance. A complete compatible output is
     reused without changing its timestamp unless rewrite is requested.
     Publication is staged, so conversion errors leave an existing output intact.
+    source_library optionally labels the source record without changing the
+    temperature convention inferred from the original ACE header.
     """
     ace = ACEtk.ContinuousEnergyTable.from_file(str(ace_path))
     target = read_target(ace)
-    sources = read_source_libraries(ace, target, with_temperature=True)
+    sources = read_source_libraries(
+        ace, target, with_temperature=True, source_library=source_library
+    )
     path = output_dir / target.filename
     fields = {
         "atomic-number": target.atomic_number,
@@ -114,6 +120,8 @@ def main():
     with any missing parents. ``--ace-files`` selects filenames in the order
     supplied; without it, every regular file in the input directory is
     selected in sorted order, without a filename-suffix filter.
+    ``--source-library`` sets the ACE provenance label without changing
+    temperature interpretation.
 
     ``--rewrite`` and ``--verbose`` are passed to each conversion. Verbose
     output replaces the progress bar. ``--keep-going`` retains successful
@@ -130,6 +138,11 @@ def main():
     )
     parser.add_argument(
         "--ace-files", nargs="+", help="Select filenames from MCDC_ACE_LIB"
+    )
+    parser.add_argument(
+        "--source-library",
+        metavar="NAME",
+        help="Label ACE source provenance; default: recognize the header or use unknown",
     )
     add_keep_going_option(parser)
     args = parser.parse_args()
@@ -156,7 +169,13 @@ def main():
     for path in progress:
         progress.set_postfix_str(path.name)
         try:
-            convert_file(path, output_dir, args.rewrite, args.verbose)
+            convert_file(
+                path,
+                output_dir,
+                args.rewrite,
+                args.verbose,
+                source_library=args.source_library,
+            )
         except (ValueError, OSError) as error:
             failures.handle(path.name, error, progress=progress)
     failures.finish()

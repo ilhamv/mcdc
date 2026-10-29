@@ -62,7 +62,7 @@ Missing or inapplicable information is an empty string.
 
 ``conversion-time`` is recorded when data is written and remains unchanged when conversion is skipped.
 Temperature-dependent projectile files additionally include scalar ``temperature`` (K) and ``kT`` (eV) datasets in each applicable source-library subgroup.
-These preserve the source's nominal temperature and thermal energy, with a ``unit`` attribute on each dataset.
+These preserve the evaluation temperature and original source thermal energy, with a ``unit`` attribute on each dataset.
 
 Names and paths
 ---------------

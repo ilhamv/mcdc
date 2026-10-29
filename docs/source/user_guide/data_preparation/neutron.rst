@@ -35,6 +35,8 @@ From the repository root, set the input and output directories and run the gener
      - Report filenames and reaction details during conversion.
    * - ``--keep-going``
      - Continue after conversion errors and summarize failed files at the end.
+   * - ``--source-library NAME``
+     - Set the ACE provenance label described in :doc:`index`.
 
 Existing compatible data is reused unless ``--rewrite`` is supplied.
 Incompatible formats or conflicting identity fields are reported as errors.
@@ -45,11 +47,12 @@ Distribution errors identify the reaction, distribution path, ACE law, and table
 Temperature
 -----------
 
-Output filenames use the source library's nominal temperature in kelvin.
+Output filenames include the target temperature in kelvin.
+Temperature is derived from the ACE header's ``kT``, except where a recognized library supplies a nominal temperature for the ZAID suffix.
 
-For Lib81, filename suffixes map to nominal temperatures as follows:
+For Lib81 and Lib81x, filename suffixes map to nominal temperatures as follows:
 
-.. list-table:: Lib81 temperatures
+.. list-table:: Lib81 and Lib81x temperatures
    :header-rows: 1
 
    * - Suffix
@@ -83,6 +86,7 @@ Fission tables with delayed-neutron yields must also provide explicit prompt-neu
 Unsupported ACE representations are reported as errors.
 
 Units and source-library metadata follow the :doc:`format conventions <../../reference/data_format/conventions>`.
+ACE source-library labels follow :doc:`index`.
 
 Reaction coverage
 -----------------
@@ -136,4 +140,4 @@ The aggregate relationships are defined in `Appendix B of the ENDF-6 specificati
 Validation
 ----------
 
-The generator has been tested using ACE data from the `LANL-prepared Lib81 neutron library <https://nucleardata.lanl.gov/ace/lib81/>`_.
+The generator has been tested using ACE data from the `LANL-prepared Lib81 neutron library <https://nucleardata.lanl.gov/ace/lib81/>`_, including evaluations labeled ``Lib81x``.

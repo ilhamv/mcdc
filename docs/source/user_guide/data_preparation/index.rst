@@ -36,6 +36,15 @@ Use ``--keep-going`` to process the remaining inputs and summarize all failed co
 Successful conversions are retained, and the command returns a nonzero exit status if any conversion fails.
 Error messages identify the source input and include reaction or distribution context when available.
 
+ACE source-library labels
+-------------------------
+
+The neutron and proton generators preserve the original ACE header metadata for every converted evaluation.
+Use ``--source-library NAME`` to set the provenance subgroup at ``source-libraries/NAME``.
+Without this option, the generator recognizes header labels matching ``Lib<number>[x]`` (such as ``Lib81`` or ``Lib81x``) and ``TENDL-YYYY`` or ``TENDL YYYY`` (such as ``TENDL-2021``).
+LANL labels are preserved, and TENDL labels are stored as ``TENDL-YYYY``; other inputs use ``unknown``.
+Library recognition supplies metadata defaults and library-specific conventions; supported ACE representations can be converted from other libraries as well.
+
 .. toctree::
    :maxdepth: 1
 

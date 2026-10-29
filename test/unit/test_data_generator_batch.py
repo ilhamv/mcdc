@@ -60,7 +60,7 @@ def test_failed_inputs_stop_or_continue_and_report_errors(
         arguments.append("--keep-going")
     monkeypatch.setattr(sys, "argv", arguments)
 
-    def convert(path, directory, *args):
+    def convert(path, directory, *args, **kwargs):
         if path.name == case.names[1]:
             raise ValueError("MT 22: invalid outgoing-energy table")
         if path.name == case.names[2]:
@@ -86,7 +86,7 @@ def test_failed_inputs_stop_or_continue_and_report_errors(
 def test_keep_going_success_has_zero_exit_status(generator_case, monkeypatch, capsys):
     case = generator_case
     monkeypatch.setattr(sys, "argv", [*case.arguments, "--keep-going"])
-    monkeypatch.setattr(case.generate, case.converter, lambda *args: None)
+    monkeypatch.setattr(case.generate, case.converter, lambda *args, **kwargs: None)
     assert case.generate.main() is None
     assert not capsys.readouterr().err
 
@@ -101,7 +101,7 @@ def test_proton_pstar_failures_use_the_same_batch_policy(
     if keep_going:
         arguments.append("--keep-going")
     monkeypatch.setattr(sys, "argv", arguments)
-    monkeypatch.setattr(case.generate, case.converter, lambda *args: None)
+    monkeypatch.setattr(case.generate, case.converter, lambda *args, **kwargs: None)
 
     def convert_pstar(symbol, mass, ratio, directory, *args):
         if (symbol, mass) == ("H", 1):
@@ -115,3 +115,19 @@ def test_proton_pstar_failures_use_the_same_batch_policy(
     assert error.value.code == 1
     assert "proton-H1.h5: invalid stopping-power table" in capsys.readouterr().err
     assert (case.output / "proton-H2.h5").exists() == keep_going
+
+
+@pytest.mark.parametrize("generator_case", ["neutron", "proton"], indirect=True)
+def test_ace_generators_forward_source_library_override(generator_case, monkeypatch):
+    case = generator_case
+    monkeypatch.setattr(
+        sys, "argv", [*case.arguments, "--source-library", "CustomLibrary"]
+    )
+    labels = []
+
+    def convert(*args, source_library):
+        labels.append(source_library)
+
+    monkeypatch.setattr(case.generate, case.converter, convert)
+    case.generate.main()
+    assert labels == ["CustomLibrary"] * len(case.names)
