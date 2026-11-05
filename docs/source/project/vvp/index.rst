@@ -4,7 +4,7 @@
 Verification, Validation, and Performance
 =========================================
 
-.. figure:: ../../images/project/vvp-workflow.png
+.. figure:: ../../images/project/vvp/vvp-workflow.png
    :width: 100%
    :class: vvp-workflow-figure
    :alt: MC/DC-VVP workflow from campaign configuration through Maestro orchestration to verification, validation, and performance assessments, with results presented in documentation and release assets.
@@ -75,12 +75,22 @@ The same hierarchy applies to validation and performance, but their tasks will l
 Results presentation
 --------------------
 
-Results are presented as plots and animations showing comparisons with reference results and trends across tasks, such as statistical convergence as the particle count increases.
-Figures and animations are embedded directly from GitHub release assets, which can also be browsed and downloaded from the corresponding release page.
+Plots and animations compare MC/DC predictions with reference results and show trends across tasks, such as statistical convergence as the particle count increases.
+These are embedded in the documentation from GitHub release assets, which readers can also browse and download directly.
 
-For the ``dev`` documentation, assets are hosted in the rolling `VVP evidence for dev <https://github.com/mcdc-project/mcdc/releases/tag/vvp-dev>`_ release and updated when a new development campaign is published.
-Starting with MC/DC v0.16.0, evidence for each released version, including patch releases, is attached to that version's release and retained as a fixed record.
-Versioned documentation uses the assets associated with its corresponding MC/DC release.
+The asset source follows the documentation version:
+
+- **Development documentation** uses the rolling `VVP evidence for dev <https://github.com/mcdc-project/mcdc/releases/tag/vvp-dev>`_ release, updated when a new development campaign is published.
+- **Versioned documentation** uses the evidence attached to the corresponding MC/DC release, including patch releases.
+  This evidence is retained as a fixed record of that version's assessment.
+
+Operating and contributing
+--------------------------
+
+Use :doc:`campaigns/index` for environment setup, local and HPC launches,
+restart behavior, processing, and release-asset preparation.
+Read :doc:`contributing` to add cases, integrate suites,
+or document new evidence.
 
 .. toctree::
    :hidden:
@@ -88,3 +98,5 @@ Versioned documentation uses the assets associated with its corresponding MC/DC 
    verification/index
    validation/index
    performance/index
+   campaigns/index
+   contributing
