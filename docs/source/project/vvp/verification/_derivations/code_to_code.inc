@@ -1,3 +1,8 @@
+The equations here describe the unscaled 2-norm convention used by the existing
+code-to-code processor and associated figures.
+See :ref:`verification_error_metrics` for the standardized RMS convention and
+its reference-bin and invalid-value rules.
+
 Suppose :math:`R_i^{(m)}(N)` is the estimate from participating code :math:`m` in tally bin :math:`i` at common sampling level :math:`N`.
 For :math:`M` participating codes, the fixed comparison field is the arithmetic mean at the largest shared sample,
 

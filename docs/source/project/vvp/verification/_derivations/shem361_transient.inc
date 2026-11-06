@@ -45,7 +45,7 @@ with
    \nu_d\Sigma_f&-\Lambda
    \end{bmatrix}.
 
-A unit neutron-density pulse in group 361 corresponds to
+A unit particle-density pulse in group 361 corresponds to
 
 .. math::
 
@@ -55,7 +55,7 @@ A unit neutron-density pulse in group 361 corresponds to
    0
    \end{bmatrix},
 
-because group flux equals speed times neutron density.
+because group flux equals speed times particle density.
 The state at the end of time interval :math:`k` is
 
 .. math::
@@ -73,7 +73,7 @@ MC/DC reports interval-averaged flux, so the matching reference is
     \frac{e^{B\Delta t_k}-I}{\Delta t_k}y_k.
 
 The first :math:`G` components give the time-averaged spectrum.
-The corresponding total neutron density is
+The corresponding total particle density is
 
 .. math::
 

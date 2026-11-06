@@ -5,64 +5,60 @@ Verification
 ============
 
 Verification assesses whether MC/DC correctly solves its stated mathematical and numerical problems.
-:doc:`Unit tests <../../../developer_guide/contributing/unit_testing>` verify individual components, interfaces, and edge cases, while VVP uses analytical and code-to-code comparisons to test complete simulations through full-transport problems.
-These separate activities provide verification evidence at complementary scales.
+It uses well-defined problems with a definite target solution.
+In analytical verification, that solution is known explicitly or supplied by a
+manufactured or accurately converged semi-analytical reference.
+In code-to-code verification, the exact solution need not be known explicitly,
+but equivalent formulations of the same well-posed problem have a common solution
+to which all participating codes should converge as statistical and numerical
+errors are reduced.
+
+Establishing that a transport code solves its intended problems correctly
+requires verification of both its individual components and their behavior
+together in a complete simulation.
+:doc:`Unit tests <../../../developer_guide/contributing/unit_testing>` isolate
+components, interfaces, and edge cases, making it easier to identify defects in
+specific parts of the implementation.
+MC/DC-VVP complements these tests with full-transport problems that exercise
+model preparation, source sampling, geometry tracking, particle interactions,
+and tallying together.
+Analytical and code-to-code comparisons then assess whether the resulting
+simulation estimates approach the intended solution.
 
 Verification suites and cases
 -----------------------------
 
-The current VVP verification campaign is organized first by verification method, then by particle type, suite, and case.
+The verification campaign is organized by verification method, transport
+formulation, suite, and case.
+The multigroup suites assess the shared, particle-agnostic transport formulation:
+interaction cross sections and associated distributions specify the problem,
+with cross sections set to zero for interaction channels that are not relevant.
+Cases are classified by the transport formulation being verified.
+Each case specifies its particle species and interaction data as part of the
+problem definition.
+See :ref:`reading_verification_results` for guidance on interpreting convergence
+curves, uncertainty plots, and solution comparisons.
+Use :doc:`../campaigns/verification` for task configuration, launch commands,
+reference-data preparation, and processing.
 
-- **Analytical verification** — Provides the strongest direct test when an analytical, manufactured, or accurately converged semi-analytical reference is available.
+**Analytical verification** uses known reference solutions:
 
-  - **Neutron** — Covers fixed-source and :math:`k`-eigenvalue neutron transport.
+- :doc:`Multigroup fixed-source <analytical/multigroup/fixed_source/index>` tests
+  steady-state and transient solutions as source-particle counts increase.
+- :doc:`Multigroup k-eigenvalue <analytical/multigroup/k_eigenvalue/index>` tests
+  multiplication factors and fundamental modes as active-cycle counts increase.
 
-    - **Fixed-source suite** — Tests error convergence as the source-particle count increases.
+**Code-to-code verification** compares independent implementations, checking
+convergence toward a common solution:
 
-      - **Slab problems** — Exercise one-dimensional geometry, materials, sources, energy groups, and time dependence.
+- :doc:`Multigroup fixed-source <code_to_code/multigroup/fixed_source/index>` compares
+  steady-state and transient fixed-source solutions across participating codes.
+- **Multigroup k-eigenvalue** (planned) will compare multiplication factors and
+  fundamental modes across participating codes.
 
-        - :doc:`Absorbium slab <analytical/neutron/fixed_source/slab_absorbium>`
-        - :doc:`Manufactured two-group slab <analytical/neutron/fixed_source/mms_two_group_slab>`
-        - :doc:`Time-dependent isotropic-beam slab <analytical/neutron/fixed_source/slab_isobeam_td>`
-        - :doc:`Reed's slab problem <analytical/neutron/fixed_source/reed>`
+Each suite page describes its scope, evidence, case catalog, and operating workflow.
 
-      - **AZURV1 variants** — Test criticality, censuses, tally recombination, and variance reduction on one transient problem.
-
-        - :doc:`Base critical problem <analytical/neutron/fixed_source/azurv1>`
-        - :doc:`Subcritical medium <analytical/neutron/fixed_source/azurv1_sub>`
-        - :doc:`Supercritical medium <analytical/neutron/fixed_source/azurv1_super>`
-        - :doc:`Time censuses <analytical/neutron/fixed_source/azurv1-census>`
-        - :doc:`Census-based tallying <analytical/neutron/fixed_source/azurv1-census-tally>`
-        - :doc:`Basic variance reduction <analytical/neutron/fixed_source/azurv1-basic_techniques>`
-        - :doc:`Weight windows <analytical/neutron/fixed_source/azurv1-weight_windows>`
-
-      - **Infinite-medium SHEM-361 variants** — Test 361-group steady-state and transient transport, weight windows, and censuses without spatial leakage.
-
-        - :doc:`Steady-state <analytical/neutron/fixed_source/inf_shem361>`
-        - :doc:`Steady-state with weight windows <analytical/neutron/fixed_source/inf_shem361-weight_windows>`
-        - :doc:`Transient <analytical/neutron/fixed_source/inf_shem361_td>`
-        - :doc:`Transient with time censuses <analytical/neutron/fixed_source/inf_shem361_td-census>`
-
-    - **k-eigenvalue suite** — Tests multiplication-factor and fundamental-mode convergence with active cycles.
-
-      - **Finite-slab criticality problems** — Test leakage-dependent modes in homogeneous and heterogeneous one-group slabs.
-
-        - :doc:`Homogeneous one-group slab criticality <analytical/neutron/k_eigenvalue/one_group_slab>`
-        - :doc:`Kornreich-Parsons slab <analytical/neutron/k_eigenvalue/kornreich>`
-
-      - **Infinite-medium SHEM-361 variants** — Test 361-group eigenpairs below and above criticality without spatial leakage.
-
-        - :doc:`Subcritical <analytical/neutron/k_eigenvalue/inf_shem361_subcritical>`
-        - :doc:`Supercritical <analytical/neutron/k_eigenvalue/inf_shem361_supercritical>`
-
-- **Code-to-code verification** — Extends verification to complex problems without tractable analytical references and tests whether differences between independent codes decrease at the expected statistical rate.
-  Convergence increases confidence in the implementations and helps expose modeling or numerical discrepancies.
-  Agreement does not establish correctness because the codes may share assumptions, defects, or biases.
-
-  - **Neutron suite** — Covers multidimensional reactor and shielding transients.
-
-    - :doc:`C5G7 four-phase transient <code_to_code/neutron/c5g7-4phase>`
-    - :doc:`Kobayashi dog-leg transient <code_to_code/neutron/kobayashi>`
+.. _reading_verification_results:
 
 Reading verification results
 ----------------------------
@@ -70,7 +66,12 @@ Reading verification results
 Monte Carlo estimates fluctuate statistically, so a single close comparison is not sufficient evidence of convergence.
 The verification suites repeat each case over a sequence of sampling levels and compare the observed error or difference with the expected inverse-square-root behavior.
 For a source-particle count :math:`N`, ordinary Monte Carlo sampling predicts errors proportional to :math:`N^{-1/2}` when statistical uncertainty dominates.
-The fixed-source suites therefore vary the number of source particles and report a relative 2-norm together with a maximum relative error or difference.
+The fixed-source suites therefore vary the number of source particles and
+summarize discrepancies using a relative 2-norm and a maximum relative error or
+difference. :doc:`error_metrics` defines the standardized bin-normalized 2-norm
+and absolute maximum, including reference selection, bin weighting, and
+zero-reference handling. It also records the different conventions used by
+existing processors and published figures.
 
 The :math:`k`-eigenvalue suite instead varies the number of active cycles while holding the particles per cycle and inactive cycles fixed within each case.
 Its convergence plots test the corresponding :math:`N_\mathrm{active}^{-1/2}` behavior, while its uncertainty plots show whether the reference multiplication factor is consistent with the reported MC/DC uncertainty.
@@ -85,24 +86,7 @@ Decay proportional to :math:`N^{-1/2}` indicates that the codes are approaching 
 .. toctree::
    :hidden:
 
-   analytical/neutron/fixed_source/slab_absorbium
-   analytical/neutron/fixed_source/mms_two_group_slab
-   analytical/neutron/fixed_source/slab_isobeam_td
-   analytical/neutron/fixed_source/reed
-   analytical/neutron/fixed_source/azurv1
-   analytical/neutron/fixed_source/azurv1_sub
-   analytical/neutron/fixed_source/azurv1_super
-   analytical/neutron/fixed_source/azurv1-census
-   analytical/neutron/fixed_source/azurv1-census-tally
-   analytical/neutron/fixed_source/azurv1-basic_techniques
-   analytical/neutron/fixed_source/azurv1-weight_windows
-   analytical/neutron/fixed_source/inf_shem361
-   analytical/neutron/fixed_source/inf_shem361-weight_windows
-   analytical/neutron/fixed_source/inf_shem361_td
-   analytical/neutron/fixed_source/inf_shem361_td-census
-   analytical/neutron/k_eigenvalue/one_group_slab
-   analytical/neutron/k_eigenvalue/kornreich
-   analytical/neutron/k_eigenvalue/inf_shem361_subcritical
-   analytical/neutron/k_eigenvalue/inf_shem361_supercritical
-   code_to_code/neutron/c5g7-4phase
-   code_to_code/neutron/kobayashi
+   analytical/multigroup/fixed_source/index
+   analytical/multigroup/k_eigenvalue/index
+   code_to_code/multigroup/fixed_source/index
+   error_metrics

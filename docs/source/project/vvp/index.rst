@@ -58,11 +58,11 @@ A **task** is one execution of a case at one sampling level, such as a selected 
 
 A suite answers a broad verification, validation, or performance question, a case exercises a particular problem and capability set, and repeated tasks expose how its result changes with sampling effort.
 
-For example, the analytical neutron fixed-source verification suite contains the AZURV1 case, which is executed as a sequence of source-particle-count tasks:
+For example, the analytical multigroup fixed-source verification suite contains the AZURV1 case, which is executed as a sequence of source-particle-count tasks:
 
 .. code-block:: text
 
-   analytical neutron fixed-source suite
+   analytical multigroup fixed-source suite
    └── AZURV1 case
        ├── task: N_particle = 100,000
        ├── task: N_particle = 215,443

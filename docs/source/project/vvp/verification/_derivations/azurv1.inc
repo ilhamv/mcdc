@@ -1,4 +1,4 @@
-With unit neutron speed and unit total cross section, the one-group angular flux satisfies
+With unit particle speed and unit total cross section, the one-group angular flux satisfies
 
 .. math::
 
