@@ -30,7 +30,10 @@ A ``task.yaml`` entry selects a case and a logarithmic particle-count sequence:
      logN_min: 5
      logN_max: 7
      N_task: 7
-     walltime_factor: 0.45
+     walltime: 0.27
+
+The required ``walltime`` requests hours for the whole case job; a launch-level
+override applies uniformly. Record the calibration basis in task comments.
 
 The runner generates counts using
 ``numpy.logspace(logN_min, logN_max, N_task, dtype=int)``.
@@ -91,7 +94,7 @@ Tasks vary active cycles rather than particles per cycle:
      N_active_min: 20
      N_active_max: 2000
      N_task: 5
-     walltime_factor: 0.21
+     walltime: 0.21
 
 Counts are generated with
 ``numpy.rint(numpy.geomspace(N_active_min, N_active_max, N_task)).astype(int)``.

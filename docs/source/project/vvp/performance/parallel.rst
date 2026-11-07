@@ -21,6 +21,7 @@ per batch. For example:
    kobayashi-detector:
      method: Analog
      N_particle_base: 30_000_000
+     walltime: {1: 1.5, 2: 3.0, 4: 6.0, 8: 12.0, 16: 24.0}
 
 Calibrate the baseline for approximately one hour on one full node, including
 compilation and full tally output, while holding the batch count and physical
@@ -36,6 +37,7 @@ For separate calibrations, use a mapping of positive integers:
      N_particle_base:
        dane: 30_000_000
        tuolumne: 120_000_000
+     walltime: {1: 1.5, 2: 3.0, 4: 6.0, 8: 12.0, 16: 24.0}
 
 The mapping is an illustrative configuration, not a measured calibration.
 Each selected platform must have an entry; missing baselines raise an error.
@@ -44,8 +46,12 @@ Node counts are powers of two from one through ``N_node_max`` (up to the configu
 platform limit). Workload multipliers are 1, 2, 4, 8, and 16.
 For node count :math:`P` and multiplier :math:`m`, particles per batch are
 :math:`N_\mathrm{particle,base}Pm`.
-Each job requests exclusive nodes and :math:`1.5m` hours, capped by the platform
-limit, providing a 50% buffer over the baseline calibration.
+Each case requires a ``walltime`` mapping with positive hours for every workload
+multiplier. The selected value applies at every node count.
+Document the calibration basis and chosen margin in task comments.
+A launch ``--walltime`` overrides all matrix jobs uniformly, but every task value
+must still be present and valid. Requests use exclusive nodes, are rounded up to
+scheduler resolution, and are capped at the platform maximum.
 
 CPU-only platforms use all CPU cores, one MPI rank per core.
 GPU platforms use all GPUs, one rank per GPU, ``--target=gpu``, and
@@ -63,6 +69,7 @@ The repository-wide configuration uses a platforms list and maximum node count:
        "enabled": True,
        "platforms": ["dane", "tuolumne"],
        "N_node_max": 128,
+       "walltime": None,
    },
 
 On each target machine, run the root launcher with that machine's ``--platform``.
@@ -75,7 +82,8 @@ For a suite-level preview without job submission:
    python launch.py --platform tuolumne --N_node_max 128 --dry_run
 
 These are platform-specific alternatives. Omit ``--dry_run`` to submit on the
-selected host. Load the platform's scheduler/GPU environment first;
+selected host. Add ``--walltime HOURS`` to override every job with the same
+duration. Load the platform's scheduler/GPU environment first;
 see :doc:`../campaigns/setup`.
 
 Platform names distinguish output directories, filenames, task names, study

@@ -54,7 +54,7 @@ For example, a local fixed-source campaign can use:
            "enabled": True,
            "platforms": ["local"],
            "N_node": 1,
-           "walltime": 1.0,
+           "walltime": None,
        },
    }
 
@@ -110,12 +110,24 @@ running the launcher through ``flux env``.
 Walltime and workload
 ---------------------
 
-For verification and SINBAD, ``walltime`` is the base duration in hours.
-A case's ``walltime_factor`` in ``task.yaml`` scales that duration.
-The request is rounded up to the scheduler's time resolution and capped at the
-platform maximum. Local execution ignores walltime.
-Serial performance applies the factor per execution-mode block.
-Parallel performance derives its own requests from workload multipliers.
+Every task definition must include a finite, positive ``walltime`` in hours.
+For verification, this covers the entire case job and its sequential sampling
+levels; validation uses one value per case, and serial performance uses one per
+execution-mode block. Parallel performance requires a mapping from every workload
+multiplier to its requested hours; see :doc:`../performance/parallel`.
+
+A non-``None`` ``walltime`` in ``configs/launch_config.py``, or a suite-level
+``--walltime HOURS``, overrides all selected job durations uniformly.
+Without an override, each job uses its task value. There is no platform-maximum
+fallback: a missing or invalid task value is an error even when an override is
+provided. Validation also applies to local launches and already completed tasks.
+Local execution does not enforce a time limit.
+Scheduler requests are rounded up to the scheduler's time resolution and capped
+at the platform maximum.
+
+Document calibration in ``task.yaml`` comments: platform and resources, workload,
+measured runtime, and the chosen margin.
+Use ``None`` for the launch-level walltime to select the task-defined requests.
 
 Review the suite's ``task.yaml`` before launching: repository configurations can
 represent large campaigns. Choose sampling levels and resource counts appropriate

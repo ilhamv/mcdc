@@ -39,27 +39,27 @@ Task configuration
 ------------------
 
 Unlike verification suites, ``task.yaml`` is nested by benchmark directory and
-case directory. Each entry specifies particles per batch and a walltime factor:
+case directory. Each entry specifies particles per batch and required walltime hours:
 
 .. code-block:: yaml
 
    oktavian-si-60:
      neutron_leakage:
        N_particle: 1_000_000_000
-       walltime_factor: 0.34
+       walltime: 8.16
    fng-tud-sic:
      p1:
        N_particle: 1_000_000_000
-       walltime_factor: 0.01
+       walltime: 0.24
      p2:
        N_particle: 1_000_000_000
-       walltime_factor: 0.00875
+       walltime: 0.21
      p3:
        N_particle: 1_000_000_000
-       walltime_factor: 0.00875
+       walltime: 0.21
      p4:
        N_particle: 1_000_000_000
-       walltime_factor: 0.00875
+       walltime: 0.21
 
 The batch count remains in each input.
 Enable only cases whose benchmark observable can be calculated directly.
@@ -78,19 +78,19 @@ Or launch on a configured cluster:
 
 .. code-block:: console
 
-   python launch.py --platform dane --N_node 10 --walltime 24
+   python launch.py --platform dane --N_node 10
 
 Each case uses the specified node count and all configured CPU cores per node.
-Its walltime is the base duration multiplied by its factor, rounded up to
-scheduler resolution and capped at the platform maximum. Local execution uses
-one node and ignores walltime.
-The example factors were calibrated for ten-node Dane runs, including at least a
-50% buffer above observed runtime; recalibrate for other platforms or workloads.
-A 24-hour base gives about 8 hours 10 minutes for OKTAVIAN, 14 minutes 24 seconds
-for P1, and 12 minutes 37 seconds for P2--P4.
+Each task requires positive ``walltime`` hours. The example requests 8.16 hours
+for OKTAVIAN, 0.24 hours for P1, and 0.21 hours for P2--P4.
+Document measured runtime, resources, workload, and margin in task comments.
+A launch ``--walltime`` overrides every case job uniformly; requests are rounded
+up to scheduler resolution and capped at the platform maximum.
+Local execution uses one node and ignores time limits, but still requires valid
+task values even when an override is supplied.
 
 The saved ``launch_config.yaml`` records platform, nodes, processes, Python
-interpreter, base walltime, and scaled case walltimes.
+interpreter, optional walltime override, and effective case walltimes.
 For repository-wide operation, enable ``validation/sinbad`` in
 ``configs/launch_config.py`` and set ``sinbad_root`` to the local SINBAD root.
 See :doc:`../campaigns/setup` for platform and user settings.

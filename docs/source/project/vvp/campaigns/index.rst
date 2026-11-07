@@ -41,6 +41,7 @@ Set ``verification/analytical/multigroup/fixed_source/task.yaml`` to:
      logN_min: 3
      logN_max: 4
      N_task: 3
+     walltime: 0.1  # Illustrative hours; ignored for local execution.
 
 This selects one case and three particle-count tasks between 1,000 and 10,000.
 It demonstrates the workflow; use a suitably resolved sampling campaign when

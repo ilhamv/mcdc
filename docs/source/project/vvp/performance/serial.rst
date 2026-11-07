@@ -14,7 +14,7 @@ Configuring tasks
 
 Each case in ``task.yaml`` has a ``numba`` block, a ``python`` block, or both.
 Omit a mode to disable it. Each block defines its own logarithmic particle-count
-bounds, task count, and walltime factor:
+bounds, task count, and required walltime in hours:
 
 .. code-block:: yaml
 
@@ -23,21 +23,24 @@ bounds, task count, and walltime factor:
        logN_min: 1
        logN_max: 6
        N_task: 11
-       walltime_factor: 1.0
+       walltime: 24.0
      python:
        logN_min: 1
        logN_max: 4
        N_task: 7
-       walltime_factor: 1.0
+       walltime: 24.0
 
 The example selects eleven Numba and seven Python points on separate grids.
 ``input.py`` sets ``N_batch``; the processor reads actual history and batch counts
 from each output.
 
-``--walltime`` specifies a base duration in hours, multiplied by the mode's
-``walltime_factor``, rounded up to scheduler resolution, and capped at the
-platform maximum. If omitted, the platform maximum is the base.
-Local execution ignores walltime.
+Each mode block must specify positive ``walltime`` hours for its complete
+sampling sequence. A launch ``--walltime`` overrides all case-mode jobs uniformly;
+otherwise each mode uses its own task value.
+Requests are rounded up to scheduler resolution and capped at the platform
+maximum. Missing or invalid task values are errors even with an override or a
+local launch. Local execution ignores the time limit.
+Document the calibration in task comments.
 An HPC job requests one process on one exclusive node, not every CPU core on that
 node. Use :doc:`../campaigns/setup` for shared scheduler and account settings.
 

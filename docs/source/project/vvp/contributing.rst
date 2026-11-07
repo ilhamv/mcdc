@@ -67,10 +67,12 @@ Start from a neighboring case in the appropriate suite. Keep its file interfaces
    for the actual observable, not a similarly named baseline problem.
 #. Register the case in ``task.yaml``.
    Fixed-source/code-to-code entries use ``logN_min``, ``logN_max``, ``N_task``,
-   and ``walltime_factor``; eigenvalue entries use ``N_active_min``,
-   ``N_active_max``, ``N_task``, and ``walltime_factor``.
+   and ``walltime``; eigenvalue entries use ``N_active_min``,
+   ``N_active_max``, ``N_task``, and ``walltime``.
    The :doc:`verification workflows <campaigns/verification>`
    show both schemas and task-generation rules.
+   Require positive walltime hours in each task and document its calibration in
+   task-file comments; launch overrides do not replace this requirement.
 #. Check a small task locally, inspect its tally grids and normalization, then
    process a small sequence before allocating a full campaign.
    Exercise partial restart and an already complete case; a repeated unchanged
@@ -88,7 +90,7 @@ For example, adding a fixed-source ``my_case`` requires a matching
      logN_min: 3
      logN_max: 5
      N_task: 3
-     walltime_factor: 1.0
+     walltime: 1.0  # Illustrative hours; calibrate for the case job.
 
 Those sampling levels are illustrative; choose production levels based on the
 observable's variance and required statistical resolution.
