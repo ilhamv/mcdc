@@ -7,6 +7,7 @@ from mpi4py import MPI
 ####
 
 import mcdc.config as config
+import mcdc.memory_trace as memory_trace
 import mcdc.mcdc_set as mcdc_set
 import mcdc.output as output_module
 import mcdc.transport.particle_bank as particle_bank_module
@@ -47,7 +48,13 @@ def _reduce(tally, simulation, data):
 
     # MPI reduce
     master = simulation["mpi_master"]
+    batch = simulation["idx_batch"] + 1
+    tally_id = tally["ID"]
     with objmode():
+        if master and config.args.memory_trace:
+            memory_trace.mark(
+                "before_reduce", int(batch), {"id": int(tally_id), "bins": int(N)}
+            )
         if config.target == "gpu" and config.gpu_state_storage != "separate":
             # Receive into host memory before updating GPU-backed data.
             buff = np.zeros(N)
@@ -62,6 +69,10 @@ def _reduce(tally, simulation, data):
                 MPI.COMM_WORLD.Reduce(MPI.IN_PLACE, data[start:end], MPI.SUM, 0)
             else:
                 MPI.COMM_WORLD.Reduce(data[start:end], None, MPI.SUM, 0)
+        if master and config.args.memory_trace:
+            memory_trace.mark(
+                "after_reduce", int(batch), {"id": int(tally_id), "bins": int(N)}
+            )
 
 
 @njit

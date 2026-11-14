@@ -753,12 +753,12 @@ class Simulation(MCDCBase):
 
         >>> simulation.run()
         """
-        if not self.compiled:
-            self.compile()
+        from mcdc.main import run_simulation, trace_run_memory
 
-        from mcdc.main import run_simulation
-
-        run_simulation(self)
+        with trace_run_memory():
+            if not self.compiled:
+                self.compile()
+            run_simulation(self)
         self.compiled = False
 
     def __repr__(self) -> str:

@@ -41,6 +41,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--progress_bar", default=True, action="store_true")
     parser.add_argument("--no-progress_bar", dest="progress_bar", action="store_false")
     parser.add_argument(
+        "--memory-trace",
+        metavar="PATH",
+        help="Write rank-zero batch markers and one-second memory samples to a JSONL file.",
+    )
+    parser.add_argument(
         "--no-tally_output",
         action="store_true",
         help="Skip storing tally results in the HDF5 output.",

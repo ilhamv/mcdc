@@ -4,6 +4,8 @@ from numba import njit, objmode, uint64
 
 import mcdc.mcdc_get as mcdc_get
 import mcdc.numba_types as type_
+import mcdc.config as config
+import mcdc.memory_trace as memory_trace
 import mcdc.output as output_module
 import mcdc.transport.geometry as geometry
 import mcdc.transport.geometry.surface as surface_module
@@ -40,10 +42,13 @@ def fixed_source_simulation(simulation_container, data):
     N_particle = settings["N_particle"]
     N_census = settings["N_census"]
     use_census_based_tally = settings["use_census_based_tally"]
+    trace = simulation["mpi_master"] and bool(config.args.memory_trace)
 
     # Loop over batches
     for idx_batch in range(N_batch):
         simulation["idx_batch"] = idx_batch
+        if trace:
+            memory_trace.mark("batch_start", batch=idx_batch + 1)
         seed_batch = rng.split_seed(uint64(idx_batch), settings["rng_seed"])
 
         # Distribute work
@@ -81,6 +86,8 @@ def fixed_source_simulation(simulation_container, data):
                     tally_module.closeout.accumulate_statistics_and_reset_scores(
                         simulation, data
                     )
+                    if trace:
+                        memory_trace.mark("after_statistics", batch=idx_batch + 1)
                     with objmode():
                         output_module.generate_census_based_tally(simulation, data)
                     tally_module.closeout.reset_statistics(simulation, data)
@@ -111,6 +118,8 @@ def fixed_source_simulation(simulation_container, data):
                     tally_module.closeout.accumulate_statistics_and_reset_scores(
                         simulation, data
                     )
+                    if trace:
+                        memory_trace.mark("after_statistics", batch=idx_batch + 1)
                 else:
                     tally_module.closeout.reset_scores(simulation, data)
 

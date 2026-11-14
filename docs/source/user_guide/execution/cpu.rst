@@ -66,3 +66,28 @@ For systems that do not use SLURM (i.e., a local system) try ``mpiexec`` or ``mp
 
 CPU Profiling
 -------------
+
+To diagnose memory use during fixed-source batch transport, run the input from
+a Slurm allocation and pass a trace filename on a persistent filesystem.
+This example uses one node and 112 ranks.
+
+.. code-block:: bash
+
+    srun -N 1 -n 112 python input.py --mode=numba --memory-trace kobayashi-memory.jsonl
+
+Rank zero records the start of each batch, the beginning and end of each tally
+reduction, and the end of its statistics update.
+The tally ID and bin count identify the reduction for the large mesh.
+A separate sampler records memory once per second, including during compilation
+and MPI calls.
+Each line is a timestamped JSON record written as it is collected.
+
+On Linux, the trace reports current and peak memory in bytes for the Slurm
+step on rank zero's node, alongside resident memory for ranks zero and one
+when both are on that node.
+It also records the tightest visible memory limit from the step and its
+ancestors, with the limit's source path.
+The opening record identifies the cgroup. Unavailable counters appear as
+``null``.
+Compare current memory at ``after_statistics`` across batches, then inspect
+the samples between ``before_reduce`` and ``after_reduce`` for temporary peaks.

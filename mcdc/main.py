@@ -1,5 +1,37 @@
+from contextlib import contextmanager
+import os
+
 from mcdc.object_.simulation import Simulation
 import mcdc.config as config
+from mcdc import memory_trace
+
+
+@contextmanager
+def trace_run_memory():
+    """Own the diagnostic sampler for one simulation, including exceptional exits."""
+    path = config.args.memory_trace
+    if path is None:
+        yield
+        return
+
+    from mpi4py import MPI
+
+    comm = MPI.COMM_WORLD
+    worker_pid = None
+    if comm.size > 1:
+        # Rank zero can read the worker's /proc entry only on a shared host.
+        worker = (MPI.Get_processor_name(), os.getpid()) if comm.rank == 1 else None
+        host, pid = comm.bcast(worker, root=1)
+        if host == MPI.Get_processor_name():
+            worker_pid = pid
+    if comm.rank == 0:
+        memory_trace.start(path, worker_pid=worker_pid)
+    try:
+        yield
+    finally:
+        if comm.rank == 0:
+            memory_trace.stop()
+
 
 # ======================================================================================
 # Run Simulation
@@ -35,6 +67,8 @@ def run_simulation(simulationPy: Simulation):
     #       the Numba-based compilation framework.
     simulation_container, data = prepare(simulationPy)
     simulation = simulation_container[0]
+    if master and config.args.memory_trace:
+        memory_trace.mark("after_prepare")
 
     # Prevent intermediate census tallies from a previous run from being recombined.
     import mcdc.output as output_module
