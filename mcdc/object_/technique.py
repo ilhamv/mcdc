@@ -153,6 +153,38 @@ class ImplicitCollision(MCDCBase):
 
 
 # ======================================================================================
+# Forced decay
+# ======================================================================================
+
+
+class ForcedDecay(MCDCBase):
+    """Simulation-owned forced-decay configuration."""
+
+    # MC/DC framework metadata
+    label = "forced_decay"
+
+    active: bool
+
+    def __init__(self) -> None:
+        self.active = False
+
+    def __call__(self, active: bool = True) -> None:
+        """Configure forced decay of delayed neutron precursors.
+
+        Parameters
+        ----------
+        active : bool, optional
+            Whether forced decay is enabled.
+
+        Examples
+        --------
+        >>> simulation.technique.forced_decay()
+        >>> simulation.technique.forced_decay(active=False)
+        """
+        self.active = active
+
+
+# ======================================================================================
 # Weighted emission
 # ======================================================================================
 
@@ -489,6 +521,7 @@ class Technique(MCDCBase):
 
     implicit_capture: ImplicitCapture
     implicit_collision: ImplicitCollision
+    forced_decay: ForcedDecay
     weighted_emission: WeightedEmission
     global_weight_roulette: GlobalWeightRoulette
     neutron_weight_windows: WeightWindows
@@ -501,6 +534,7 @@ class Technique(MCDCBase):
         # Construct every simulation-wide technique configuration
         self.implicit_capture = ImplicitCapture()
         self.implicit_collision = ImplicitCollision()
+        self.forced_decay = ForcedDecay()
         self.weighted_emission = WeightedEmission()
         self.global_weight_roulette = GlobalWeightRoulette()
         for pname, ptype in PARTICLE_TYPE_BY_NAME.items():

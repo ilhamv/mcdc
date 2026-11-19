@@ -13,6 +13,7 @@ from sphinx.util.docutils import SphinxDirective
 
 from mcdc.object_.settings import Settings
 from mcdc.object_.technique import (
+    ForcedDecay,
     GlobalWeightRoulette,
     ImplicitCapture,
     ImplicitCollision,
@@ -44,6 +45,7 @@ SETTINGS_METHODS = (
 TECHNIQUES = (
     ("implicit_capture", ImplicitCapture),
     ("implicit_collision", ImplicitCollision),
+    ("forced_decay", ForcedDecay),
     ("weighted_emission", WeightedEmission),
     ("global_weight_roulette", GlobalWeightRoulette),
     ("weight_windows", WeightWindows),
