@@ -96,9 +96,7 @@ def pop_particle(particle_container, bank):
     # Set default IDs and event for the live particle
     particle = particle_container[0]
     particle["alive"] = True
-    particle["material_ID"] = -1
-    particle["cell_ID"] = -1
-    particle["surface_ID"] = -1
+    particle_module.reset_IDs(particle_container)
     particle["event"] = EVENT_NONE
 
 
