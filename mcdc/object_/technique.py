@@ -1,3 +1,6 @@
+from math import isfinite
+from numbers import Real
+
 import numpy as np
 
 from mcdc.constant import (
@@ -48,6 +51,50 @@ class ImplicitCapture(MCDCBase):
         >>> simulation.technique.implicit_capture(active=False)
         """
         self.active = active
+
+
+# ======================================================================================
+# Implicit collision
+# ======================================================================================
+
+
+class ImplicitCollision(MCDCBase):
+    """Simulation-owned implicit-collision configuration."""
+
+    # MC/DC framework metadata
+    label = "implicit_collision"
+
+    active: bool
+    multiplicity: float
+
+    def __init__(self) -> None:
+        self.active = False
+        self.multiplicity = 1.0
+
+    def __call__(self, multiplicity: float = 1.0, *, active: bool = True) -> None:
+        """Configure implicit collision with a fixed expected multiplicity.
+
+        Parameters
+        ----------
+        multiplicity : float, optional
+            Expected number of outgoing particles per collision. Must be
+            finite and positive. A multiplicity of one gives branchless
+            collision.
+        active : bool, optional
+            Whether implicit collision is enabled.
+        """
+        if (
+            isinstance(multiplicity, (bool, np.bool_))
+            or not isinstance(multiplicity, Real)
+            or not isfinite(multiplicity)
+            or multiplicity <= 0.0
+        ):
+            print_error(
+                "Implicit collision multiplicity must be a positive finite scalar."
+            )
+
+        self.active = active
+        self.multiplicity = float(multiplicity)
 
 
 # ======================================================================================
@@ -386,6 +433,7 @@ class Technique(MCDCBase):
     label = "technique"
 
     implicit_capture: ImplicitCapture
+    implicit_collision: ImplicitCollision
     weighted_emission: WeightedEmission
     global_weight_roulette: GlobalWeightRoulette
     neutron_weight_windows: WeightWindows
@@ -397,11 +445,16 @@ class Technique(MCDCBase):
     def __init__(self) -> None:
         # Construct every simulation-wide technique configuration
         self.implicit_capture = ImplicitCapture()
+        self.implicit_collision = ImplicitCollision()
         self.weighted_emission = WeightedEmission()
         self.global_weight_roulette = GlobalWeightRoulette()
         for pname, ptype in PARTICLE_TYPE_BY_NAME.items():
             setattr(self, f"{pname}_weight_windows", WeightWindows(ptype))
         self.population_control = PopulationControl()
+
+    def branchless_collision(self, active: bool = True) -> None:
+        """Configure implicit collision with one outgoing particle per collision."""
+        self.implicit_collision(multiplicity=1.0, active=active)
 
     def weight_windows(
         self,
