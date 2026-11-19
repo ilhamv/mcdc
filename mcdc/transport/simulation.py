@@ -321,6 +321,10 @@ def step_particle(particle_container, program, data):
     # Advance
     # ==================================================================================
 
+    # Snapshot the start of this flight
+    flight_data_container = util.local_array(1, type_.flight_data)
+    particle_module.copy(flight_data_container["initial_particle"], particle_container)
+
     # Move particle
     move_particle(particle_container, distance, simulation, data)
 
@@ -341,7 +345,7 @@ def step_particle(particle_container, program, data):
 
     # Collision
     if particle["event"] & EVENT_COLLISION:
-        collision(particle_container, program, data)
+        collision(particle_container, flight_data_container, program, data)
         if not particle["alive"]:
             return
 
@@ -518,7 +522,7 @@ def condensed_interactions(particle_container, distance, simulation, data):
 
 
 @njit
-def collision(particle_container, program, data):
+def collision(particle_container, flight_data_container, program, data):
     """Perform a discrete collision and score its interaction contribution."""
     simulation = util.access_simulation(program)
     particle = particle_container[0]
@@ -532,7 +536,13 @@ def collision(particle_container, program, data):
         interaction_data_container["incident_particle"], particle_container
     )
 
-    physics.collision(particle_container, interaction_data_container, program, data)
+    physics.collision(
+        particle_container,
+        flight_data_container,
+        interaction_data_container,
+        program,
+        data,
+    )
 
     score_interaction_tallies(interaction_data_container, simulation, data)
 

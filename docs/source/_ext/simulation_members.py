@@ -15,6 +15,7 @@ from mcdc.object_.settings import Settings
 from mcdc.object_.technique import (
     GlobalWeightRoulette,
     ImplicitCapture,
+    ImplicitCollision,
     PopulationControl,
     WeightedEmission,
     WeightWindows,
@@ -42,6 +43,7 @@ SETTINGS_METHODS = (
 
 TECHNIQUES = (
     ("implicit_capture", ImplicitCapture),
+    ("implicit_collision", ImplicitCollision),
     ("weighted_emission", WeightedEmission),
     ("global_weight_roulette", GlobalWeightRoulette),
     ("weight_windows", WeightWindows),

@@ -66,35 +66,90 @@ class ImplicitCollision(MCDCBase):
 
     active: bool
     multiplicity: float
+    time_grid: NDArray[np.float64]
+    relative_density: NDArray[np.float64]
 
     def __init__(self) -> None:
         self.active = False
         self.multiplicity = 1.0
+        self.time_grid = np.empty(0)
+        self.relative_density = np.empty(0)
 
-    def __call__(self, multiplicity: float = 1.0, *, active: bool = True) -> None:
-        """Configure implicit collision with a fixed expected multiplicity.
+    def __call__(
+        self,
+        multiplicity: float | NDArray[np.float64] | None = None,
+        time: NDArray[np.float64] | None = None,
+        *,
+        relative_density: NDArray[np.float64] | None = None,
+        active: bool = True,
+    ) -> None:
+        """Configure fixed or time-dependent implicit collision.
+
+        Currently supports neutrons only.
 
         Parameters
         ----------
-        multiplicity : float, optional
-            Expected number of outgoing particles per collision. Must be
-            finite and positive. A multiplicity of one gives branchless
-            collision.
+        multiplicity : float or array, optional
+            Fixed positive expected product count. Defaults to one (branchless
+            collision). An array passed positionally supplies the relative density.
+        relative_density : array, optional
+            Positive finite particle density at each supplied time, in any common
+            normalization.
+        time : array, optional
+            Strictly increasing times in seconds, one per density value.
         active : bool, optional
             Whether implicit collision is enabled.
+
+        Examples
+        --------
+        >>> simulation.technique.implicit_collision(
+        ...     relative_density=[1., 2.], time=[0., 1.]
+        ... )
         """
-        if (
-            isinstance(multiplicity, (bool, np.bool_))
-            or not isinstance(multiplicity, Real)
-            or not isfinite(multiplicity)
-            or multiplicity <= 0.0
-        ):
-            print_error(
-                "Implicit collision multiplicity must be a positive finite scalar."
-            )
+        if relative_density is not None and multiplicity is not None:
+            print_error("Specify either multiplicity or relative_density.")
+        if isinstance(multiplicity, (list, tuple, np.ndarray)):
+            relative_density, multiplicity = multiplicity, None
+
+        if relative_density is None:
+            if time is not None:
+                print_error("Implicit collision time grid requires density values.")
+            if multiplicity is None:
+                multiplicity = 1.0
+            if (
+                isinstance(multiplicity, (bool, np.bool_))
+                or not isinstance(multiplicity, Real)
+                or not isfinite(multiplicity)
+                or multiplicity <= 0.0
+            ):
+                print_error(
+                    "Implicit collision multiplicity must be a positive finite scalar."
+                )
+            time_grid = np.empty(0)
+            values = np.empty(0)
+        else:
+            values = np.asarray(relative_density, dtype=float)
+            time_grid = np.asarray(time, dtype=float)
+            if (
+                values.ndim != 1
+                or not values.size
+                or not np.all(np.isfinite(values) & (values > 0))
+            ):
+                print_error(
+                    "Implicit collision requires a 1-D array of positive finite density values."
+                )
+            if time_grid.shape != values.shape or not np.all(np.isfinite(time_grid)):
+                print_error(
+                    "Implicit collision requires one finite time per density value."
+                )
+            if not np.all(np.diff(time_grid) > 0):
+                print_error("Implicit collision times must be strictly increasing.")
+            multiplicity = 1.0
 
         self.active = active
         self.multiplicity = float(multiplicity)
+        self.time_grid = time_grid
+        self.relative_density = values
 
 
 # ======================================================================================

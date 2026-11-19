@@ -164,13 +164,19 @@ def neutron_production_xs(reaction_type, particle_container, simulation, data):
 
 
 @njit
-def collision(particle_container, interaction_data_container, program, data):
+def collision(
+    particle_container,
+    flight_data_container,
+    interaction_data_container,
+    program,
+    data,
+):
     simulation = util.access_simulation(program)
     particle = particle_container[0]
 
     # Implicit collision
     if simulation["technique"]["implicit_collision"]["active"]:
-        implicit_collision(particle_container, program, data)
+        implicit_collision(particle_container, flight_data_container, program, data)
         return
 
     # Get the reaction cross-sections
@@ -202,11 +208,13 @@ def collision(particle_container, interaction_data_container, program, data):
 
 
 @njit
-def implicit_collision(particle_container, program, data):
+def implicit_collision(particle_container, flight_data_container, program, data):
     simulation = util.access_simulation(program)
     settings = simulation["settings"]
     particle = particle_container[0]
     particle["alive"] = False
+    if particle["w"] == 0.0:
+        return
 
     # Expected neutron production from each reaction
     nuSigmaS = neutron_production_xs(
@@ -223,12 +231,30 @@ def implicit_collision(particle_container, program, data):
         return
 
     # Sample the product count and distribute the expected outgoing weight.
-    multiplicity = simulation["technique"]["implicit_collision"]["multiplicity"]
+    SigmaT = macro_xs(NEUTRON_REACTION_TOTAL, particle_container, simulation, data)
+    config = simulation["technique"]["implicit_collision"]
+    fixed_multiplicity = config["relative_density_length"] == 0
+
+    if fixed_multiplicity:
+        multiplicity = config["multiplicity"]
+        weight_product = particle["w"] * production / (SigmaT * multiplicity)
+
+    else:
+        initial = flight_data_container[0]["initial_particle"]
+        times = mcdc_get.implicit_collision.time_grid_all(config, data)
+
+        density = mcdc_get.implicit_collision.relative_density_all(config, data)
+        density_start = _get_density(initial["t"], times, density)
+        density_end = _get_density(particle["t"], times, density)
+
+        target = initial["w"] * (density_end / density_start)
+
+        multiplicity = particle["w"] * (production / SigmaT) / target
+        weight_product = math.copysign(target, particle["w"])
+
     N = 1
     if multiplicity != 1.0:
         N = int(math.floor(multiplicity + rng.lcg(particle_container)))
-    SigmaT = macro_xs(NEUTRON_REACTION_TOTAL, particle_container, simulation, data)
-    weight_product = particle["w"] * production / (SigmaT * multiplicity)
 
     material = simulation["materials"][particle["material_ID"]]
     mgxs = simulation["neutron_multigroup_data"][material["neutron_multigroup_ID"]]
@@ -596,6 +622,18 @@ def sample_fission_neutron(particle_container_new, group, mgxs, simulation, data
 # ======================================================================================
 # Helpers
 # ======================================================================================
+
+
+@njit
+def _get_density(t, times, density):
+    if t <= times[0]:
+        return density[0]
+    if t >= times[-1]:
+        return density[-1]
+    i = util.find_bin(t, times)
+    return util.linear_interpolation(
+        t, times[i], times[i + 1], density[i], density[i + 1]
+    )
 
 
 @njit

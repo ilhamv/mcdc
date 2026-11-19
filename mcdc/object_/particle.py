@@ -32,8 +32,16 @@ class ParticleData(MCDCBase):
 
 
 @dataclass
+class FlightData(MCDCBase):
+    """Data associated with particle flight (one transport step)."""
+
+    label = "flight_data"
+    initial_particle: ParticleData = field(default_factory=ParticleData)
+
+
+@dataclass
 class InteractionData(MCDCBase):
-    """Scoring data shared by discrete collisions and condensed interactions.
+    """Data associated with particle interaction.
 
     Each treatment records its incoming particle state before changing it and
     preserves the incident top-cell ID. It accumulates weighted energy deposition in eV.
