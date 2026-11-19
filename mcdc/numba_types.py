@@ -796,6 +796,11 @@ implicit_capture = into_dtype([
     ('active', bool_),
 ])
 
+implicit_collision = into_dtype([
+    ('active', bool_),
+    ('multiplicity', float64),
+])
+
 weighted_emission = into_dtype([
     ('active', bool_),
     ('weight_target', float64),
@@ -838,6 +843,7 @@ population_control = into_dtype([
 
 technique = into_dtype([
     ('implicit_capture', implicit_capture),
+    ('implicit_collision', implicit_collision),
     ('weighted_emission', weighted_emission),
     ('global_weight_roulette', global_weight_roulette),
     ('neutron_weight_windows', weight_windows),

@@ -442,6 +442,16 @@ class Simulation(MCDCBase):
             and multigroup_grids_are_identical
         )
 
+        if self.technique.implicit_collision.active:
+            if (
+                self.technique.implicit_capture.active
+                or self.technique.weighted_emission.active
+            ):
+                print_error(
+                    "Implicit collision cannot be combined with implicit capture "
+                    "or weighted emission."
+                )
+
         # Require physical energy boundaries wherever energy selects local groups.
         if self.settings.neutron_multigroup.hybrid:
             for material in self.materials:
