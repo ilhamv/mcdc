@@ -168,16 +168,23 @@ def collision(particle_container, interaction_data_container, program, data):
     simulation = util.access_simulation(program)
     particle = particle_container[0]
 
+    # Implicit collision
+    if simulation["technique"]["implicit_collision"]["active"]:
+        implicit_collision(particle_container, program, data)
+        return
+
     # Get the reaction cross-sections
     SigmaT = macro_xs(NEUTRON_REACTION_TOTAL, particle_container, simulation, data)
     SigmaS = macro_xs(
         NEUTRON_REACTION_ELASTIC_SCATTERING, particle_container, simulation, data
     )
-    SigmaC = macro_xs(NEUTRON_REACTION_CAPTURE, particle_container, simulation, data)
     SigmaF = macro_xs(NEUTRON_REACTION_FISSION, particle_container, simulation, data)
 
     # Implicit capture
     if simulation["technique"]["implicit_capture"]["active"]:
+        SigmaC = macro_xs(
+            NEUTRON_REACTION_CAPTURE, particle_container, simulation, data
+        )
         particle["w"] *= (SigmaT - SigmaC) / SigmaT
         SigmaT -= SigmaC
 
@@ -194,6 +201,117 @@ def collision(particle_container, interaction_data_container, program, data):
             particle["alive"] = False
 
 
+@njit
+def implicit_collision(particle_container, program, data):
+    simulation = util.access_simulation(program)
+    settings = simulation["settings"]
+    particle = particle_container[0]
+    particle["alive"] = False
+
+    # Expected neutron production from each reaction
+    nuSigmaS = neutron_production_xs(
+        NEUTRON_REACTION_ELASTIC_SCATTERING, particle_container, simulation, data
+    )
+    nuSigmaF = (
+        neutron_production_xs(
+            NEUTRON_REACTION_FISSION, particle_container, simulation, data
+        )
+        / simulation["k_eff"]
+    )
+    production = nuSigmaS + nuSigmaF
+    if production == 0.0:
+        return
+
+    # Sample the product count and distribute the expected outgoing weight.
+    multiplicity = simulation["technique"]["implicit_collision"]["multiplicity"]
+    N = 1
+    if multiplicity != 1.0:
+        N = int(math.floor(multiplicity + rng.lcg(particle_container)))
+    SigmaT = macro_xs(NEUTRON_REACTION_TOTAL, particle_container, simulation, data)
+    weight_product = particle["w"] * production / (SigmaT * multiplicity)
+
+    material = simulation["materials"][particle["material_ID"]]
+    mgxs = simulation["neutron_multigroup_data"][material["neutron_multigroup_ID"]]
+    group = _get_energy_group(particle["E"], mgxs, simulation, data)
+    particle_container_new = util.local_array(1, type_.particle_data)
+    particle_new = particle_container_new[0]
+
+    # Each product samples its own reaction.
+    for n in range(N):
+        scatter = nuSigmaF == 0.0 or rng.lcg(particle_container) * production < nuSigmaS
+        particle_module.copy_as_child(particle_container_new, particle_container)
+        particle_new["w"] = weight_product
+
+        if scatter:
+            sample_scattering_neutron(
+                particle_container_new, group, mgxs, simulation, data
+            )
+            prompt = True
+        else:
+            prompt = sample_fission_neutron(
+                particle_container_new, group, mgxs, simulation, data
+            )
+
+        if not scatter and settings["neutron_eigenvalue_mode"]:
+            particle_bank_module.bank_census_particle(particle_container_new, program)
+            continue
+
+        if prompt:
+            if particle["event"] & EVENT_TIME_CENSUS:
+                particle_bank_module.bank_census_particle(
+                    particle_container_new, program
+                )
+                continue
+        else:
+            t = particle_new["t"]
+            if t > settings["time_boundary"] - COINCIDENCE_TOLERANCE_TIME:
+                continue
+            motion.move_product(
+                particle_container_new, particle_container, simulation, data
+            )
+
+            if settings["N_census"] > 1:
+                idx = simulation["idx_census"]
+                if (
+                    t
+                    > mcdc_get.settings.census_time(idx, settings, data)
+                    - COINCIDENCE_TOLERANCE_TIME
+                ):
+                    if (
+                        t
+                        > mcdc_get.settings.census_time(idx + 1, settings, data)
+                        - COINCIDENCE_TOLERANCE_TIME
+                    ):
+                        particle_bank_module.bank_future_particle(
+                            particle_container_new, program
+                        )
+                    else:
+                        particle_bank_module.bank_census_particle(
+                            particle_container_new, program
+                        )
+                    continue
+
+        if n < N - 1:
+            particle_bank_module.bank_active_particle(particle_container_new, program)
+            continue
+
+        particle["alive"] = True
+        particle["ux"] = particle_new["ux"]
+        particle["uy"] = particle_new["uy"]
+        particle["uz"] = particle_new["uz"]
+        particle["E"] = particle_new["E"]
+        particle["w"] = particle_new["w"]
+        if not prompt:
+            # Relocate the retained delayed neutron at its emission state.
+            particle["t"] = particle_new["t"]
+            particle["x"] = particle_new["x"]
+            particle["y"] = particle_new["y"]
+            particle["z"] = particle_new["z"]
+            particle["cell_ID"] = -1
+            particle["material_ID"] = -1
+            particle["surface_ID"] = -1
+
+
 # ======================================================================================
 # Reactions
 # ======================================================================================
@@ -208,12 +326,8 @@ def scattering(particle_container, program, data):
     # Material attributes
     mgxs_ID = material["neutron_multigroup_ID"]
     mgxs = simulation["neutron_multigroup_data"][mgxs_ID]
-    G = mgxs["G"]
 
     # Particle attributes
-    ux = particle["ux"]
-    uy = particle["uy"]
-    uz = particle["uz"]
     group = _get_energy_group(particle["E"], mgxs, simulation, data)
 
     # Kill the current particle
@@ -231,7 +345,7 @@ def scattering(particle_container, program, data):
     nu_s = mcdc_get.neutron_multigroup_data.nu_s(group, mgxs, data)
     N = int(math.floor(weight_production * nu_s + rng.lcg(particle_container)))
 
-    # Set up secondary partice container
+    # Set up secondary particle container
     particle_container_new = util.local_array(1, type_.particle_data)
     particle_new = particle_container_new[0]
 
@@ -243,30 +357,7 @@ def scattering(particle_container, program, data):
         # Set weight
         particle_new["w"] = weight_product
 
-        # Sample scattering angle
-        mu0 = 2.0 * rng.lcg(particle_container_new) - 1.0
-
-        # Scatter direction
-        azi = 2.0 * PI * rng.lcg(particle_container_new)
-        ux_new, uy_new, uz_new = scatter_direction(ux, uy, uz, mu0, azi)
-        particle_new["ux"] = ux_new
-        particle_new["uy"] = uy_new
-        particle_new["uz"] = uz_new
-
-        # Get outgoing spectrum
-        chi_s = mcdc_get.neutron_multigroup_data.chi_s_vector(group, mgxs, data)
-
-        # Sample outgoing energy
-        xi = rng.lcg(particle_container_new)
-        total = 0.0
-        group_out = 0
-        for group_out in range(G):
-            total += chi_s[group_out]
-            if total > xi:
-                break
-        particle_new["E"] = _get_group_energy(
-            group_out, particle_container_new, mgxs, simulation, data
-        )
+        sample_scattering_neutron(particle_container_new, group, mgxs, simulation, data)
 
         # Census takes precedence over retaining the last product.
         if particle["event"] & EVENT_TIME_CENSUS:
@@ -292,8 +383,6 @@ def fission(particle_container, program, data):
     # Material attributes
     mgxs_ID = material["neutron_multigroup_ID"]
     mgxs = simulation["neutron_multigroup_data"][mgxs_ID]
-    G = mgxs["G"]
-    J = mgxs["J"]
 
     # Particle attributes
     group = _get_energy_group(particle["E"], mgxs, simulation, data)
@@ -311,9 +400,6 @@ def fission(particle_container, program, data):
 
     # Fission yields
     nu = mcdc_get.neutron_multigroup_data.nu_f(group, mgxs, data)
-    nu_p = mcdc_get.neutron_multigroup_data.nu_p(group, mgxs, data)
-    if J > 0:
-        nu_d = mcdc_get.neutron_multigroup_data.nu_d_vector(group, mgxs, data)
 
     # Get number of secondaries
     N = int(
@@ -322,7 +408,7 @@ def fission(particle_container, program, data):
         )
     )
 
-    # Set up secondary partice container
+    # Set up secondary particle container
     particle_container_new = util.local_array(1, type_.particle_data)
     particle_new = particle_container_new[0]
 
@@ -334,46 +420,9 @@ def fission(particle_container, program, data):
         # Set weight
         particle_new["w"] = weight_product
 
-        # Sample isotropic direction
-        ux_new, uy_new, uz_new = sample_isotropic_direction(particle_container_new)
-        particle_new["ux"] = ux_new
-        particle_new["uy"] = uy_new
-        particle_new["uz"] = uz_new
-
-        # Prompt or delayed?
-        xi = rng.lcg(particle_container_new) * nu
-        total = nu_p
-        if xi < total:
-            prompt = True
-            spectrum = mcdc_get.neutron_multigroup_data.chi_p_vector(group, mgxs, data)
-        else:
-            prompt = False
-
-            # Determine delayed group, decay constant, and spectrum
-            for j in range(J):
-                total += nu_d[j]
-                if xi < total:
-                    spectrum = mcdc_get.neutron_multigroup_data.chi_d_vector(
-                        j, mgxs, data
-                    )
-                    decay = mcdc_get.neutron_multigroup_data.decay_rate(j, mgxs, data)
-                    break
-
-        # Sample outgoing energy
-        xi = rng.lcg(particle_container_new)
-        tot = 0.0
-        for group_out in range(G):
-            tot += spectrum[group_out]
-            if tot > xi:
-                break
-        particle_new["E"] = _get_group_energy(
-            group_out, particle_container_new, mgxs, simulation, data
+        prompt = sample_fission_neutron(
+            particle_container_new, group, mgxs, simulation, data
         )
-
-        # Sample emission time
-        if not prompt:
-            xi = rng.lcg(particle_container_new)
-            particle_new["t"] -= math.log(xi) / decay
 
         # Eigenvalue mode: bank right away
         if settings["neutron_eigenvalue_mode"]:
@@ -471,6 +520,77 @@ def fission(particle_container, program, data):
                 particle_bank_module.bank_census_particle(
                     particle_container_new, program
                 )
+
+
+# ======================================================================================
+# Reaction products
+# ======================================================================================
+
+
+@njit
+def sample_scattering_neutron(particle_container_new, group, mgxs, simulation, data):
+    """Sample one scattered neutron from its incident direction and energy group."""
+    particle = particle_container_new[0]
+    mu0 = 2.0 * rng.lcg(particle_container_new) - 1.0
+    azi = 2.0 * PI * rng.lcg(particle_container_new)
+    ux, uy, uz = scatter_direction(
+        particle["ux"], particle["uy"], particle["uz"], mu0, azi
+    )
+    particle["ux"] = ux
+    particle["uy"] = uy
+    particle["uz"] = uz
+
+    spectrum = mcdc_get.neutron_multigroup_data.chi_s_vector(group, mgxs, data)
+
+    # Sample outgoing energy
+    xi = rng.lcg(particle_container_new)
+    total = 0.0
+    for group_out in range(mgxs["G"]):
+        total += spectrum[group_out]
+        if total > xi:
+            break
+    particle["E"] = _get_group_energy(
+        group_out, particle_container_new, mgxs, simulation, data
+    )
+
+
+@njit
+def sample_fission_neutron(particle_container_new, group, mgxs, simulation, data):
+    """Sample one fission neutron and return whether its emission is prompt."""
+    particle = particle_container_new[0]
+    ux, uy, uz = sample_isotropic_direction(particle_container_new)
+    particle["ux"] = ux
+    particle["uy"] = uy
+    particle["uz"] = uz
+
+    nu = mcdc_get.neutron_multigroup_data.nu_f(group, mgxs, data)
+    total = mcdc_get.neutron_multigroup_data.nu_p(group, mgxs, data)
+    xi = rng.lcg(particle_container_new) * nu
+    prompt = xi < total or mgxs["J"] == 0
+    if prompt:
+        spectrum = mcdc_get.neutron_multigroup_data.chi_p_vector(group, mgxs, data)
+    else:
+        nu_d = mcdc_get.neutron_multigroup_data.nu_d_vector(group, mgxs, data)
+        for j in range(mgxs["J"]):
+            total += nu_d[j]
+            if xi < total:
+                break
+        spectrum = mcdc_get.neutron_multigroup_data.chi_d_vector(j, mgxs, data)
+        decay = mcdc_get.neutron_multigroup_data.decay_rate(j, mgxs, data)
+
+    # Sample outgoing energy
+    xi = rng.lcg(particle_container_new)
+    total = 0.0
+    for group_out in range(mgxs["G"]):
+        total += spectrum[group_out]
+        if total > xi:
+            break
+    particle["E"] = _get_group_energy(
+        group_out, particle_container_new, mgxs, simulation, data
+    )
+    if not prompt:
+        particle["t"] -= math.log(rng.lcg(particle_container_new)) / decay
+    return prompt
 
 
 # ======================================================================================
