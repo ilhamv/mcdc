@@ -171,6 +171,9 @@ class ForcedDecay(MCDCBase):
     def __call__(self, active: bool = True) -> None:
         """Configure forced decay of delayed neutron precursors.
 
+        Applies to neutron transport with a finite time boundary.
+        Emission times are sampled uniformly over the remaining simulation time.
+
         Parameters
         ----------
         active : bool, optional

@@ -32,6 +32,7 @@ from numpy.typing import NDArray
 ####
 
 from mcdc.constant import (
+    INF,
     PARTICLE_NEUTRON,
     PARTICLE_ELECTRON,
     PARTICLE_PROTON,
@@ -498,12 +499,15 @@ class Simulation(MCDCBase):
             (tally.time[-1] for tally in self.tallies), default=np.inf
         )
         if latest_tally_time < settings.time_boundary:
-            if np.isfinite(settings.time_boundary):
+            if settings.time_boundary != INF:
                 print_msg(
                     f"Adjusted time_boundary from {settings.time_boundary} s to "
                     f"{latest_tally_time} s to match the latest tally time."
                 )
             settings.time_boundary = latest_tally_time
+
+        if self.technique.forced_decay.active and settings.time_boundary == INF:
+            print_error("Forced decay requires a finite simulation time boundary.")
 
         # Complete native-material compositions for the transported particles
         for material in self.materials:
