@@ -5,16 +5,21 @@ from numba import njit
 
 ####
 
+import mcdc.mcdc_get as mcdc_get
 import mcdc.mcdc_get.weight_windows as ww_get
 import mcdc.numba_types as type_
 import mcdc.transport.particle as particle_module
 import mcdc.transport.particle_bank as particle_bank_module
+import mcdc.transport.physics as physics
 import mcdc.transport.rng as rng
 import mcdc.transport.util as util
 
 from mcdc.constant import (
     COINCIDENCE_TOLERANCE_TIME,
     EVENT_TIME_CENSUS,
+    NEUTRON_REACTION_TOTAL,
+    NEUTRON_REACTION_ELASTIC_SCATTERING,
+    NEUTRON_REACTION_FISSION,
     PARTICLE_NEUTRON,
     PARTICLE_ELECTRON,
     PARTICLE_PROTON,
@@ -22,6 +27,163 @@ from mcdc.constant import (
     PARTICLE_POSITRON,
 )
 from mcdc.transport.mesh import get_indices as get_mesh_indices
+
+# ======================================================================================
+# Implicit collision
+# ======================================================================================
+
+
+@njit
+def implicit_collision(particle_container, flight_data_container, program, data):
+    simulation = util.access_simulation(program)
+    settings = simulation["settings"]
+    particle = particle_container[0]
+    particle["alive"] = False
+
+    # Expected neutron production from each reaction
+    nuSigmaS = physics.neutron.multigroup.neutron_production_xs(
+        NEUTRON_REACTION_ELASTIC_SCATTERING, particle_container, simulation, data
+    )
+    nuSigmaF = (
+        physics.neutron.multigroup.neutron_production_xs(
+            NEUTRON_REACTION_FISSION, particle_container, simulation, data
+        )
+        / simulation["k_eff"]
+    )
+    production = nuSigmaS + nuSigmaF
+    if production == 0.0:
+        return
+
+    # Sample the product count and distribute the expected outgoing weight.
+    SigmaT = physics.neutron.multigroup.macro_xs(
+        NEUTRON_REACTION_TOTAL, particle_container, simulation, data
+    )
+    config = simulation["technique"]["implicit_collision"]
+    fixed_multiplicity = config["relative_density_length"] == 0
+
+    if fixed_multiplicity:
+        multiplicity = config["multiplicity"]
+        weight_product = particle["w"] * production / (SigmaT * multiplicity)
+
+    else:
+        initial = flight_data_container[0]["initial_particle"]
+        times = mcdc_get.implicit_collision.time_grid_all(config, data)
+
+        density = mcdc_get.implicit_collision.relative_density_all(config, data)
+        density_start = _get_density(initial["t"], times, density)
+        density_end = _get_density(particle["t"], times, density)
+
+        target = initial["w"] * (density_end / density_start)
+
+        multiplicity = particle["w"] * (production / SigmaT) / target
+        weight_product = target
+
+    N = 1
+    if multiplicity != 1.0:
+        N = int(math.floor(multiplicity + rng.lcg(particle_container)))
+
+    material = simulation["materials"][particle["material_ID"]]
+    mgxs = simulation["neutron_multigroup_data"][material["neutron_multigroup_ID"]]
+    particle_container_new = util.local_array(1, type_.particle_data)
+    particle_new = particle_container_new[0]
+
+    # Each product samples its own reaction.
+    for n in range(N):
+        scatter = nuSigmaF == 0.0 or rng.lcg(particle_container) * production < nuSigmaS
+        particle_module.copy_as_child(particle_container_new, particle_container)
+        particle_new["w"] = weight_product
+
+        prompt = True
+        if scatter:
+            physics.neutron.multigroup.sample_scattering_neutron(
+                particle_container_new, mgxs, simulation, data
+            )
+        else:
+            physics.neutron.multigroup.sample_fission_neutron(
+                particle_container_new, particle_container, mgxs, simulation, data
+            )
+            prompt = particle_new["t"] == particle["t"]
+
+        if not scatter and settings["neutron_eigenvalue_mode"]:
+            particle_bank_module.bank_census_particle(particle_container_new, program)
+            continue
+
+        # Split or roulette the delayed product to the target weight at emission.
+        if not prompt and not fixed_multiplicity:
+            t_emit = particle_new["t"]
+            if t_emit > settings["time_boundary"] - COINCIDENCE_TOLERANCE_TIME:
+                continue
+            density_emit = _get_density(t_emit, times, density)
+            target_emit = weight_product * (density_emit / density_end)
+            survive = split_roulette(particle_container_new, target_emit, program, data)
+            if not survive:
+                continue
+
+        is_last = n == N - 1
+        particle_bank_module.bank_or_revive_particle(
+            particle_container, particle_container_new, is_last, program, data
+        )
+
+
+@njit
+def _get_density(t, times, density):
+    if t <= times[0]:
+        return density[0]
+    if t >= times[-1]:
+        return density[-1]
+    i = util.find_bin(t, times)
+    return util.linear_interpolation(
+        t, times[i], times[i + 1], density[i], density[i + 1]
+    )
+
+
+# ======================================================================================
+# Forced decay
+# ======================================================================================
+
+
+@njit
+def force_decay(particle_container, decay_rate, time_boundary):
+    """Force a finite-rate decay before the time boundary and correct its weight."""
+    particle = particle_container[0]
+    xi = rng.lcg(particle_container)
+
+    # Uniform delayed emission probability on the remaining physical time domain.
+    duration = time_boundary - particle["t"]
+    delay = xi * duration
+    particle["t"] += delay
+
+    # Weight adjustment
+    particle["w"] *= decay_rate * duration * math.exp(-decay_rate * delay)
+
+
+# ======================================================================================
+# Splitting and roulette
+# ======================================================================================
+
+
+@njit
+def split_roulette(particle_container, weight_target, program, data):
+    """Bank extra copies at the target weight and return whether the particle survives."""
+    particle = particle_container[0]
+
+    multiplicity = particle["w"] / weight_target
+    particle["w"] = weight_target
+
+    if multiplicity == 1.0:
+        return True
+
+    N = int(math.floor(multiplicity + rng.lcg(particle_container)))
+    if N == 0:
+        return False
+
+    for _ in range(N - 1):
+        copy_container = util.local_array(1, type_.particle_data)
+        particle_module.copy_as_child(copy_container, particle_container)
+        if not particle_bank_module.bank_if_not_active(copy_container, program, data):
+            particle_bank_module.bank_active_particle(copy_container, program)
+    return True
+
 
 # ======================================================================================
 # Weight Roulette

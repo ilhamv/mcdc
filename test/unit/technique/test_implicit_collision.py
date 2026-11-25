@@ -4,7 +4,7 @@ import pytest
 import mcdc
 import mcdc.numba_types as type_
 from mcdc.constant import PARTICLE_NEUTRON
-from mcdc.transport.physics.neutron import multigroup
+from mcdc.transport.technique import implicit_collision
 
 
 def test_implicit_collision_configuration():
@@ -48,7 +48,7 @@ def test_time_dependent_implicit_collision(prepare_simulation):
     initial = flight[0]["initial_particle"]
     initial["t"] = 0.25  # Clamped density = 3.
     initial["w"] = 3.0  # Target child weight = 3 * (2 / 3) = 2.
-    multigroup.implicit_collision(particles, flight, simulation, data)
+    implicit_collision(particles, flight, simulation, data)
 
     assert particle["alive"]
     assert simulation["bank_active"]["size"][0] == 1

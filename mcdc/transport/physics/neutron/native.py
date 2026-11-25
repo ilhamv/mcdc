@@ -13,8 +13,6 @@ import mcdc.transport.rng as rng
 import mcdc.transport.util as util
 
 from mcdc.constant import (
-    COINCIDENCE_TOLERANCE_TIME,
-    EVENT_TIME_CENSUS,
     DISTRIBUTION_NONE,
     BOLTZMANN_K,
     THERMAL_THRESHOLD_FACTOR,
@@ -707,17 +705,10 @@ def sample_inelastic_scattering(
         # Bank the new particle
         # ==============================================================================
 
-        # Census takes precedence over retaining the last product.
-        if particle["event"] & EVENT_TIME_CENSUS:
-            particle_bank_module.bank_census_particle(particle_container_new, program)
-        elif n == N - 1:
-            particle["alive"] = True
-            particle["ux"] = particle_new["ux"]
-            particle["uy"] = particle_new["uy"]
-            particle["uz"] = particle_new["uz"]
-            particle["E"] = particle_new["E"]
-        else:
-            particle_bank_module.bank_active_particle(particle_container_new, program)
+        is_last = n == N - 1
+        particle_bank_module.bank_or_revive_particle(
+            particle_container, particle_container_new, is_last, program, data
+        )
 
 
 # ======================================================================================
@@ -895,98 +886,17 @@ def sample_fission(
         if settings["neutron_eigenvalue_mode"]:
             particle_bank_module.bank_census_particle(particle_container_new, program)
             continue
-        # Below is only relevant for fixed-source problem
 
-        # Prompt-neutron banking
-        if prompt:
-            # To census bank
-            if particle["event"] & EVENT_TIME_CENSUS:
-                particle_bank_module.bank_census_particle(
-                    particle_container_new, program
-                )
-
-            # To active bank
-            elif n < N - 1:
-                particle_bank_module.bank_active_particle(
-                    particle_container_new, program
-                )
-
-            # Replace current particle
-            else:
-                particle["alive"] = True
-                particle["ux"] = particle_new["ux"]
-                particle["uy"] = particle_new["uy"]
-                particle["uz"] = particle_new["uz"]
-                particle["t"] = particle_new["t"]
-                particle["E"] = particle_new["E"]
-                particle["w"] = particle_new["w"]
-
-        # Delayed-neutron banking
-        else:
-            # Skip if beyond time boundary
-            if (
-                particle_new["t"]
-                > settings["time_boundary"] - COINCIDENCE_TOLERANCE_TIME
-            ):
-                continue
-
+        if not prompt:
             # Move the precursor from the fission time to the emission time.
             motion.move_product(
                 particle_container_new, particle_container, simulation, data
             )
 
-            # Check if go to census or future bank
-            hit_current_census = False
-            hit_future_census = False
-            idx_census = simulation["idx_census"]
-            if settings["N_census"] > 1:
-                if particle_new["t"] > (
-                    mcdc_get.settings.census_time(idx_census, settings, data)
-                    - COINCIDENCE_TOLERANCE_TIME
-                ):
-                    hit_current_census = True
-                    if particle_new["t"] > (
-                        mcdc_get.settings.census_time(idx_census + 1, settings, data)
-                        - COINCIDENCE_TOLERANCE_TIME
-                    ):
-                        hit_future_census = True
-
-            # Not hitting census --> add to active bank
-            if not hit_current_census:
-                # Keep it if it is the last particle
-                if n == N - 1:
-                    particle["alive"] = True
-                    particle["x"] = particle_new["x"]
-                    particle["y"] = particle_new["y"]
-                    particle["z"] = particle_new["z"]
-                    particle["ux"] = particle_new["ux"]
-                    particle["uy"] = particle_new["uy"]
-                    particle["uz"] = particle_new["uz"]
-                    particle["t"] = particle_new["t"]
-                    particle["E"] = particle_new["E"]
-                    particle["w"] = particle_new["w"]
-                    # Relocate the retained delayed child at its emission state.
-                    particle["cell_ID"] = -1
-                    particle["material_ID"] = -1
-                    particle["surface_ID"] = -1
-                else:
-                    particle_bank_module.bank_active_particle(
-                        particle_container_new, program
-                    )
-
-            # Hit future census --> add to future bank
-            elif hit_future_census:
-                # Particle will participate in the future
-                particle_bank_module.bank_future_particle(
-                    particle_container_new, program
-                )
-
-            # Hit current census --> add to census bank
-            else:
-                # Particle will participate after the current census is completed
-                particle_bank_module.bank_census_particle(
-                    particle_container_new, program
-                )
+        is_last = n == N - 1
+        particle_bank_module.bank_or_revive_particle(
+            particle_container, particle_container_new, is_last, program, data
+        )
 
 
 @njit

@@ -5,8 +5,10 @@ from numba import njit
 ####
 
 import mcdc.mcdc_get as mcdc_get
+import mcdc.transport.rng as rng
+import mcdc.transport.technique as technique
 
-from mcdc.constant import LIGHT_SPEED
+from mcdc.constant import INF, LIGHT_SPEED
 from mcdc.transport.util import (
     find_bin,
     find_bin_with_rules,
@@ -23,6 +25,25 @@ def relativistic_energy_from_speed(speed, mass):
     inverse_gamma = math.sqrt(1.0 - beta_squared)
     gamma_minus_one = beta_squared / (inverse_gamma * (1.0 + inverse_gamma))
     return mass * gamma_minus_one
+
+
+# ======================================================================================
+# Delayed emission
+# ======================================================================================
+
+
+@njit
+def apply_delayed_decay_time(particle_container, decay_rate, simulation):
+    """Sample the emission time using forced or analog decay."""
+    settings = simulation["settings"]
+
+    if simulation["technique"]["forced_decay"]["active"]:
+        technique.force_decay(particle_container, decay_rate, settings["time_boundary"])
+        return
+
+    particle = particle_container[0]
+    xi = rng.lcg(particle_container)
+    particle["t"] -= math.log(xi) / decay_rate
 
 
 # ======================================================================================
