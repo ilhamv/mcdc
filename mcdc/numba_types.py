@@ -803,6 +803,7 @@ implicit_capture = into_dtype([
 implicit_collision = into_dtype([
     ('active', bool_),
     ('multiplicity', float64),
+    ('interpolation', int64),
     ('time_grid_offset', int64),
     ('time_grid_length', int64),
     ('relative_density_offset', int64),

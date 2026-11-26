@@ -27,11 +27,14 @@ def test_implicit_collision_configuration():
     assert not technique.implicit_collision.active
 
 
-def test_time_dependent_implicit_collision(prepare_simulation):
+@pytest.mark.parametrize("law, target", [("linear", 2.0), ("log", np.sqrt(3.0))])
+def test_time_dependent_implicit_collision(prepare_simulation, law, target):
     material = mcdc.Material.multigroup(scatter=[[1.0]], capture=[1.0])
 
     def configure(simulation):
-        simulation.technique.implicit_collision([3.0, 1.0], time=[0.5, 2.0])
+        simulation.technique.implicit_collision(
+            [3.0, 1.0], time=[0.5, 2.0], interpolation=law
+        )
 
     container, data = prepare_simulation(
         cells=[mcdc.Cell(fill=material)], configure=configure
@@ -42,18 +45,18 @@ def test_time_dependent_implicit_collision(prepare_simulation):
     particle["material_ID"] = 0
     particle["rng_seed"] = 1
     particle["uz"] = 1.0
-    particle["w"] = 8.0  # Mean neutron yield of 1/2 gives outgoing weight 4.
-    particle["t"] = 1.25  # Interpolated density = 2.
+    particle["w"] = 4.0 * target  # Mean yield of 1/2 gives two target-weight children.
+    particle["t"] = 1.25  # Halfway between the two density samples.
     flight = np.zeros(1, dtype=type_.flight_data)
     initial = flight[0]["initial_particle"]
     initial["t"] = 0.25  # Clamped density = 3.
-    initial["w"] = 3.0  # Target child weight = 3 * (2 / 3) = 2.
+    initial["w"] = 3.0
     implicit_collision(particles, flight, simulation, data)
 
     assert particle["alive"]
     assert simulation["bank_active"]["size"][0] == 1
     for child in (particle, simulation["bank_active"]["particle_data"][0]):
-        assert child["w"] == 2.0
+        assert child["w"] == pytest.approx(target)
 
 
 def test_relative_density_flight_starts_after_surface_crossing(prepare_simulation):

@@ -5,6 +5,8 @@ import numpy as np
 
 from mcdc.constant import (
     INF,
+    INTERPOLATION_LINEAR,
+    INTERPOLATION_SEMILOGY,
     PI,
     PARTICLE_TYPE_BY_NAME,
 )
@@ -66,12 +68,14 @@ class ImplicitCollision(MCDCBase):
 
     active: bool
     multiplicity: float
+    interpolation: int
     time_grid: NDArray[np.float64]
     relative_density: NDArray[np.float64]
 
     def __init__(self) -> None:
         self.active = False
         self.multiplicity = 1.0
+        self.interpolation = INTERPOLATION_LINEAR
         self.time_grid = np.empty(0)
         self.relative_density = np.empty(0)
 
@@ -81,6 +85,7 @@ class ImplicitCollision(MCDCBase):
         time: NDArray[np.float64] | None = None,
         *,
         relative_density: NDArray[np.float64] | None = None,
+        interpolation: str = "linear",
         active: bool = True,
     ) -> None:
         """Configure fixed or time-dependent implicit collision.
@@ -97,6 +102,8 @@ class ImplicitCollision(MCDCBase):
             normalization.
         time : array, optional
             Strictly increasing times in seconds, one per density value.
+        interpolation : {"linear", "log"}, optional
+            Interpolate density (default) or its logarithm linearly in time.
         active : bool, optional
             Whether implicit collision is enabled.
 
@@ -110,6 +117,8 @@ class ImplicitCollision(MCDCBase):
             print_error("Specify either multiplicity or relative_density.")
         if isinstance(multiplicity, (list, tuple, np.ndarray)):
             relative_density, multiplicity = multiplicity, None
+        if interpolation not in ("linear", "log"):
+            print_error("Implicit collision interpolation must be 'linear' or 'log'.")
 
         if relative_density is None:
             if time is not None:
@@ -148,6 +157,11 @@ class ImplicitCollision(MCDCBase):
 
         self.active = active
         self.multiplicity = float(multiplicity)
+        self.interpolation = (
+            INTERPOLATION_LINEAR
+            if interpolation == "linear"
+            else INTERPOLATION_SEMILOGY
+        )
         self.time_grid = time_grid
         self.relative_density = values
 

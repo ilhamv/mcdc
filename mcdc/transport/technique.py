@@ -70,8 +70,9 @@ def implicit_collision(particle_container, flight_data_container, program, data)
         times = mcdc_get.implicit_collision.time_grid_all(config, data)
 
         density = mcdc_get.implicit_collision.relative_density_all(config, data)
-        density_start = _get_density(initial["t"], times, density)
-        density_end = _get_density(particle["t"], times, density)
+        law = config["interpolation"]
+        density_start = _get_density(initial["t"], times, density, law)
+        density_end = _get_density(particle["t"], times, density, law)
 
         target = initial["w"] * (density_end / density_start)
 
@@ -113,7 +114,7 @@ def implicit_collision(particle_container, flight_data_container, program, data)
             t_emit = particle_new["t"]
             if t_emit > settings["time_boundary"] - COINCIDENCE_TOLERANCE_TIME:
                 continue
-            density_emit = _get_density(t_emit, times, density)
+            density_emit = _get_density(t_emit, times, density, law)
             target_emit = weight_product * (density_emit / density_end)
             survive = split_roulette(particle_container_new, target_emit, program, data)
             if not survive:
@@ -126,15 +127,13 @@ def implicit_collision(particle_container, flight_data_container, program, data)
 
 
 @njit
-def _get_density(t, times, density):
+def _get_density(t, times, density, law):
     if t <= times[0]:
         return density[0]
     if t >= times[-1]:
         return density[-1]
     i = util.find_bin(t, times)
-    return util.linear_interpolation(
-        t, times[i], times[i + 1], density[i], density[i + 1]
-    )
+    return util.interpolate(t, times[i], times[i + 1], density[i], density[i + 1], law)
 
 
 # ======================================================================================
