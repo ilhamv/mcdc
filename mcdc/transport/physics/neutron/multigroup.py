@@ -10,7 +10,6 @@ import mcdc.transport.geometry.motion as motion
 import mcdc.transport.particle as particle_module
 import mcdc.transport.particle_bank as particle_bank_module
 import mcdc.transport.rng as rng
-import mcdc.transport.technique as technique
 import mcdc.transport.util as util
 
 from mcdc.constant import (
@@ -173,13 +172,6 @@ def collision(
     simulation = util.access_simulation(program)
     particle = particle_container[0]
 
-    # Implicit collision
-    if simulation["technique"]["implicit_collision"]["active"]:
-        technique.implicit_collision(
-            particle_container, flight_data_container, program, data
-        )
-        return
-
     # Get the reaction cross-sections
     SigmaT = macro_xs(NEUTRON_REACTION_TOTAL, particle_container, simulation, data)
     SigmaS = macro_xs(
@@ -324,6 +316,38 @@ def fission(particle_container, program, data):
 # ======================================================================================
 # Reaction products
 # ======================================================================================
+
+
+@njit
+def implicit_collision_xs(particle_container, simulation, data):
+    """Return total, scattering production, and fission production."""
+    SigmaT = macro_xs(NEUTRON_REACTION_TOTAL, particle_container, simulation, data)
+    nuSigmaS = neutron_production_xs(
+        NEUTRON_REACTION_ELASTIC_SCATTERING, particle_container, simulation, data
+    )
+    nuSigmaF = (
+        neutron_production_xs(
+            NEUTRON_REACTION_FISSION, particle_container, simulation, data
+        )
+        / simulation["k_eff"]
+    )
+    return SigmaT, nuSigmaS, nuSigmaF
+
+
+@njit
+def sample_implicit_neutron(
+    neutron_container, incident_container, threshold, nuSigmaS, simulation, data
+):
+    """Sample one neutron by production and return whether it came from fission."""
+    material = simulation["materials"][incident_container[0]["material_ID"]]
+    mgxs = simulation["neutron_multigroup_data"][material["neutron_multigroup_ID"]]
+    if threshold < nuSigmaS:
+        sample_scattering_neutron(neutron_container, mgxs, simulation, data)
+        return False
+    sample_fission_neutron(
+        neutron_container, incident_container, mgxs, simulation, data
+    )
+    return True
 
 
 @njit

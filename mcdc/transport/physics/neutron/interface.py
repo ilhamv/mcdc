@@ -4,6 +4,7 @@ from numba import njit
 
 import mcdc.transport.physics.neutron.multigroup as multigroup
 import mcdc.transport.physics.neutron.native as native
+import mcdc.transport.technique as technique
 import mcdc.transport.util as util
 
 # ======================================================================================
@@ -58,6 +59,16 @@ def collision(
     data,
 ):
     simulation = util.access_simulation(program)
+
+    if simulation["technique"]["implicit_collision"]["active"]:
+        technique.implicit_collision(
+            particle_container,
+            flight_data_container,
+            interaction_data_container,
+            program,
+            data,
+        )
+        return
 
     if multigroup.applicable(particle_container, simulation, data):
         multigroup.collision(

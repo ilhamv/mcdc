@@ -1,4 +1,3 @@
-import numpy as np
 import math
 
 from numba import njit
@@ -17,9 +16,6 @@ import mcdc.transport.util as util
 from mcdc.constant import (
     COINCIDENCE_TOLERANCE_TIME,
     EVENT_TIME_CENSUS,
-    NEUTRON_REACTION_TOTAL,
-    NEUTRON_REACTION_ELASTIC_SCATTERING,
-    NEUTRON_REACTION_FISSION,
     PARTICLE_NEUTRON,
     PARTICLE_ELECTRON,
     PARTICLE_PROTON,
@@ -34,30 +30,41 @@ from mcdc.transport.mesh import get_indices as get_mesh_indices
 
 
 @njit
-def implicit_collision(particle_container, flight_data_container, program, data):
+def implicit_collision(
+    particle_container, flight_data_container, interaction_data_container, program, data
+):
     simulation = util.access_simulation(program)
     settings = simulation["settings"]
     particle = particle_container[0]
     particle["alive"] = False
 
     # Expected neutron production from each reaction
-    nuSigmaS = physics.neutron.multigroup.neutron_production_xs(
-        NEUTRON_REACTION_ELASTIC_SCATTERING, particle_container, simulation, data
+    multigroup = physics.neutron.multigroup.applicable(
+        particle_container, simulation, data
     )
-    nuSigmaF = (
-        physics.neutron.multigroup.neutron_production_xs(
-            NEUTRON_REACTION_FISSION, particle_container, simulation, data
+    if multigroup:
+        SigmaT, nuSigmaS, nuSigmaF = physics.neutron.multigroup.implicit_collision_xs(
+            particle_container, simulation, data
         )
-        / simulation["k_eff"]
-    )
+    else:
+        SigmaT, nuSigmaS, nuSigmaF = physics.neutron.native.implicit_collision_xs(
+            particle_container, simulation, data
+        )
+
+        # Score incident energy and mean reaction Q even if no neutrons are emitted.
+        if SigmaT > 0.0:
+            q_value = physics.neutron.native.implicit_collision_q_value(
+                particle_container, SigmaT, simulation, data
+            )
+            interaction_data_container[0]["energy_deposition"] = particle["w"] * (
+                particle["E"] + q_value
+            )
+
     production = nuSigmaS + nuSigmaF
     if production == 0.0:
         return
 
     # Sample the product count and distribute the expected outgoing weight.
-    SigmaT = physics.neutron.multigroup.macro_xs(
-        NEUTRON_REACTION_TOTAL, particle_container, simulation, data
-    )
     config = simulation["technique"]["implicit_collision"]
     fixed_multiplicity = config["relative_density_length"] == 0
 
@@ -83,33 +90,46 @@ def implicit_collision(particle_container, flight_data_container, program, data)
     if multiplicity != 1.0:
         N = int(math.floor(multiplicity + rng.lcg(particle_container)))
 
-    material = simulation["materials"][particle["material_ID"]]
-    mgxs = simulation["neutron_multigroup_data"][material["neutron_multigroup_ID"]]
     particle_container_new = util.local_array(1, type_.particle_data)
     particle_new = particle_container_new[0]
 
     # Each product samples its own reaction.
     for n in range(N):
-        scatter = nuSigmaF == 0.0 or rng.lcg(particle_container) * production < nuSigmaS
         particle_module.copy_as_child(particle_container_new, particle_container)
         particle_new["w"] = weight_product
 
-        prompt = True
-        if scatter:
-            physics.neutron.multigroup.sample_scattering_neutron(
-                particle_container_new, mgxs, simulation, data
+        threshold = rng.lcg(particle_container) * production
+
+        if multigroup:
+            fission = physics.neutron.multigroup.sample_implicit_neutron(
+                particle_container_new,
+                particle_container,
+                threshold,
+                nuSigmaS,
+                simulation,
+                data,
             )
         else:
-            physics.neutron.multigroup.sample_fission_neutron(
-                particle_container_new, particle_container, mgxs, simulation, data
+            fission = physics.neutron.native.sample_implicit_neutron(
+                particle_container_new,
+                particle_container,
+                threshold,
+                nuSigmaS,
+                simulation,
+                data,
             )
-            prompt = particle_new["t"] == particle["t"]
 
-        if not scatter and settings["neutron_eigenvalue_mode"]:
+            # Subtract energy taken by the product
+            interaction_data_container[0]["energy_deposition"] -= (
+                particle_new["E"] * weight_product
+            )
+
+        if fission and settings["neutron_eigenvalue_mode"]:
             particle_bank_module.bank_census_particle(particle_container_new, program)
             continue
 
         # Split or roulette the delayed product to the target weight at emission.
+        prompt = particle_new["t"] == particle["t"]
         if not prompt and not fixed_multiplicity:
             t_emit = particle_new["t"]
             if t_emit > settings["time_boundary"] - COINCIDENCE_TOLERANCE_TIME:

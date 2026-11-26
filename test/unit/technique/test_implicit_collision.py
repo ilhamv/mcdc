@@ -51,7 +51,8 @@ def test_time_dependent_implicit_collision(prepare_simulation, law, target):
     initial = flight[0]["initial_particle"]
     initial["t"] = 0.25  # Clamped density = 3.
     initial["w"] = 3.0
-    implicit_collision(particles, flight, simulation, data)
+    interaction = np.zeros(1, dtype=type_.interaction_data)
+    implicit_collision(particles, flight, interaction, simulation, data)
 
     assert particle["alive"]
     assert simulation["bank_active"]["size"][0] == 1
