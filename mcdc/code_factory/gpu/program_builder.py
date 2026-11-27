@@ -31,6 +31,7 @@ def adapt_transport_functions():
         gpu_transport.particle_bank.report_empty_bank
     )
     transport.util.atomic_add = gpu_transport.util.atomic_add
+    transport.util.atomic_max = gpu_transport.util.atomic_max
     transport.util.local_array = gpu_transport.util.local_array
 
 

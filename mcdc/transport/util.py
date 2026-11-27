@@ -265,6 +265,13 @@ def atomic_add(array, idx, value):
 
 
 @njit
+def atomic_max(array, idx, value):
+    result = array[idx]
+    array[idx] = max(result, value)
+    return result
+
+
+@njit
 def local_array(shape, dtype):
     return np.zeros(shape, dtype=dtype)
 

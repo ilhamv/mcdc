@@ -468,18 +468,18 @@ def tracklength(particle_container, distance, tally, simulation, data):
 
 @njit
 def eigenvalue_tally(particle_container, distance, simulation, data):
+    # Weighted track length
     particle = particle_container[0]
     flux = distance * particle["w"]
 
-    # Get nu-fission
+    # Fission production for the cycle eigenvalue
     nuSigmaF = physics.neutron_production_xs(
         NEUTRON_REACTION_FISSION, particle_container, simulation, data
     )
 
-    # Fission production (needed even during inactive cycle)
     util.atomic_add(simulation["eigenvalue_tally_nuSigmaF"], 0, flux * nuSigmaF)
 
-    # Done, if inactive
+    # Score densities during active cycles
     if not simulation["cycle_active"]:
         return
 
@@ -492,39 +492,96 @@ def eigenvalue_tally(particle_container, distance, simulation, data):
     util.atomic_add(simulation["eigenvalue_tally_n"], 0, n_density)
 
     # Maximum neutron density
-    if simulation["n_max"] < n_density:
-        simulation["n_max"] = n_density
+    util.atomic_max(simulation["eigenvalue_tally_n_max"], 0, n_density)
 
     # ==================================================================================
-    # TODO: Delayed neutron precursor density
+    # Delayed neutron production and precursor density
     # ==================================================================================
-    return
-    # Get the decay-wighted multiplicity
-    total = 0.0
-    if simulation["settings"]["neutron_multigroup_mode"]:
-        g = particle["g"]
-        for j in range(J):
-            nu_d = mcdc_get.material.mgxs_nu_d(g, j, material, data)
-            decay = mcdc_get.material.mgxs_decay_rate(j, material, data)
-            total += nu_d / decay
+
+    if nuSigmaF == 0.0:
+        return
+
+    # Calculate the precursor density for this flight
+    material = simulation["materials"][particle["material_ID"]]
+    E = particle["E"]
+    if physics.neutron.multigroup.applicable(particle_container, simulation, data):
+        C_density = _calculate_precursor_density_multigroup(
+            flux, E, material, simulation, data
+        )
     else:
-        E = P["E"]
-        for i in range(material["N_nuclide"]):
-            ID_nuclide = material["nuclide_IDs"][i]
-            nuclide = simulation["nuclides"][ID_nuclide]
-            if not nuclide["fissionable"]:
-                continue
-            for j in range(J):
-                nu_d = get_nu_group(NU_FISSION_DELAYED, nuclide, E, j)
-                decay = nuclide["ce_decay"][j]
-                total += nu_d / decay
+        C_density = _calculate_precursor_density(flux, E, material, simulation, data)
 
-    SigmaF = physics.macro_xs(
-        NEUTRON_REACTION_FISSION, particle_container, simulation, data
-    )
-    C_density = flux * total * SigmaF / simulation["k_eff"]
+    # Total precursor density for this flight
     util.atomic_add(simulation["eigenvalue_tally_C"], 0, C_density)
+    util.atomic_max(simulation["eigenvalue_tally_C_max"], 0, C_density)
 
-    # Maximum precursor density
-    if simulation["C_max"] < C_density:
-        simulation["C_max"] = C_density
+
+@njit
+def _calculate_precursor_density(flux, E, material, simulation, data):
+    """Score native precursor groups and return their total density contribution."""
+    C_density = 0.0
+    for i in range(material["N_nuclide"]):
+        nuclide_ID = mcdc_get.material.nuclide_IDs(i, material, data)
+        nuclide = simulation["nuclides"][nuclide_ID]
+        density = mcdc_get.material.nuclide_densities(i, material, data)
+
+        # Select fission reactions that produce delayed neutrons
+        for r in range(nuclide["N_neutron_fission_reaction"]):
+            reaction_ID = mcdc_get.nuclide.neutron_fission_reaction_IDs(
+                r, nuclide, data
+            )
+            reaction = simulation["neutron_reactions"][reaction_ID]
+            fission = simulation["neutron_fission_reactions"][reaction["sub_ID"]]
+            if fission["N_delayed_precursor"] == 0:
+                continue
+
+            # Delayed production from this reaction
+            xs = physics.neutron.native.reaction_micro_xs(E, reaction, nuclide, data)
+            nu_d = physics.neutron.native.neutron_fission_delayed_multiplicity(
+                E, fission, simulation, data
+            )
+            production = flux * density * xs * nu_d
+
+            # Partition production using the reaction’s group fractions
+            for j in range(fission["N_delayed_precursor"]):
+                fraction = mcdc_get.neutron_fission_reaction.delayed_fractions(
+                    j, fission, data
+                )
+                decay = mcdc_get.neutron_fission_reaction.delayed_decay_rates(
+                    j, fission, data
+                )
+                C_density += _score_precursor_group(
+                    j, production * fraction, decay, simulation, data
+                )
+    return C_density
+
+
+@njit
+def _calculate_precursor_density_multigroup(flux, E, material, simulation, data):
+    """Score multigroup precursor groups and return their total density contribution."""
+    # Fission contribution from the incident energy group
+    mgxs = simulation["neutron_multigroup_data"][material["neutron_multigroup_ID"]]
+    group = physics.neutron.multigroup._get_energy_group(E, mgxs, simulation, data)
+    fissions = flux * mcdc_get.neutron_multigroup_data.fission(group, mgxs, data)
+
+    # Score production and density by precursor group
+    C_density = 0.0
+    for j in range(mgxs["J"]):
+        production = fissions * mcdc_get.neutron_multigroup_data.nu_d(
+            group, j, mgxs, data
+        )
+        decay = mcdc_get.neutron_multigroup_data.decay_rate(j, mgxs, data)
+        C_density += _score_precursor_group(j, production, decay, simulation, data)
+    return C_density
+
+
+@njit
+def _score_precursor_group(j, production, decay, simulation, data):
+    C = production / decay
+
+    # Score the group at its index in the global tallies
+    util.atomic_add(
+        data, simulation["eigenvalue_tally_nuSigmaF_delayed_offset"] + j, production
+    )
+    util.atomic_add(data, simulation["eigenvalue_tally_C_group_offset"] + j, C)
+    return C
