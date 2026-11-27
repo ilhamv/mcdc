@@ -113,7 +113,8 @@ def test_collision_captures_energy_before_electron_cutoff(
     particle["alive"] = True
 
     simulation["cycle_active"] = True
-    collide(particle_container, simulation, data)
+    flight_data_container = np.zeros(1, dtype=type_.flight_data)
+    collide(particle_container, flight_data_container, simulation, data)
 
     assert particle["E"] == 0.0
     assert not particle["alive"]

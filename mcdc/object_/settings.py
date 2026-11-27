@@ -144,9 +144,9 @@ class Settings(MCDCBase):
     source_file_name: str = ""
 
     # Misc.
-    #: Time in seconds at which particle transport terminates. The default is
-    #: infinity.
-    time_boundary: float = np.inf
+    #: Time in seconds at which particle transport terminates. Defaults to MC/DC's
+    #: infinity sentinel, ``INF`` (1e10 s).
+    time_boundary: float = INF
     #: Base name used for the HDF5 output file. The default is ``"output"``.
     output_name: str = "output"
     #: Whether to display transport progress. The default is ``True``.

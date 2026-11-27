@@ -205,6 +205,7 @@ BLOCK_COUNT = 0
 def build_gpu_program(data_size):
     import harmonize
     import mcdc.numba_types as type_
+    import mcdc.transport.particle as particle_module
     import mcdc.transport.util as util
     from mcdc.transport.simulation import generate_source_particle, step_particle
 
@@ -265,9 +266,7 @@ def build_gpu_program(data_size):
         particle_container[0] = particle_input
         particle = particle_container[0]
         particle["alive"] = True
-        particle["material_ID"] = -1
-        particle["cell_ID"] = -1
-        particle["surface_ID"] = -1
+        particle_module.reset_IDs(particle_container)
         particle["event"] = -1
         particle["fresh"] = False
         step_particle(particle_container, program, data)

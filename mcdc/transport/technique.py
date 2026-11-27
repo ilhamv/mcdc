@@ -1,14 +1,15 @@
-import numpy as np
 import math
 
 from numba import njit
 
 ####
 
+import mcdc.mcdc_get as mcdc_get
 import mcdc.mcdc_get.weight_windows as ww_get
 import mcdc.numba_types as type_
 import mcdc.transport.particle as particle_module
 import mcdc.transport.particle_bank as particle_bank_module
+import mcdc.transport.physics as physics
 import mcdc.transport.rng as rng
 import mcdc.transport.util as util
 
@@ -22,6 +23,186 @@ from mcdc.constant import (
     PARTICLE_POSITRON,
 )
 from mcdc.transport.mesh import get_indices as get_mesh_indices
+
+# ======================================================================================
+# Implicit collision
+# ======================================================================================
+
+
+@njit
+def implicit_collision(
+    particle_container, flight_data_container, interaction_data_container, program, data
+):
+    simulation = util.access_simulation(program)
+    settings = simulation["settings"]
+    particle = particle_container[0]
+    particle["alive"] = False
+
+    # Expected neutron production from each reaction
+    multigroup = physics.neutron.multigroup.applicable(
+        particle_container, simulation, data
+    )
+    if multigroup:
+        SigmaT, nuSigmaS, nuSigmaF = physics.neutron.multigroup.implicit_collision_xs(
+            particle_container, simulation, data
+        )
+    else:
+        SigmaT, nuSigmaS, nuSigmaF = physics.neutron.native.implicit_collision_xs(
+            particle_container, simulation, data
+        )
+
+        # Score incident energy and mean reaction Q even if no neutrons are emitted.
+        if SigmaT > 0.0:
+            q_value = physics.neutron.native.implicit_collision_q_value(
+                particle_container, SigmaT, simulation, data
+            )
+            interaction_data_container[0]["energy_deposition"] = particle["w"] * (
+                particle["E"] + q_value
+            )
+
+    production = nuSigmaS + nuSigmaF
+    if production == 0.0:
+        return
+
+    # Sample the product count and distribute the expected outgoing weight.
+    config = simulation["technique"]["implicit_collision"]
+    fixed_multiplicity = config["relative_density_length"] == 0
+
+    if fixed_multiplicity:
+        multiplicity = config["multiplicity"]
+        weight_product = particle["w"] * production / (SigmaT * multiplicity)
+
+    else:
+        initial = flight_data_container[0]["initial_particle"]
+        times = mcdc_get.implicit_collision.time_grid_all(config, data)
+
+        density = mcdc_get.implicit_collision.relative_density_all(config, data)
+        law = config["interpolation"]
+        density_start = _get_density(initial["t"], times, density, law)
+        density_end = _get_density(particle["t"], times, density, law)
+
+        target = initial["w"] * (density_end / density_start)
+
+        multiplicity = particle["w"] * (production / SigmaT) / target
+        weight_product = target
+
+    N = 1
+    if multiplicity != 1.0:
+        N = int(math.floor(multiplicity + rng.lcg(particle_container)))
+
+    particle_container_new = util.local_array(1, type_.particle_data)
+    particle_new = particle_container_new[0]
+
+    # Each product samples its own reaction.
+    for n in range(N):
+        particle_module.copy_as_child(particle_container_new, particle_container)
+        particle_new["w"] = weight_product
+
+        threshold = rng.lcg(particle_container) * production
+
+        if multigroup:
+            fission = physics.neutron.multigroup.sample_implicit_neutron(
+                particle_container_new,
+                particle_container,
+                threshold,
+                nuSigmaS,
+                simulation,
+                data,
+            )
+        else:
+            fission = physics.neutron.native.sample_implicit_neutron(
+                particle_container_new,
+                particle_container,
+                threshold,
+                nuSigmaS,
+                simulation,
+                data,
+            )
+
+            # Subtract energy taken by the product
+            interaction_data_container[0]["energy_deposition"] -= (
+                particle_new["E"] * weight_product
+            )
+
+        if fission and settings["neutron_eigenvalue_mode"]:
+            particle_bank_module.bank_census_particle(particle_container_new, program)
+            continue
+
+        # Split or roulette the delayed product to the target weight at emission.
+        prompt = particle_new["t"] == particle["t"]
+        if not prompt and not fixed_multiplicity:
+            t_emit = particle_new["t"]
+            if t_emit > settings["time_boundary"] - COINCIDENCE_TOLERANCE_TIME:
+                continue
+            density_emit = _get_density(t_emit, times, density, law)
+            target_emit = weight_product * (density_emit / density_end)
+            survive = split_roulette(particle_container_new, target_emit, program, data)
+            if not survive:
+                continue
+
+        is_last = n == N - 1
+        particle_bank_module.bank_or_revive_particle(
+            particle_container, particle_container_new, is_last, program, data
+        )
+
+
+@njit
+def _get_density(t, times, density, law):
+    if t <= times[0]:
+        return density[0]
+    if t >= times[-1]:
+        return density[-1]
+    i = util.find_bin(t, times)
+    return util.interpolate(t, times[i], times[i + 1], density[i], density[i + 1], law)
+
+
+# ======================================================================================
+# Forced decay
+# ======================================================================================
+
+
+@njit
+def force_decay(particle_container, decay_rate, time_boundary):
+    """Force a finite-rate decay before the time boundary and correct its weight."""
+    particle = particle_container[0]
+    xi = rng.lcg(particle_container)
+
+    # Uniform delayed emission probability on the remaining physical time domain.
+    duration = time_boundary - particle["t"]
+    delay = xi * duration
+    particle["t"] += delay
+
+    # Weight adjustment
+    particle["w"] *= decay_rate * duration * math.exp(-decay_rate * delay)
+
+
+# ======================================================================================
+# Splitting and roulette
+# ======================================================================================
+
+
+@njit
+def split_roulette(particle_container, weight_target, program, data):
+    """Bank extra copies at the target weight and return whether the particle survives."""
+    particle = particle_container[0]
+
+    multiplicity = particle["w"] / weight_target
+    particle["w"] = weight_target
+
+    if multiplicity == 1.0:
+        return True
+
+    N = int(math.floor(multiplicity + rng.lcg(particle_container)))
+    if N == 0:
+        return False
+
+    for _ in range(N - 1):
+        copy_container = util.local_array(1, type_.particle_data)
+        particle_module.copy_as_child(copy_container, particle_container)
+        if not particle_bank_module.bank_if_not_active(copy_container, program, data):
+            particle_bank_module.bank_active_particle(copy_container, program)
+    return True
+
 
 # ======================================================================================
 # Weight Roulette

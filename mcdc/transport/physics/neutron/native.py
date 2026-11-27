@@ -13,8 +13,6 @@ import mcdc.transport.rng as rng
 import mcdc.transport.util as util
 
 from mcdc.constant import (
-    COINCIDENCE_TOLERANCE_TIME,
-    EVENT_TIME_CENSUS,
     DISTRIBUTION_NONE,
     BOLTZMANN_K,
     THERMAL_THRESHOLD_FACTOR,
@@ -38,6 +36,7 @@ from mcdc.transport.distribution import (
     sample_isotropic_direction,
 )
 from mcdc.transport.physics.util import (
+    apply_delayed_decay_time,
     evaluate_neutron_xs_energy_grid,
     evaluate_reaction_xs,
     interpolate_xs,
@@ -467,7 +466,16 @@ def sample_elastic_scattering(
     reaction, particle_container, interaction_data_container, nuclide, simulation, data
 ):
     particle = particle_container[0]
-    interaction_data = interaction_data_container[0]
+    E = particle["E"]
+    sample_elastic_neutron(reaction, particle_container, nuclide, simulation, data)
+    interaction_data_container[0]["energy_deposition"] += (
+        E - particle["E"]
+    ) * particle["w"]
+
+
+@njit
+def sample_elastic_neutron(reaction, particle_container, nuclide, simulation, data):
+    particle = particle_container[0]
     sub_ID = reaction["sub_ID"]
     elastic_scattering = simulation["neutron_elastic_scattering_reactions"][sub_ID]
 
@@ -476,10 +484,6 @@ def sample_elastic_scattering(
     ux = particle["ux"]
     uy = particle["uy"]
     uz = particle["uz"]
-
-    # Energy deposition
-    interaction_data["energy_deposition"] += E * particle["w"]
-    # Note: Q-value is zero in elastic scattering
 
     # Sample nucleus thermal velocity
     A = nuclide["atomic_weight_ratio"]
@@ -551,9 +555,6 @@ def sample_elastic_scattering(
     particle["uy"] = vy / speed
     particle["uz"] = vz / speed
 
-    # Subtract outgoing energy from energy deposition
-    interaction_data["energy_deposition"] -= particle["E"] * particle["w"]
-
 
 @njit
 def sample_nucleus_velocity(A, temperature, particle_container):
@@ -621,9 +622,6 @@ def sample_inelastic_scattering(
 
     # Particle attributes
     E = particle["E"]
-    ux = particle["ux"]
-    uy = particle["uy"]
-    uz = particle["uz"]
 
     # Kill the current particle
     particle["alive"] = False
@@ -644,61 +642,14 @@ def sample_inelastic_scattering(
         # Set default attributes
         particle_module.copy_as_child(particle_container_new, particle_container)
 
-        # ==============================================================================
-        # Sample angle (if not energy-correlated)
-        # ==============================================================================
-
-        mu_distribution = simulation["distributions"][inelastic_scattering["mu_ID"]]
-        if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
-            mu = sample_distribution(
-                E, mu_distribution, particle_container_new, simulation, data
-            )
-
-        # ==============================================================================
-        # Sample energy (also angle if correlated)
-        # ==============================================================================
-
-        spectrum = simulation["distributions"][inelastic_scattering["spectrum_ID"]]
-
-        # Sample energy
-        if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
-            E_new = sample_distribution_with_scale(
-                E, spectrum, particle_container_new, simulation, data
-            )
-        else:
-            E_new, mu = sample_correlated_distribution_with_scale(
-                E,
-                spectrum,
-                particle_container_new,
-                simulation,
-                data,
-                nuclide["atomic_weight_ratio"],
-                reaction["q_value"],
-            )
-
-        # ==============================================================================
-        # Frame transformation
-        # ==============================================================================
-
-        reference_frame = reaction["reference_frame"]
-        if reference_frame == REFERENCE_FRAME_COM:
-            A = nuclide["atomic_weight_ratio"]
-            mu_COM = mu
-            E_COM = E_new
-
-            E_new = (
-                E_COM + (E + 2 * mu_COM * (A + 1) * math.sqrt(E * E_COM)) / (A + 1) ** 2
-            )
-            mu = mu_COM * math.sqrt(E_COM / E_new) + math.sqrt(E / E_new) / (A + 1)
-
-        azi = 2.0 * PI * rng.lcg(particle_container_new)
-        ux_new, uy_new, uz_new = scatter_direction(ux, uy, uz, mu, azi)
-
-        # Now the secondary angle and energy are finalized
-        particle_new["ux"] = ux_new
-        particle_new["uy"] = uy_new
-        particle_new["uz"] = uz_new
-        particle_new["E"] = E_new
+        sample_outgoing_neutron(
+            particle_container_new,
+            reaction,
+            inelastic_scattering,
+            nuclide,
+            simulation,
+            data,
+        )
 
         # Subtract outgoing energy from energy deposition
         interaction_data["energy_deposition"] -= particle_new["E"] * particle_new["w"]
@@ -707,17 +658,74 @@ def sample_inelastic_scattering(
         # Bank the new particle
         # ==============================================================================
 
-        # Census takes precedence over retaining the last product.
-        if particle["event"] & EVENT_TIME_CENSUS:
-            particle_bank_module.bank_census_particle(particle_container_new, program)
-        elif n == N - 1:
-            particle["alive"] = True
-            particle["ux"] = particle_new["ux"]
-            particle["uy"] = particle_new["uy"]
-            particle["uz"] = particle_new["uz"]
-            particle["E"] = particle_new["E"]
-        else:
-            particle_bank_module.bank_active_particle(particle_container_new, program)
+        is_last = n == N - 1
+        particle_bank_module.bank_or_revive_particle(
+            particle_container, particle_container_new, is_last, program, data
+        )
+
+
+@njit
+def sample_outgoing_neutron(
+    particle_container_new, reaction, channel, nuclide, simulation, data
+):
+    """Sample the outgoing energy and direction for inelastic scattering or prompt fission."""
+    particle_new = particle_container_new[0]
+    E = particle_new["E"]
+    ux, uy, uz = particle_new["ux"], particle_new["uy"], particle_new["uz"]
+
+    # ==============================================================================
+    # Sample angle (if not energy-correlated)
+    # ==============================================================================
+
+    mu_distribution = simulation["distributions"][channel["mu_ID"]]
+    if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
+        mu = sample_distribution(
+            E, mu_distribution, particle_container_new, simulation, data
+        )
+
+    # ==============================================================================
+    # Sample energy (also angle if correlated)
+    # ==============================================================================
+
+    spectrum = simulation["distributions"][channel["spectrum_ID"]]
+
+    # Sample energy
+    if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
+        E_new = sample_distribution_with_scale(
+            E, spectrum, particle_container_new, simulation, data
+        )
+    else:
+        E_new, mu = sample_correlated_distribution_with_scale(
+            E,
+            spectrum,
+            particle_container_new,
+            simulation,
+            data,
+            nuclide["atomic_weight_ratio"],
+            reaction["q_value"],
+        )
+
+    # ==============================================================================
+    # Frame transformation
+    # ==============================================================================
+
+    reference_frame = reaction["reference_frame"]
+    if reference_frame == REFERENCE_FRAME_COM:
+        A = nuclide["atomic_weight_ratio"]
+        mu_COM = mu
+        E_COM = E_new
+
+        E_new = E_COM + (E + 2 * mu_COM * (A + 1) * math.sqrt(E * E_COM)) / (A + 1) ** 2
+        mu = mu_COM * math.sqrt(E_COM / E_new) + math.sqrt(E / E_new) / (A + 1)
+
+    azi = 2.0 * PI * rng.lcg(particle_container_new)
+    ux_new, uy_new, uz_new = scatter_direction(ux, uy, uz, mu, azi)
+
+    # Now the secondary angle and energy are finalized
+    particle_new["ux"] = ux_new
+    particle_new["uy"] = uy_new
+    particle_new["uz"] = uz_new
+    particle_new["E"] = E_new
 
 
 # ======================================================================================
@@ -740,9 +748,6 @@ def sample_fission(
 
     # Particle properties
     E = particle["E"]
-    ux = particle["ux"]
-    uy = particle["uy"]
-    uz = particle["uz"]
 
     # Kill the current particle
     particle["alive"] = False
@@ -761,7 +766,6 @@ def sample_fission(
         weight_product = weight_target
 
     # Fission yields
-    N_delayed = fission["N_delayed_precursor"]
     nu_p = neutron_fission_prompt_multiplicity(E, fission, simulation, data)
     nu_d = neutron_fission_delayed_multiplicity(E, fission, simulation, data)
     nu = nu_p + nu_d
@@ -785,104 +789,17 @@ def sample_fission(
         # Set weight
         particle_new["w"] = weight_product
 
-        # Prompt or delayed?
-        prompt = True
-        delayed_group = N_delayed - 1
-        xi = rng.lcg(particle_container_new)
-        total = nu_p / nu
-        if xi > total:
-            prompt = False
-            # Determine delayed group
-            for j in range(N_delayed):
-                fraction = mcdc_get.neutron_fission_reaction.delayed_fractions(
-                    j, fission, data
-                )
-                total += fraction * nu_d / nu
-                if xi < total:
-                    delayed_group = j
-                    break
-
-        # ==============================================================================
-        # Sample prompt neutron
-        # ==============================================================================
-
-        if prompt:
-            # Sample angle (if not energy-correlated)
-            mu_distribution = simulation["distributions"][fission["mu_ID"]]
-            if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
-                mu = sample_distribution(
-                    E, mu_distribution, particle_container_new, simulation, data
-                )
-
-            # Sample energy (also angle if correlated)
-            spectrum = simulation["distributions"][fission["spectrum_ID"]]
-            if mu_distribution["sub_type"] != DISTRIBUTION_NONE:
-                E_new = sample_distribution_with_scale(
-                    E,
-                    spectrum,
-                    particle_container_new,
-                    simulation,
-                    data,
-                )
-            else:
-                E_new, mu = sample_correlated_distribution_with_scale(
-                    E,
-                    spectrum,
-                    particle_container_new,
-                    simulation,
-                    data,
-                    nuclide["atomic_weight_ratio"],
-                    reaction["q_value"],
-                )
-
-            # Frame transformation
-            reference_frame = reaction["reference_frame"]
-            if reference_frame == REFERENCE_FRAME_COM:
-                A = nuclide["atomic_weight_ratio"]
-                mu_COM = mu
-                E_COM = E_new
-
-                E_new = (
-                    E_COM
-                    + (E + 2 * mu_COM * (A + 1) * math.sqrt(E * E_COM)) / (A + 1) ** 2
-                )
-                mu = mu_COM * math.sqrt(E_COM / E_new) + math.sqrt(E / E_new) / (A + 1)
-
-            azi = 2.0 * PI * rng.lcg(particle_container_new)
-            ux_new, uy_new, uz_new = scatter_direction(ux, uy, uz, mu, azi)
-
-            # Now the secondary angle and energy are finalized
-            particle_new["ux"] = ux_new
-            particle_new["uy"] = uy_new
-            particle_new["uz"] = uz_new
-            particle_new["E"] = E_new
-
-        # ==============================================================================
-        # Sample delayed fission neutron
-        # ==============================================================================
-
-        else:
-            # Sample isotropic angle
-            ux_new, uy_new, uz_new = sample_isotropic_direction(particle_container_new)
-
-            particle_new["ux"] = ux_new
-            particle_new["uy"] = uy_new
-            particle_new["uz"] = uz_new
-            spectrum_ID = mcdc_get.neutron_fission_reaction.delayed_spectrum_IDs(
-                delayed_group, fission, data
-            )
-            spectrum = simulation["distributions"][spectrum_ID]
-            particle_new["E"] = sample_distribution_with_scale(
-                E, spectrum, particle_container_new, simulation, data
-            )
-
-            # Sample emission time
-            decay_rate = mcdc_get.neutron_fission_reaction.delayed_decay_rates(
-                delayed_group, fission, data
-            )
-            if not prompt:
-                xi = rng.lcg(particle_container_new)
-                particle_new["t"] -= math.log(xi) / decay_rate
+        sample_fission_neutron(
+            particle_container_new,
+            particle_container,
+            reaction,
+            fission,
+            nuclide,
+            nu_p,
+            nu_d,
+            simulation,
+            data,
+        )
 
         # Subtract outgoing energy from energy deposition
         interaction_data["energy_deposition"] -= particle_new["E"] * particle_new["w"]
@@ -895,98 +812,90 @@ def sample_fission(
         if settings["neutron_eigenvalue_mode"]:
             particle_bank_module.bank_census_particle(particle_container_new, program)
             continue
-        # Below is only relevant for fixed-source problem
 
-        # Prompt-neutron banking
-        if prompt:
-            # To census bank
-            if particle["event"] & EVENT_TIME_CENSUS:
-                particle_bank_module.bank_census_particle(
-                    particle_container_new, program
-                )
+        is_last = n == N - 1
+        particle_bank_module.bank_or_revive_particle(
+            particle_container, particle_container_new, is_last, program, data
+        )
 
-            # To active bank
-            elif n < N - 1:
-                particle_bank_module.bank_active_particle(
-                    particle_container_new, program
-                )
 
-            # Replace current particle
-            else:
-                particle["alive"] = True
-                particle["ux"] = particle_new["ux"]
-                particle["uy"] = particle_new["uy"]
-                particle["uz"] = particle_new["uz"]
-                particle["t"] = particle_new["t"]
-                particle["E"] = particle_new["E"]
-                particle["w"] = particle_new["w"]
-
-        # Delayed-neutron banking
-        else:
-            # Skip if beyond time boundary
-            if (
-                particle_new["t"]
-                > settings["time_boundary"] - COINCIDENCE_TOLERANCE_TIME
-            ):
-                continue
-
-            # Move the precursor from the fission time to the emission time.
-            motion.move_product(
-                particle_container_new, particle_container, simulation, data
+@njit
+def sample_fission_neutron(
+    particle_container_new,
+    incident_container,
+    reaction,
+    fission,
+    nuclide,
+    nu_p,
+    nu_d,
+    simulation,
+    data,
+):
+    """Set the energy, direction, emission time, and position of one fission neutron."""
+    particle_new = particle_container_new[0]
+    E = particle_new["E"]
+    N_delayed = fission["N_delayed_precursor"]
+    nu = nu_p + nu_d
+    # Prompt or delayed?
+    prompt = True
+    delayed_group = N_delayed - 1
+    xi = rng.lcg(particle_container_new)
+    total = nu_p / nu
+    if xi > total:
+        prompt = False
+        # Determine delayed group
+        for j in range(N_delayed):
+            fraction = mcdc_get.neutron_fission_reaction.delayed_fractions(
+                j, fission, data
             )
+            total += fraction * nu_d / nu
+            if xi < total:
+                delayed_group = j
+                break
 
-            # Check if go to census or future bank
-            hit_current_census = False
-            hit_future_census = False
-            idx_census = simulation["idx_census"]
-            if settings["N_census"] > 1:
-                if particle_new["t"] > (
-                    mcdc_get.settings.census_time(idx_census, settings, data)
-                    - COINCIDENCE_TOLERANCE_TIME
-                ):
-                    hit_current_census = True
-                    if particle_new["t"] > (
-                        mcdc_get.settings.census_time(idx_census + 1, settings, data)
-                        - COINCIDENCE_TOLERANCE_TIME
-                    ):
-                        hit_future_census = True
+    # ==============================================================================
+    # Sample prompt neutron
+    # ==============================================================================
 
-            # Not hitting census --> add to active bank
-            if not hit_current_census:
-                # Keep it if it is the last particle
-                if n == N - 1:
-                    particle["alive"] = True
-                    particle["x"] = particle_new["x"]
-                    particle["y"] = particle_new["y"]
-                    particle["z"] = particle_new["z"]
-                    particle["ux"] = particle_new["ux"]
-                    particle["uy"] = particle_new["uy"]
-                    particle["uz"] = particle_new["uz"]
-                    particle["t"] = particle_new["t"]
-                    particle["E"] = particle_new["E"]
-                    particle["w"] = particle_new["w"]
-                    # Relocate the retained delayed child at its emission state.
-                    particle["cell_ID"] = -1
-                    particle["material_ID"] = -1
-                    particle["surface_ID"] = -1
-                else:
-                    particle_bank_module.bank_active_particle(
-                        particle_container_new, program
-                    )
+    if prompt:
+        sample_outgoing_neutron(
+            particle_container_new, reaction, fission, nuclide, simulation, data
+        )
 
-            # Hit future census --> add to future bank
-            elif hit_future_census:
-                # Particle will participate in the future
-                particle_bank_module.bank_future_particle(
-                    particle_container_new, program
-                )
+    # ==============================================================================
+    # Sample delayed fission neutron
+    # ==============================================================================
 
-            # Hit current census --> add to census bank
-            else:
-                # Particle will participate after the current census is completed
-                particle_bank_module.bank_census_particle(
-                    particle_container_new, program
-                )
+    else:
+        # Sample isotropic angle
+        ux_new, uy_new, uz_new = sample_isotropic_direction(particle_container_new)
+
+        particle_new["ux"] = ux_new
+        particle_new["uy"] = uy_new
+        particle_new["uz"] = uz_new
+        spectrum_ID = mcdc_get.neutron_fission_reaction.delayed_spectrum_IDs(
+            delayed_group, fission, data
+        )
+        spectrum = simulation["distributions"][spectrum_ID]
+        particle_new["E"] = sample_distribution_with_scale(
+            E, spectrum, particle_container_new, simulation, data
+        )
+
+        # Sample emission time
+        decay_rate = mcdc_get.neutron_fission_reaction.delayed_decay_rates(
+            delayed_group, fission, data
+        )
+        if simulation["technique"]["implicit_collision"]["active"] and math.isfinite(
+            decay_rate
+        ):
+            apply_delayed_decay_time(particle_container_new, decay_rate, simulation)
+        else:
+            xi = rng.lcg(particle_container_new)
+            particle_new["t"] -= math.log(xi) / decay_rate
+        if not simulation["settings"]["neutron_eigenvalue_mode"]:
+            motion.move_product(
+                particle_container_new, incident_container, simulation, data
+            )
 
 
 @njit
@@ -999,3 +908,150 @@ def neutron_fission_prompt_multiplicity(E, fission, simulation, data):
 def neutron_fission_delayed_multiplicity(E, fission, simulation, data):
     reaction_data = simulation["data"][fission["delayed_multiplicity_ID"]]
     return evaluate_data_clamped(E, reaction_data, simulation, data)
+
+
+# ======================================================================================
+# Implicit collision
+# ======================================================================================
+
+
+@njit
+def implicit_collision_xs(particle_container, simulation, data):
+    """Return total, scattering production, and fission production."""
+    particle = particle_container[0]
+    material = simulation["materials"][particle["material_ID"]]
+    E = particle["E"]
+
+    # Sum total and production cross sections over all reactions
+    SigmaT = 0.0
+    nuSigmaS = 0.0
+    nuSigmaF = 0.0
+    for i in range(material["N_nuclide"]):
+        nuclide = simulation["nuclides"][
+            mcdc_get.material.nuclide_IDs(i, material, data)
+        ]
+        density = mcdc_get.material.nuclide_densities(i, material, data)
+        for j in range(nuclide["N_neutron_reaction"]):
+            reaction_ID = mcdc_get.nuclide.neutron_reaction_IDs(j, nuclide, data)
+            reaction = simulation["neutron_reactions"][reaction_ID]
+            xs = density * reaction_micro_xs(E, reaction, nuclide, data)
+            SigmaT += xs
+            nu_s, nu_f = _implicit_neutron_yields(E, reaction, simulation, data)
+            nuSigmaS += xs * nu_s
+            nuSigmaF += xs * nu_f
+
+    return SigmaT, nuSigmaS, nuSigmaF
+
+
+@njit
+def implicit_collision_q_value(particle_container, SigmaT, simulation, data):
+    """Return the mean Q-value weighted by macroscopic reaction cross sections."""
+    particle = particle_container[0]
+    material = simulation["materials"][particle["material_ID"]]
+    E = particle["E"]
+
+    # Weight each reaction Q-value by its macroscopic cross section
+    q_xs = 0.0
+    for i in range(material["N_nuclide"]):
+        nuclide = simulation["nuclides"][
+            mcdc_get.material.nuclide_IDs(i, material, data)
+        ]
+        density = mcdc_get.material.nuclide_densities(i, material, data)
+        for j in range(nuclide["N_neutron_reaction"]):
+            reaction_ID = mcdc_get.nuclide.neutron_reaction_IDs(j, nuclide, data)
+            reaction = simulation["neutron_reactions"][reaction_ID]
+            xs = density * reaction_micro_xs(E, reaction, nuclide, data)
+            q_xs += xs * reaction["q_value"]
+
+    return q_xs / SigmaT
+
+
+@njit
+def sample_implicit_neutron(
+    neutron_container, incident_container, threshold, nuSigmaS, simulation, data
+):
+    """Sample one neutron by production and return whether it came from fission."""
+    incident = incident_container[0]
+    E = incident["E"]
+    material = simulation["materials"][incident["material_ID"]]
+
+    # Select scattering or fission
+    fission_selected = threshold >= nuSigmaS
+    production = 0.0
+    offset = nuSigmaS if fission_selected else 0.0
+
+    # Locate the reaction in the selected production interval
+    for i in range(material["N_nuclide"]):
+        nuclide = simulation["nuclides"][
+            mcdc_get.material.nuclide_IDs(i, material, data)
+        ]
+        density = mcdc_get.material.nuclide_densities(i, material, data)
+        for j in range(nuclide["N_neutron_reaction"]):
+            reaction_ID = mcdc_get.nuclide.neutron_reaction_IDs(j, nuclide, data)
+            reaction = simulation["neutron_reactions"][reaction_ID]
+            kind = reaction["sub_type"]
+            if kind == NEUTRON_REACTION_CAPTURE or (
+                (kind == NEUTRON_REACTION_FISSION) != fission_selected
+            ):
+                continue
+            xs = density * reaction_micro_xs(E, reaction, nuclide, data)
+            nu_s, nu_f = _implicit_neutron_yields(E, reaction, simulation, data)
+            production += xs * (nu_s + nu_f)
+            if offset + production <= threshold:
+                continue
+
+            # Sample the outgoing neutron from the selected reaction
+            if kind == NEUTRON_REACTION_ELASTIC_SCATTERING:
+                sample_elastic_neutron(
+                    reaction, neutron_container, nuclide, simulation, data
+                )
+            elif kind == NEUTRON_REACTION_INELASTIC_SCATTERING:
+                channel = simulation["neutron_inelastic_scattering_reactions"][
+                    reaction["sub_ID"]
+                ]
+                sample_outgoing_neutron(
+                    neutron_container, reaction, channel, nuclide, simulation, data
+                )
+            else:
+                fission = simulation["neutron_fission_reactions"][reaction["sub_ID"]]
+                nu_p = neutron_fission_prompt_multiplicity(E, fission, simulation, data)
+                nu_d = neutron_fission_delayed_multiplicity(
+                    E, fission, simulation, data
+                )
+                sample_fission_neutron(
+                    neutron_container,
+                    incident_container,
+                    reaction,
+                    fission,
+                    nuclide,
+                    nu_p,
+                    nu_d,
+                    simulation,
+                    data,
+                )
+            return fission_selected
+    raise ValueError("No neutron-producing reaction selected at implicit collision.")
+
+
+@njit
+def _implicit_neutron_yields(E, reaction, simulation, data):
+    kind = reaction["sub_type"]
+
+    # Scattering yield
+    if kind == NEUTRON_REACTION_ELASTIC_SCATTERING:
+        return 1.0, 0.0
+    if kind == NEUTRON_REACTION_INELASTIC_SCATTERING:
+        channel = simulation["neutron_inelastic_scattering_reactions"][
+            reaction["sub_ID"]
+        ]
+        return float(channel["multiplicity"]), 0.0
+
+    # Fission yield scaled by k_eff
+    if kind == NEUTRON_REACTION_FISSION:
+        fission = simulation["neutron_fission_reactions"][reaction["sub_ID"]]
+        nu_p = neutron_fission_prompt_multiplicity(E, fission, simulation, data)
+        nu_d = neutron_fission_delayed_multiplicity(E, fission, simulation, data)
+        return 0.0, (nu_p + nu_d) / simulation["k_eff"]
+
+    # No neutron production
+    return 0.0, 0.0

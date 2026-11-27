@@ -54,6 +54,8 @@ import mcdc.mcdc_set.surface as surface
 
 import mcdc.mcdc_set.tally as tally
 
+import mcdc.mcdc_set.implicit_collision as implicit_collision
+
 import mcdc.mcdc_set.weight_windows as weight_windows
 
 import mcdc.mcdc_set.simulation as simulation

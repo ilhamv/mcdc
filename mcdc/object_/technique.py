@@ -1,7 +1,12 @@
+from math import isfinite
+from numbers import Real
+
 import numpy as np
 
 from mcdc.constant import (
     INF,
+    INTERPOLATION_LINEAR,
+    INTERPOLATION_SEMILOGY,
     PI,
     PARTICLE_TYPE_BY_NAME,
 )
@@ -46,6 +51,152 @@ class ImplicitCapture(MCDCBase):
         Disable implicit capture:
 
         >>> simulation.technique.implicit_capture(active=False)
+        """
+        self.active = active
+
+
+# ======================================================================================
+# Implicit collision
+# ======================================================================================
+
+
+class ImplicitCollision(MCDCBase):
+    """Simulation-owned implicit-collision configuration."""
+
+    # MC/DC framework metadata
+    label = "implicit_collision"
+
+    active: bool
+    multiplicity: float
+    interpolation: int
+    time_grid: NDArray[np.float64]
+    relative_density: NDArray[np.float64]
+
+    def __init__(self) -> None:
+        self.active = False
+        self.multiplicity = 1.0
+        self.interpolation = INTERPOLATION_LINEAR
+        self.time_grid = np.empty(0)
+        self.relative_density = np.empty(0)
+
+    def __call__(
+        self,
+        multiplicity: float | NDArray[np.float64] | None = None,
+        time: NDArray[np.float64] | None = None,
+        *,
+        relative_density: NDArray[np.float64] | None = None,
+        interpolation: str = "linear",
+        active: bool = True,
+    ) -> None:
+        """Configure fixed or time-dependent implicit collision.
+
+        Currently supports neutrons only.
+
+        Parameters
+        ----------
+        multiplicity : float or array, optional
+            Fixed positive expected product count. Defaults to one (branchless
+            collision). An array passed positionally supplies the relative density.
+        relative_density : array, optional
+            Positive finite particle density at each supplied time, in any common
+            normalization.
+        time : array, optional
+            Strictly increasing times in seconds, one per density value.
+        interpolation : {"linear", "log"}, optional
+            Interpolate density (default) or its logarithm linearly in time.
+        active : bool, optional
+            Whether implicit collision is enabled.
+
+        Examples
+        --------
+        >>> simulation.technique.implicit_collision(
+        ...     relative_density=[1., 2.], time=[0., 1.]
+        ... )
+        """
+        if relative_density is not None and multiplicity is not None:
+            print_error("Specify either multiplicity or relative_density.")
+        if isinstance(multiplicity, (list, tuple, np.ndarray)):
+            relative_density, multiplicity = multiplicity, None
+        if interpolation not in ("linear", "log"):
+            print_error("Implicit collision interpolation must be 'linear' or 'log'.")
+
+        if relative_density is None:
+            if time is not None:
+                print_error("Implicit collision time grid requires density values.")
+            if multiplicity is None:
+                multiplicity = 1.0
+            if (
+                isinstance(multiplicity, (bool, np.bool_))
+                or not isinstance(multiplicity, Real)
+                or not isfinite(multiplicity)
+                or multiplicity <= 0.0
+            ):
+                print_error(
+                    "Implicit collision multiplicity must be a positive finite scalar."
+                )
+            time_grid = np.empty(0)
+            values = np.empty(0)
+        else:
+            values = np.asarray(relative_density, dtype=float)
+            time_grid = np.asarray(time, dtype=float)
+            if (
+                values.ndim != 1
+                or not values.size
+                or not np.all(np.isfinite(values) & (values > 0))
+            ):
+                print_error(
+                    "Implicit collision requires a 1-D array of positive finite density values."
+                )
+            if time_grid.shape != values.shape or not np.all(np.isfinite(time_grid)):
+                print_error(
+                    "Implicit collision requires one finite time per density value."
+                )
+            if not np.all(np.diff(time_grid) > 0):
+                print_error("Implicit collision times must be strictly increasing.")
+            multiplicity = 1.0
+
+        self.active = active
+        self.multiplicity = float(multiplicity)
+        self.interpolation = (
+            INTERPOLATION_LINEAR
+            if interpolation == "linear"
+            else INTERPOLATION_SEMILOGY
+        )
+        self.time_grid = time_grid
+        self.relative_density = values
+
+
+# ======================================================================================
+# Forced decay
+# ======================================================================================
+
+
+class ForcedDecay(MCDCBase):
+    """Simulation-owned forced-decay configuration."""
+
+    # MC/DC framework metadata
+    label = "forced_decay"
+
+    active: bool
+
+    def __init__(self) -> None:
+        self.active = False
+
+    def __call__(self, active: bool = True) -> None:
+        """Configure forced decay of delayed neutron precursors.
+
+        Applies to neutron transport with a finite time boundary.
+        Emission times are sampled uniformly over the remaining simulation time.
+
+        Parameters
+        ----------
+        active : bool, optional
+            Whether forced decay is enabled.
+
+        Examples
+        --------
+        >>> simulation.technique.forced_decay()
+        >>> simulation.technique.forced_decay(active=False)
         """
         self.active = active
 
@@ -386,6 +537,8 @@ class Technique(MCDCBase):
     label = "technique"
 
     implicit_capture: ImplicitCapture
+    implicit_collision: ImplicitCollision
+    forced_decay: ForcedDecay
     weighted_emission: WeightedEmission
     global_weight_roulette: GlobalWeightRoulette
     neutron_weight_windows: WeightWindows
@@ -397,11 +550,17 @@ class Technique(MCDCBase):
     def __init__(self) -> None:
         # Construct every simulation-wide technique configuration
         self.implicit_capture = ImplicitCapture()
+        self.implicit_collision = ImplicitCollision()
+        self.forced_decay = ForcedDecay()
         self.weighted_emission = WeightedEmission()
         self.global_weight_roulette = GlobalWeightRoulette()
         for pname, ptype in PARTICLE_TYPE_BY_NAME.items():
             setattr(self, f"{pname}_weight_windows", WeightWindows(ptype))
         self.population_control = PopulationControl()
+
+    def branchless_collision(self, active: bool = True) -> None:
+        """Configure implicit collision with one outgoing particle per collision."""
+        self.implicit_collision(multiplicity=1.0, active=active)
 
     def weight_windows(
         self,

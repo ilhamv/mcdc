@@ -45,6 +45,54 @@ def add_bank_size(bank, value):
 
 
 @njit
+def bank_or_revive_particle(
+    primary_container, secondary_container, is_last, program, data
+):
+    """Bank a secondary or revive the current particle with the last active secondary."""
+    primary_particle = primary_container[0]
+    secondary_particle = secondary_container[0]
+
+    prompt = primary_particle["t"] == secondary_particle["t"]
+
+    if prompt:
+        if primary_particle["event"] & EVENT_TIME_CENSUS:
+            bank_census_particle(secondary_container, program)
+            return
+    elif bank_if_not_active(secondary_container, program, data):
+        return
+
+    if not is_last:
+        bank_active_particle(secondary_container, program)
+
+    else:
+        particle_module.revive_from_secondary(primary_container, secondary_container)
+        if not prompt:
+            particle_module.reset_IDs(primary_container)
+
+
+@njit
+def bank_if_not_active(particle_container, program, data):
+    """Return True if emission time sends the particle to census, future, or past the time boundary."""
+    simulation = util.access_simulation(program)
+    settings = simulation["settings"]
+    t = particle_container[0]["t"]
+    if t > settings["time_boundary"] - COINCIDENCE_TOLERANCE_TIME:
+        return True
+
+    if settings["N_census"] > 1:
+        idx = simulation["idx_census"]
+        census_time = mcdc_get.settings.census_time(idx, settings, data)
+        if t > census_time - COINCIDENCE_TOLERANCE_TIME:
+            next_census = mcdc_get.settings.census_time(idx + 1, settings, data)
+            if t > next_census - COINCIDENCE_TOLERANCE_TIME:
+                bank_future_particle(particle_container, program)
+            else:
+                bank_census_particle(particle_container, program)
+            return True
+    return False
+
+
+@njit
 def _bank_particle(particle_container, bank):
     # Check if bank is full
     if get_bank_size(bank) == bank["particle_data"].shape[0]:
@@ -96,9 +144,7 @@ def pop_particle(particle_container, bank):
     # Set default IDs and event for the live particle
     particle = particle_container[0]
     particle["alive"] = True
-    particle["material_ID"] = -1
-    particle["cell_ID"] = -1
-    particle["surface_ID"] = -1
+    particle_module.reset_IDs(particle_container)
     particle["event"] = EVENT_NONE
 
 

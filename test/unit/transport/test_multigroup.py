@@ -155,3 +155,35 @@ def test_delayed_fission_products(prepare_simulation):
     _assert_fission_products(particle_container, simulation)
     assert particle_container[0]["t"] > 0.0
     assert np.all(simulation["bank_active"]["particle_data"][:3]["t"] > 0.0)
+
+
+@pytest.mark.parametrize("rate", [0.0, 2.0, np.inf])
+def test_analog_fission_forced_decay_uses_remaining_time(prepare_simulation, rate):
+    material = mcdc.Material.multigroup(fission=[1.0], nu_d=[[1.0]], decay_rate=[rate])
+
+    def configure(simulation):
+        simulation.settings.time_boundary = 0.75
+        simulation.technique.forced_decay()
+
+    container, data = prepare_simulation(
+        cells=[mcdc.Cell(fill=material)], configure=configure
+    )
+    simulation = container[0]
+    particles = _make_particle()
+    particle = particles[0]
+    particle["E"], particle["t"], particle["w"] = 0.0, 0.5, 3.0
+    multigroup.fission(particles, simulation, data)
+
+    assert simulation["bank_active"]["size"][0] == 0
+    if rate == 0.0:
+        assert not particle["alive"]
+    elif np.isinf(rate):
+        assert particle["alive"]
+        assert particle["t"] == 0.5
+        assert particle["w"] == 3.0
+    else:
+        assert particle["alive"]
+        assert 0.5 <= particle["t"] < 0.75
+        assert particle["w"] == pytest.approx(
+            3.0 * rate * 0.25 * np.exp(-rate * (particle["t"] - 0.5))
+        )

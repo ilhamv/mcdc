@@ -716,6 +716,10 @@ proton_inelastic_scattering_reaction = into_dtype([
     ('base_ID', int64),
 ])
 
+flight_data = into_dtype([
+    ('initial_particle', particle_data),
+])
+
 interaction_data = into_dtype([
     ('energy_deposition', float64),
     ('incident_particle', particle_data),
@@ -797,6 +801,20 @@ implicit_capture = into_dtype([
     ('active', bool_),
 ])
 
+implicit_collision = into_dtype([
+    ('active', bool_),
+    ('multiplicity', float64),
+    ('interpolation', int64),
+    ('time_grid_offset', int64),
+    ('time_grid_length', int64),
+    ('relative_density_offset', int64),
+    ('relative_density_length', int64),
+])
+
+forced_decay = into_dtype([
+    ('active', bool_),
+])
+
 weighted_emission = into_dtype([
     ('active', bool_),
     ('weight_target', float64),
@@ -839,6 +857,8 @@ population_control = into_dtype([
 
 technique = into_dtype([
     ('implicit_capture', implicit_capture),
+    ('implicit_collision', implicit_collision),
+    ('forced_decay', forced_decay),
     ('weighted_emission', weighted_emission),
     ('global_weight_roulette', global_weight_roulette),
     ('neutron_weight_windows', weight_windows),
