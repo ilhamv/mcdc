@@ -47,7 +47,7 @@ def generate_output(mcdc, data, simulationPy, no_tally_output=False):
         return
 
     # Tallies
-    if not no_tally_output:
+    if not no_tally_output and simulationPy.tallies:
         create_tally_dataset(file, mcdc, data)
 
     # Eigenvalues
@@ -58,12 +58,33 @@ def generate_output(mcdc, data, simulationPy, no_tally_output=False):
         )
         file.create_dataset("k_mean", data=mcdc["k_avg_running"])
         file.create_dataset("k_sdev", data=mcdc["k_sdv_running"])
-        file.create_dataset("global_tally/neutron/mean", data=mcdc["n_avg"])
-        file.create_dataset("global_tally/neutron/sdev", data=mcdc["n_sdv"])
-        file.create_dataset("global_tally/neutron/max", data=mcdc["n_max"])
-        file.create_dataset("global_tally/precursor/mean", data=mcdc["C_avg"])
-        file.create_dataset("global_tally/precursor/sdev", data=mcdc["C_sdv"])
-        file.create_dataset("global_tally/precursor/max", data=mcdc["C_max"])
+
+        # Neutron density and generation time
+        file.create_dataset("global_tally/neutron_density/mean", data=mcdc["n_avg"])
+        file.create_dataset("global_tally/neutron_density/sdev", data=mcdc["n_sdv"])
+        file.create_dataset("global_tally/neutron_density/max", data=mcdc["n_max"])
+        file.create_dataset(
+            "global_tally/generation_time/mean", data=mcdc["generation_time_avg"][0]
+        )
+        file.create_dataset(
+            "global_tally/generation_time/sdev", data=mcdc["generation_time_sdv"][0]
+        )
+
+        # Total precursor density
+        file.create_dataset("global_tally/precursor_density/mean", data=mcdc["C_avg"])
+        file.create_dataset("global_tally/precursor_density/sdev", data=mcdc["C_sdv"])
+        file.create_dataset("global_tally/precursor_density/max", data=mcdc["C_max"])
+
+        # Delayed fraction and decay rate by precursor group
+        for j in range(mcdc["beta_avg_length"]):
+            fraction = file.create_group(f"global_tally/precursor_fraction-{j}")
+            fraction["mean"] = mcdc_get.simulation.beta_avg(j, mcdc, data)
+            fraction["sdev"] = mcdc_get.simulation.beta_sdv(j, mcdc, data)
+            decay = file.create_group(f"global_tally/precursor_decay_rate-{j}")
+            decay["mean"] = mcdc_get.simulation.lambda_avg(j, mcdc, data)
+            decay["sdev"] = mcdc_get.simulation.lambda_sdv(j, mcdc, data)
+
+        # Gyration radius by cycle
         if mcdc["settings"]["use_gyration_radius"]:
             file.create_dataset(
                 "gyration_radius",

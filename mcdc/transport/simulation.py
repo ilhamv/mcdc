@@ -169,7 +169,7 @@ def eigenvalue_simulation(simulation_container, data):
 
     # Tally closeout
     tally_module.closeout.finalize(simulation, data)
-    tally_module.closeout.eigenvalue_simulation(simulation)
+    tally_module.closeout.eigenvalue_simulation(simulation, data)
 
 
 # =============================================================================

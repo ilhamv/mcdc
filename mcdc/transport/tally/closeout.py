@@ -7,6 +7,7 @@ from mpi4py import MPI
 ####
 
 import mcdc.config as config
+import mcdc.mcdc_get as mcdc_get
 import mcdc.mcdc_set as mcdc_set
 import mcdc.output as output_module
 import mcdc.transport.particle_bank as particle_bank_module
@@ -38,7 +39,9 @@ def _reduce(tally, simulation, data):
     """Normalize one tally's scores and sum them across MPI ranks."""
     N = tally["bin_length"]
     start = tally["bin_offset"]
-    end = start + N
+    if N == 0:
+        return
+    chunks = min(N, simulation["settings"]["tally_reduction_chunks"])
 
     # Normalize
     N_particle = simulation["settings"]["N_particle"]
@@ -48,20 +51,27 @@ def _reduce(tally, simulation, data):
     # MPI reduce
     master = simulation["mpi_master"]
     with objmode():
-        if config.target == "gpu" and config.gpu_state_storage != "separate":
-            # Receive into host memory before updating GPU-backed data.
-            buff = np.zeros(N)
-            MPI.COMM_WORLD.Reduce(data[start:end], buff, MPI.SUM, 0)
+        chunk_size, remainder = divmod(N, chunks)
+        gpu_backed = config.target == "gpu" and config.gpu_state_storage != "separate"
+        if gpu_backed:
+            # Reuse one chunk-sized host buffer for GPU-backed data.
+            buff = np.zeros(chunk_size + (remainder > 0))
 
-            if master:
-                data[start:end] = buff
-
-        else:
-            # Host-backed data can be reduced in place without a receive buffer.
-            if master:
-                MPI.COMM_WORLD.Reduce(MPI.IN_PLACE, data[start:end], MPI.SUM, 0)
+        offset = start
+        for chunk in range(chunks):
+            length = chunk_size + (chunk < remainder)
+            end = offset + length
+            scores = data[offset:end]
+            if gpu_backed:
+                received = buff[:length]
+                MPI.COMM_WORLD.Reduce(scores, received, MPI.SUM, 0)
+                if master:
+                    data[offset:end] = received
+            elif master:
+                MPI.COMM_WORLD.Reduce(MPI.IN_PLACE, scores, MPI.SUM, 0)
             else:
-                MPI.COMM_WORLD.Reduce(data[start:end], None, MPI.SUM, 0)
+                MPI.COMM_WORLD.Reduce(scores, None, MPI.SUM, 0)
+            offset = end
 
 
 @njit
@@ -374,44 +384,53 @@ def eigenvalue_cycle(simulation, data):
     idx_cycle = simulation["idx_cycle"]
     N_particle = simulation["settings"]["N_particle"]
 
-    # MPI Allreduce
+    # Local precursor group scores
+    tally_delayed = mcdc_get.simulation.eigenvalue_tally_nuSigmaF_delayed_all(
+        simulation, data
+    )
+    tally_C_group = mcdc_get.simulation.eigenvalue_tally_C_group_all(simulation, data)
+
+    # MPI reduction buffers
     buff_nuSigmaF = np.zeros(1, np.float64)
     buff_n = np.zeros(1, np.float64)
-    buff_nmax = np.zeros(1, np.float64)
     buff_C = np.zeros(1, np.float64)
-    buff_Cmax = np.zeros(1, np.float64)
+    buff_delayed = np.zeros_like(tally_delayed)
+    buff_C_group = np.zeros_like(tally_C_group)
+
+    # Reduce total fission production every cycle
     with objmode():
         MPI.COMM_WORLD.Allreduce(
             np.array(simulation["eigenvalue_tally_nuSigmaF"]), buff_nuSigmaF, MPI.SUM
         )
+
+        # Reduce density and precursor group tallies during active cycles
         if simulation["cycle_active"]:
-            MPI.COMM_WORLD.Allreduce(
-                np.array(simulation["eigenvalue_tally_n"]), buff_n, MPI.SUM
+            MPI.COMM_WORLD.Reduce(
+                np.array(simulation["eigenvalue_tally_n"]), buff_n, MPI.SUM, 0
             )
-            MPI.COMM_WORLD.Allreduce(
-                np.array([simulation["n_max"]]), buff_nmax, MPI.MAX
+            MPI.COMM_WORLD.Reduce(
+                np.array(simulation["eigenvalue_tally_C"]), buff_C, MPI.SUM, 0
             )
-            MPI.COMM_WORLD.Allreduce(
-                np.array(simulation["eigenvalue_tally_C"]), buff_C, MPI.SUM
-            )
-            MPI.COMM_WORLD.Allreduce(
-                np.array([simulation["C_max"]]), buff_Cmax, MPI.MAX
-            )
+            MPI.COMM_WORLD.Reduce(tally_delayed, buff_delayed, MPI.SUM, 0)
+            MPI.COMM_WORLD.Reduce(tally_C_group, buff_C_group, MPI.SUM, 0)
 
-    # Update and store k_eff
+    # Update k_eff on every rank for the next cycle
     simulation["k_eff"] = buff_nuSigmaF[0] / N_particle
-    mcdc_set.simulation.k_cycle(idx_cycle, simulation, data, value=simulation["k_eff"])
+    if simulation["mpi_master"]:
+        mcdc_set.simulation.k_cycle(
+            idx_cycle, simulation, data, value=simulation["k_eff"]
+        )
 
-    # Normalize other eigenvalue/global tallies
-    tally_n = buff_n[0] / N_particle
-    tally_C = buff_C[0] / N_particle
+    # =====================================================================
+    # Active-cycle statistics
+    # =====================================================================
 
-    # Maximum densities
-    simulation["n_max"] = buff_nmax[0]
-    simulation["C_max"] = buff_Cmax[0]
+    if simulation["cycle_active"] and simulation["mpi_master"]:
+        # Normalize densities per source particle
+        tally_n = buff_n[0] / N_particle
+        tally_C = buff_C[0] / N_particle
 
-    # Accumulate running average
-    if simulation["cycle_active"]:
+        # Accumulate eigenvalue and density moments
         simulation["k_avg"] += simulation["k_eff"]
         simulation["k_sdv"] += simulation["k_eff"] * simulation["k_eff"]
         simulation["n_avg"] += tally_n
@@ -419,7 +438,31 @@ def eigenvalue_cycle(simulation, data):
         simulation["C_avg"] += tally_C
         simulation["C_sdv"] += tally_C * tally_C
 
+        # Mean generation time from neutron population and fission production
         N = 1 + simulation["idx_cycle"] - simulation["settings"]["N_inactive"]
+        production = buff_nuSigmaF[0]
+        generation_time = buff_n[0] / production
+        _update_ratio_moments(
+            generation_time,
+            N,
+            0,
+            simulation["generation_time_avg"],
+            simulation["generation_time_sdv"],
+        )
+
+        # Sample each precursor group ratio once per active cycle
+        beta_avg = mcdc_get.simulation.beta_avg_all(simulation, data)
+        beta_sdv = mcdc_get.simulation.beta_sdv_all(simulation, data)
+        lambda_avg = mcdc_get.simulation.lambda_avg_all(simulation, data)
+        lambda_sdv = mcdc_get.simulation.lambda_sdv_all(simulation, data)
+        for j in range(len(buff_delayed)):
+            delayed = buff_delayed[j]
+            beta = delayed / production
+            decay = delayed / buff_C_group[j]
+            _update_ratio_moments(beta, N, j, beta_avg, beta_sdv)
+            _update_ratio_moments(decay, N, j, lambda_avg, lambda_sdv)
+
+        # Running eigenvalue mean and standard error
         simulation["k_avg_running"] = simulation["k_avg"] / N
         if N == 1:
             simulation["k_sdv_running"] = 0.0
@@ -432,6 +475,8 @@ def eigenvalue_cycle(simulation, data):
     simulation["eigenvalue_tally_nuSigmaF"][0] = 0.0
     simulation["eigenvalue_tally_n"][0] = 0.0
     simulation["eigenvalue_tally_C"][0] = 0.0
+    tally_C_group[:] = 0.0
+    tally_delayed[:] = 0.0
 
     # =====================================================================
     # Gyration radius
@@ -494,18 +539,35 @@ def eigenvalue_cycle(simulation, data):
                 P = simulation["bank_census"]["particle_data"][i]
                 rms_local[0] += ((P["z"] - com_z) ** 2) * P["w"]
 
-        # MPI Allreduce
+        # Reduce squared distances to the rank reporting the gyration radius
         with objmode():
-            MPI.COMM_WORLD.Allreduce(rms_local, rms, MPI.SUM)
-        rms = math.sqrt(rms[0] / W)
-
-        # Gyration radius
-        mcdc_set.simulation.gyration_radius(idx_cycle, simulation, data, value=rms)
+            MPI.COMM_WORLD.Reduce(rms_local, rms, MPI.SUM, 0)
+        if simulation["mpi_master"]:
+            radius = math.sqrt(rms[0] / W)
+            mcdc_set.simulation.gyration_radius(
+                idx_cycle, simulation, data, value=radius
+            )
 
 
 @njit
-def eigenvalue_simulation(simulation):
-    """Finalize neutron and precursor density statistics over active cycles."""
+def eigenvalue_simulation(simulation, data):
+    """Finalize global tally means and standard errors over active cycles."""
+    # Reduce the largest single-flight density scores over all active cycles
+    local_max = np.array(
+        [
+            simulation["eigenvalue_tally_n_max"][0],
+            simulation["eigenvalue_tally_C_max"][0],
+        ]
+    )
+    density_max = np.zeros(2, np.float64)
+    with objmode():
+        MPI.COMM_WORLD.Reduce(local_max, density_max, MPI.MAX, 0)
+    if not simulation["mpi_master"]:
+        return
+    simulation["n_max"] = density_max[0]
+    simulation["C_max"] = density_max[1]
+
+    # Neutron and precursor density statistics
     N = simulation["settings"]["N_active"]
     simulation["n_avg"] /= N
     simulation["C_avg"] /= N
@@ -514,8 +576,27 @@ def eigenvalue_simulation(simulation):
             (simulation["n_sdv"] / N - simulation["n_avg"] ** 2) / (N - 1)
         )
         simulation["C_sdv"] = math.sqrt(
-            (simulation["C_sdv"] / N - simulation["C_avg"] ** 2) / (N - 1)
+            max(simulation["C_sdv"] / N - simulation["C_avg"] ** 2, 0.0) / (N - 1)
         )
     else:
         simulation["n_sdv"] = 0.0
         simulation["C_sdv"] = 0.0
+
+    # Standard errors of the active-cycle ratios
+    if N > 1:
+        simulation["generation_time_sdv"][0] = math.sqrt(
+            simulation["generation_time_sdv"][0] / (N * (N - 1))
+        )
+        for sdv in (
+            mcdc_get.simulation.beta_sdv_all(simulation, data),
+            mcdc_get.simulation.lambda_sdv_all(simulation, data),
+        ):
+            sdv[:] = np.sqrt(sdv / (N * (N - 1)))
+
+
+@njit
+def _update_ratio_moments(value, N, j, mean, M2):
+    """Update the running mean and sum of squared deviations for a cycle ratio."""
+    delta = value - mean[j]
+    mean[j] += delta / N
+    M2[j] += delta * (value - mean[j])

@@ -29,6 +29,30 @@ def overload_atomic_add_cpu(array, idx, value):
     return impl
 
 
+def atomic_max(array, idx, value):
+    result = array[idx]
+    array[idx] = max(result, value)
+    return result
+
+
+@nb.extending.overload(atomic_max, target="gpu")
+def overload_atomic_max_gpu(array, idx, value):
+    def impl(array, idx, value):
+        return harmonize.array_atomic_max(array, idx, value)
+
+    return impl
+
+
+@nb.extending.overload(atomic_max, target="cpu")
+def overload_atomic_max_cpu(array, idx, value):
+    def impl(array, idx, value):
+        result = array[idx]
+        array[idx] = max(result, value)
+        return result
+
+    return impl
+
+
 # =============================================================================
 # Generic GPU/CPU local array variable constructors
 # =============================================================================

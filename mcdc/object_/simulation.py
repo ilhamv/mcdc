@@ -192,7 +192,19 @@ class Simulation(MCDCBase):
     #
     eigenvalue_tally_nuSigmaF: Annotated[NDArray[float64], (1,)]
     eigenvalue_tally_n: Annotated[NDArray[float64], (1,)]
+    eigenvalue_tally_n_max: Annotated[NDArray[float64], (1,)]
     eigenvalue_tally_C: Annotated[NDArray[float64], (1,)]
+    eigenvalue_tally_C_max: Annotated[NDArray[float64], (1,)]
+    eigenvalue_tally_nuSigmaF_delayed: NDArray[float64]
+    eigenvalue_tally_C_group: NDArray[float64]
+
+    # Active-cycle ratio statistics
+    generation_time_avg: Annotated[NDArray[float64], (1,)]
+    generation_time_sdv: Annotated[NDArray[float64], (1,)]
+    beta_avg: NDArray[float64]
+    beta_sdv: NDArray[float64]
+    lambda_avg: NDArray[float64]
+    lambda_sdv: NDArray[float64]
     #
     gyration_radius: NDArray[float64]
     #
@@ -293,7 +305,19 @@ class Simulation(MCDCBase):
         #
         self.eigenvalue_tally_nuSigmaF = np.zeros(1)
         self.eigenvalue_tally_n = np.zeros(1)
+        self.eigenvalue_tally_n_max = np.zeros(1)
         self.eigenvalue_tally_C = np.zeros(1)
+        self.eigenvalue_tally_C_max = np.zeros(1)
+        self.eigenvalue_tally_nuSigmaF_delayed = np.zeros(0)
+        self.eigenvalue_tally_C_group = np.zeros(0)
+
+        # Active-cycle ratio statistics
+        self.generation_time_avg = np.zeros(1)
+        self.generation_time_sdv = np.zeros(1)
+        self.beta_avg = np.zeros(0)
+        self.beta_sdv = np.zeros(0)
+        self.lambda_avg = np.zeros(0)
+        self.lambda_sdv = np.zeros(0)
         #
         self.gyration_radius = np.zeros(1)
         #
@@ -374,6 +398,10 @@ class Simulation(MCDCBase):
         from mcdc.config import target
 
         settings = self.settings
+
+        chunks = settings.tally_reduction_chunks
+        if isinstance(chunks, bool) or chunks < 1:
+            print_error("tally_reduction_chunks must be a positive integer.")
 
         if (
             settings.neutron_transport.prioritize_low_energy
@@ -548,6 +576,16 @@ class Simulation(MCDCBase):
 
         self.runtime_data_loading = MPI.Wtime() - time_data_loading_start
 
+        # Size the global group tallies after all neutron data are available
+        if settings.neutron_eigenvalue_mode:
+            J = self._precursor_group_count()
+            self.eigenvalue_tally_nuSigmaF_delayed = np.zeros(J)
+            self.eigenvalue_tally_C_group = np.zeros(J)
+            self.beta_avg = np.zeros(J)
+            self.beta_sdv = np.zeros(J)
+            self.lambda_avg = np.zeros(J)
+            self.lambda_sdv = np.zeros(J)
+
         # Resolve tally filters and shapes that require the complete model
         for tally in self.tallies:
             tally._resolve_energy_filter(self)
@@ -595,6 +633,32 @@ class Simulation(MCDCBase):
         if settings.neutron_eigenvalue_mode:
             self.k_cycle = np.zeros(settings.N_cycle)
             self.gyration_radius = np.zeros(settings.N_cycle)
+
+    def _precursor_group_count(self) -> int:
+        """Return the common group count for data that define delayed neutrons."""
+
+        # Group counts from multigroup materials
+        counts = [
+            (f"material {m.ID} (multigroup)", m.neutron_multigroup.J)
+            for m in self.materials
+            if m.has_neutron_multigroup and m.neutron_multigroup.J
+        ]
+
+        # Group counts from native fission reactions
+        for nuclide in self.nuclides:
+            for reaction in nuclide.neutron_fission_reactions:
+                if reaction.N_delayed_precursor:
+                    source = (
+                        f"{nuclide.name} at {nuclide.temperature} K, MT {reaction.MT}"
+                    )
+                    counts.append((source, reaction.N_delayed_precursor))
+
+        # Require a common count across data sets that define delayed groups
+        group_counts = {count for _, count in counts}
+        if len(group_counts) > 1:
+            details = ", ".join(f"{source}: {count}" for source, count in counts)
+            print_error(f"Inconsistent delayed precursor group counts ({details}).")
+        return next(iter(group_counts), 0)
 
     # ==================================================================================
     # Simulation object setters

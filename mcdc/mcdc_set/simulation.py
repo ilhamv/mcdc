@@ -62,6 +62,180 @@ def k_cycle_chunk(start, length, simulation, data, value):
 
 
 @njit
+def eigenvalue_tally_nuSigmaF_delayed(index, simulation, data, value):
+    offset = simulation["eigenvalue_tally_nuSigmaF_delayed_offset"]
+    data[offset + index] = value
+
+
+@njit
+def eigenvalue_tally_nuSigmaF_delayed_all(simulation, data, value):
+    start = simulation["eigenvalue_tally_nuSigmaF_delayed_offset"]
+    size = simulation["eigenvalue_tally_nuSigmaF_delayed_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def eigenvalue_tally_nuSigmaF_delayed_last(simulation, data, value):
+    start = simulation["eigenvalue_tally_nuSigmaF_delayed_offset"]
+    size = simulation["eigenvalue_tally_nuSigmaF_delayed_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def eigenvalue_tally_nuSigmaF_delayed_chunk(start, length, simulation, data, value):
+    start += simulation["eigenvalue_tally_nuSigmaF_delayed_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
+def eigenvalue_tally_C_group(index, simulation, data, value):
+    offset = simulation["eigenvalue_tally_C_group_offset"]
+    data[offset + index] = value
+
+
+@njit
+def eigenvalue_tally_C_group_all(simulation, data, value):
+    start = simulation["eigenvalue_tally_C_group_offset"]
+    size = simulation["eigenvalue_tally_C_group_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def eigenvalue_tally_C_group_last(simulation, data, value):
+    start = simulation["eigenvalue_tally_C_group_offset"]
+    size = simulation["eigenvalue_tally_C_group_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def eigenvalue_tally_C_group_chunk(start, length, simulation, data, value):
+    start += simulation["eigenvalue_tally_C_group_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
+def beta_avg(index, simulation, data, value):
+    offset = simulation["beta_avg_offset"]
+    data[offset + index] = value
+
+
+@njit
+def beta_avg_all(simulation, data, value):
+    start = simulation["beta_avg_offset"]
+    size = simulation["beta_avg_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def beta_avg_last(simulation, data, value):
+    start = simulation["beta_avg_offset"]
+    size = simulation["beta_avg_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def beta_avg_chunk(start, length, simulation, data, value):
+    start += simulation["beta_avg_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
+def beta_sdv(index, simulation, data, value):
+    offset = simulation["beta_sdv_offset"]
+    data[offset + index] = value
+
+
+@njit
+def beta_sdv_all(simulation, data, value):
+    start = simulation["beta_sdv_offset"]
+    size = simulation["beta_sdv_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def beta_sdv_last(simulation, data, value):
+    start = simulation["beta_sdv_offset"]
+    size = simulation["beta_sdv_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def beta_sdv_chunk(start, length, simulation, data, value):
+    start += simulation["beta_sdv_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
+def lambda_avg(index, simulation, data, value):
+    offset = simulation["lambda_avg_offset"]
+    data[offset + index] = value
+
+
+@njit
+def lambda_avg_all(simulation, data, value):
+    start = simulation["lambda_avg_offset"]
+    size = simulation["lambda_avg_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def lambda_avg_last(simulation, data, value):
+    start = simulation["lambda_avg_offset"]
+    size = simulation["lambda_avg_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def lambda_avg_chunk(start, length, simulation, data, value):
+    start += simulation["lambda_avg_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
+def lambda_sdv(index, simulation, data, value):
+    offset = simulation["lambda_sdv_offset"]
+    data[offset + index] = value
+
+
+@njit
+def lambda_sdv_all(simulation, data, value):
+    start = simulation["lambda_sdv_offset"]
+    size = simulation["lambda_sdv_length"]
+    end = start + size
+    data[start:end] = value
+
+
+@njit
+def lambda_sdv_last(simulation, data, value):
+    start = simulation["lambda_sdv_offset"]
+    size = simulation["lambda_sdv_length"]
+    end = start + size
+    data[end - 1] = value
+
+
+@njit
+def lambda_sdv_chunk(start, length, simulation, data, value):
+    start += simulation["lambda_sdv_offset"]
+    end = start + length
+    data[start:end] = value
+
+
+@njit
 def gyration_radius(index, simulation, data, value):
     offset = simulation["gyration_radius_offset"]
     data[offset + index] = value
